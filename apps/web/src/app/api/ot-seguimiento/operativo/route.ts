@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { Connection } from 'mysql2/promise';
-import { getDmsConnection } from '@/lib/dms-connection';
-import { OT_ESTADOS_QUERY_KEYS } from '@/lib/ot-estados';
+import * as sql from 'mssql';
+import { getDmsPool } from '@/lib/dms-connection';
 
-const CACHE_TTL_MS         = 60_000;
-const FILTER_CACHE_TTL_MS  = 5 * 60_000;
+const CACHE_TTL_MS        = 60_000;
+const FILTER_CACHE_TTL_MS = 5 * 60_000;
 
 const cache       = new Map<string, { ts: number; payload: unknown }>();
 const filterCache = { ts: 0, payload: null as { sucursales: string[]; asesores: string[] } | null };
@@ -89,9 +88,6 @@ export interface OperativoData {
   filterOptions: FilterOptions;
 }
 
-const ABIERTOS    = OT_ESTADOS_QUERY_KEYS.filter(k => k !== 'Finalizado');
-const PH_ABIERTOS = ABIERTOS.map(() => '?').join(', ');
-
 function startOfWeek(): string {
   const d   = new Date();
   const day = d.getDay();
@@ -99,19 +95,58 @@ function startOfWeek(): string {
   return d.toISOString().split('T')[0];
 }
 
-function buildFilters(sucursal: string, asesor: string, estado: string, opts?: { skipEstado?: boolean; tableAlias?: string }) {
-  const alias = opts?.tableAlias ? `${opts.tableAlias}.` : '';
+/**
+ * Builds optional T-SQL filter fragments and binds named @params on a request.
+ * Column refs: sucursal → s.Descripcion, asesor → m.asesor, estado → m.EstadoTaller
+ */
+function buildFilters(
+  sucursal: string,
+  asesor: string,
+  estado: string,
+  opts?: { skipEstado?: boolean },
+) {
   const parts: string[] = [];
-  const params: string[] = [];
-  if (sucursal) { parts.push(`AND TRIM(CONVERT(${alias}SUCURSAL USING utf8mb4)) = ?`); params.push(sucursal); }
-  if (asesor)   { parts.push(`AND TRIM(CONVERT(${alias}ASESOR USING utf8mb4)) = ?`);   params.push(asesor); }
-  if (estado && !opts?.skipEstado) {
-    parts.push(`AND TRIM(CONVERT(${alias}ESTADOOT USING utf8mb4)) = ?`);
-    params.push(estado);
+  const bindings: Array<{ name: string; type: sql.ISqlType; value: string }> = [];
+
+  if (sucursal) {
+    parts.push('AND LTRIM(RTRIM(s.Descripcion)) = @sucursal');
+    bindings.push({ name: 'sucursal', type: sql.NVarChar(255), value: sucursal });
   }
-  return { sql: parts.join(' '), params };
+  if (asesor) {
+    parts.push('AND LTRIM(RTRIM(m.asesor)) = @asesor');
+    bindings.push({ name: 'asesor', type: sql.NVarChar(255), value: asesor });
+  }
+  if (estado && !opts?.skipEstado) {
+    parts.push('AND LTRIM(RTRIM(m.EstadoTaller)) = @estado');
+    bindings.push({ name: 'estado', type: sql.NVarChar(255), value: estado });
+  }
+
+  return {
+    sql: parts.join(' '),
+    bind(req: sql.Request) {
+      for (const b of bindings) {
+        try { req.input(b.name, b.type, b.value); } catch { /* already bound */ }
+      }
+    },
+  };
 }
 
+const JOIN_SUCURSAL = `
+  LEFT JOIN dbo.controltiempo_DimSucursal s ON s.IdSucursal = m.taller
+`;
+
+const DRILL_COLS = `
+  m.nroot                                AS OT,
+  LTRIM(RTRIM(m.nombrecliente))          AS cliente,
+  LTRIM(RTRIM(m.modelo))                 AS modelo,
+  LTRIM(RTRIM(m.asesor))                 AS asesor,
+  LTRIM(RTRIM(m.EstadoTaller))           AS estado,
+  LTRIM(RTRIM(s.Descripcion))            AS sucursal,
+  CAST(m.fechaingreso AS DATE)           AS fecha_ingreso,
+  DATEDIFF(DAY, m.fechaingreso, GETDATE()) AS dias_en_taller,
+  CAST(m.fechacompromisoCliente AS DATE) AS fecha_compromiso,
+  CAST(COALESCE(m.fecha_cierre_ot, m.fecha_fin_taller) AS DATE) AS fecha_cierre
+`;
 
 export async function GET(req: NextRequest) {
   const periodo  = (req.nextUrl.searchParams.get('periodo') ?? 'hoy') as Periodo;
@@ -129,309 +164,339 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const startDate = periodo === 'hoy' ? 'CURDATE()' : `'${startOfWeek()}'`;
+  // startDate passed as @startDate parameter — never string-interpolated into SQL
+  const startDateValue = periodo === 'hoy'
+    ? new Date().toISOString().split('T')[0]
+    : startOfWeek();
 
-  // ── Drill-down: devuelve lista de OTs para una métrica ────────────────────
+  // ── Drill-down ────────────────────────────────────────────────────────────────
   if (drill) {
-    const conn = await getDmsConnection();
+    let pool: sql.ConnectionPool | null = null;
     try {
-      const f = buildFilters(sucursal, asesor, estado, { skipEstado: drill === 'ingresos' || drill === 'cerrados' });
-      const COLS = `
-        OT,
-        TRIM(CONVERT(NOMBRECLIENTE USING utf8mb4)) AS cliente,
-        TRIM(CONVERT(MODELO        USING utf8mb4)) AS modelo,
-        TRIM(CONVERT(ASESOR        USING utf8mb4)) AS asesor,
-        TRIM(CONVERT(ESTADOOT      USING utf8mb4)) AS estado,
-        TRIM(CONVERT(SUCURSAL      USING utf8mb4)) AS sucursal,
-        DATE(fechaingreso)                          AS fecha_ingreso,
-        DATEDIFF(CURDATE(), DATE(fechaingreso))      AS dias_en_taller,
-        DATE(FechaCompromisoClienteMaster)          AS fecha_compromiso,
-        DATE(FechaFinalizado)                       AS fecha_cierre
-      `;
+      pool = await getDmsPool();
+      const f = buildFilters(sucursal, asesor, estado, {
+        skipEstado: drill === 'ingresos' || drill === 'cerrados',
+      });
 
-      let sql = '';
-      let params: any[] = [];
-      let label = '';
+      let querySql = '';
+      let label    = '';
 
       if (drill === 'abiertas') {
         label = 'Total OTs abiertas';
-        sql = `SELECT ${COLS} FROM v_maestro_ot_condor
-               WHERE CONVERT(ESTADOOT USING utf8mb4) IN (${PH_ABIERTOS}) ${f.sql}
-               ORDER BY fechaingreso ASC LIMIT 300`;
-        params = [...ABIERTOS, ...f.params];
+        querySql = `
+          SELECT TOP (300) ${DRILL_COLS}
+          FROM dbo.MasterOT_Condor m ${JOIN_SUCURSAL}
+          WHERE m.EstadoOT = 'Abierto' ${f.sql}
+          ORDER BY m.fechaingreso ASC`;
 
       } else if (drill === 'criticas') {
         label = 'OTs críticas (+30 días)';
-        sql = `SELECT ${COLS} FROM v_maestro_ot_condor
-               WHERE CONVERT(ESTADOOT USING utf8mb4) IN (${PH_ABIERTOS})
-                 AND DATEDIFF(CURDATE(), DATE(fechaingreso)) > 30 ${f.sql}
-               ORDER BY dias_en_taller DESC LIMIT 300`;
-        params = [...ABIERTOS, ...f.params];
+        querySql = `
+          SELECT TOP (300) ${DRILL_COLS}
+          FROM dbo.MasterOT_Condor m ${JOIN_SUCURSAL}
+          WHERE m.EstadoOT = 'Abierto'
+            AND DATEDIFF(DAY, m.fechaingreso, GETDATE()) > 30 ${f.sql}
+          ORDER BY dias_en_taller DESC`;
 
       } else if (drill === 'atraso') {
         label = 'OTs en atraso (14–30 días)';
-        sql = `SELECT ${COLS} FROM v_maestro_ot_condor
-               WHERE CONVERT(ESTADOOT USING utf8mb4) IN (${PH_ABIERTOS})
-                 AND DATEDIFF(CURDATE(), DATE(fechaingreso)) > 14
-                 AND DATEDIFF(CURDATE(), DATE(fechaingreso)) <= 30 ${f.sql}
-               ORDER BY dias_en_taller DESC LIMIT 300`;
-        params = [...ABIERTOS, ...f.params];
+        querySql = `
+          SELECT TOP (300) ${DRILL_COLS}
+          FROM dbo.MasterOT_Condor m ${JOIN_SUCURSAL}
+          WHERE m.EstadoOT = 'Abierto'
+            AND DATEDIFF(DAY, m.fechaingreso, GETDATE()) > 14
+            AND DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 30 ${f.sql}
+          ORDER BY dias_en_taller DESC`;
 
       } else if (drill === 'ingresos') {
         label = periodo === 'hoy' ? 'Ingresos de hoy' : 'Ingresos de la semana';
-        sql = `SELECT ${COLS} FROM v_maestro_ot_condor
-               WHERE DATE(fechaingreso) >= ${startDate} ${f.sql}
-               ORDER BY fechaingreso DESC LIMIT 300`;
-        params = f.params;
+        querySql = `
+          SELECT TOP (300) ${DRILL_COLS}
+          FROM dbo.MasterOT_Condor m ${JOIN_SUCURSAL}
+          WHERE CAST(m.fechaingreso AS DATE) >= @startDate ${f.sql}
+          ORDER BY m.fechaingreso DESC`;
 
       } else if (drill === 'cerrados') {
         label = periodo === 'hoy' ? 'Cerrados hoy' : 'Cerrados esta semana';
-        sql = `SELECT ${COLS} FROM v_maestro_ot_condor
-               WHERE DATE(FechaFinalizado) >= ${startDate} ${f.sql}
-               ORDER BY FechaFinalizado DESC LIMIT 300`;
-        params = f.params;
+        querySql = `
+          SELECT TOP (300) ${DRILL_COLS}
+          FROM dbo.MasterOT_Condor m ${JOIN_SUCURSAL}
+          WHERE CAST(COALESCE(m.fecha_cierre_ot, m.fecha_fin_taller) AS DATE) >= @startDate ${f.sql}
+          ORDER BY m.fecha_cierre_ot DESC`;
 
       } else if (drill === 'vencidos') {
         label = 'Compromisos vencidos';
-        sql = `SELECT ${COLS} FROM v_maestro_ot_condor
-               WHERE FechaCompromisoClienteMaster IS NOT NULL
-                 AND DATE(FechaCompromisoClienteMaster) < CURDATE()
-                 AND FechaFinalizado IS NULL
-                 AND CONVERT(ESTADOOT USING utf8mb4) IN (${PH_ABIERTOS}) ${f.sql}
-               ORDER BY dias_en_taller DESC LIMIT 300`;
-        params = [...ABIERTOS, ...f.params];
+        querySql = `
+          SELECT TOP (300) ${DRILL_COLS}
+          FROM dbo.MasterOT_Condor m ${JOIN_SUCURSAL}
+          WHERE m.fechacompromisoCliente IS NOT NULL
+            AND CAST(m.fechacompromisoCliente AS DATE) < CAST(GETDATE() AS DATE)
+            AND m.fecha_cierre_ot IS NULL
+            AND m.EstadoOT = 'Abierto' ${f.sql}
+          ORDER BY dias_en_taller DESC`;
       }
 
-      const [rows] = await conn.execute<any[]>(sql, params);
-      const result: DrillResult = {
+      const request = pool.request();
+      request.input('startDate', sql.Date, startDateValue);
+      f.bind(request);
+
+      const result = await request.query(querySql);
+      const rows   = result.recordset as any[];
+
+      const drillResult: DrillResult = {
         metric: drill,
         label,
-        rows: (rows as any[]).map((r: any) => ({
+        rows: rows.map((r: any) => ({
           ot:              Number(r.OT),
-          cliente:         String(r.cliente ?? '').trim(),
-          modelo:          String(r.modelo  ?? '').trim(),
-          asesor:          String(r.asesor  ?? '').trim(),
-          estado:          String(r.estado  ?? '').trim(),
+          cliente:         String(r.cliente  ?? '').trim(),
+          modelo:          String(r.modelo   ?? '').trim(),
+          asesor:          String(r.asesor   ?? '').trim(),
+          estado:          String(r.estado   ?? '').trim(),
           sucursal:        String(r.sucursal ?? '').trim(),
-          fechaIngreso:    String(r.fecha_ingreso ?? '').split('T')[0],
+          fechaIngreso:    r.fecha_ingreso  ? String(r.fecha_ingreso).split('T')[0]  : '',
           diasEnTaller:    Number(r.dias_en_taller ?? 0),
           fechaCompromiso: r.fecha_compromiso ? String(r.fecha_compromiso).split('T')[0] : undefined,
           fechaCierre:     r.fecha_cierre     ? String(r.fecha_cierre).split('T')[0]     : undefined,
         })),
         total: 0,
       };
-      result.total = result.rows.length;
-      return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } });
+      drillResult.total = drillResult.rows.length;
+      return NextResponse.json(drillResult, { headers: { 'Cache-Control': 'no-store' } });
+
     } catch (err: any) {
       console.error('[operativo/drill]', err.message);
       return NextResponse.json({ error: 'Error al consultar DMS' }, { status: 500 });
     } finally {
-      await conn.end().catch(() => {});
+      await pool?.close();
     }
   }
 
-  // Todas las conexiones se abrirán en paralelo, una por grupo de consulta.
-  // En el finally cerramos TODAS para no dejar conexiones colgadas.
-  const connections: (Connection | null)[] = [];
-  const openConn = async () => {
-    const c = await getDmsConnection();
-    connections.push(c);
-    return c;
+  // ── Main dashboard queries ────────────────────────────────────────────────────
+  const pools: sql.ConnectionPool[] = [];
+  const openPool = async () => {
+    const p = await getDmsPool();
+    pools.push(p);
+    return p;
   };
 
   try {
-    // ── 0. Opciones de filtro (cacheadas 5 min) ────────────────────────────
+    // ── 0. Filter options (cached 5 min) ─────────────────────────────────────
     let filterOptions: FilterOptions;
     if (!force && filterCache.payload && Date.now() - filterCache.ts < FILTER_CACHE_TTL_MS) {
       filterOptions = filterCache.payload;
     } else {
-      const [cSuc, cAse] = await Promise.all([openConn(), openConn()]);
-      const [sucursalesRows, asesoresRows] = await Promise.all([
-        cSuc.execute<any[]>(
-          `SELECT DISTINCT TRIM(CONVERT(SUCURSAL USING utf8mb4)) AS suc
-           FROM v_maestro_ot_condor
-           WHERE CONVERT(ESTADOOT USING utf8mb4) IN (${PH_ABIERTOS})
-             AND SUCURSAL IS NOT NULL AND TRIM(CONVERT(SUCURSAL USING utf8mb4)) <> ''
-           ORDER BY suc`,
-          ABIERTOS,
-        ),
-        cAse.execute<any[]>(
-          `SELECT DISTINCT TRIM(CONVERT(ASESOR USING utf8mb4)) AS asesor
-           FROM v_maestro_ot_condor
-           WHERE CONVERT(ESTADOOT USING utf8mb4) IN (${PH_ABIERTOS})
-             AND ASESOR IS NOT NULL AND TRIM(ASESOR) <> ''
-           ORDER BY asesor
-           LIMIT 300`,
-          ABIERTOS,
-        ),
+      const [pSuc, pAse] = await Promise.all([openPool(), openPool()]);
+      const [sucResult, aseResult] = await Promise.all([
+        pSuc.request().query(`
+          SELECT DISTINCT LTRIM(RTRIM(s.Descripcion)) AS suc
+          FROM dbo.MasterOT_Condor m
+          ${JOIN_SUCURSAL}
+          WHERE m.EstadoOT = 'Abierto'
+            AND s.Descripcion IS NOT NULL
+            AND LTRIM(RTRIM(s.Descripcion)) <> ''
+          ORDER BY suc
+        `),
+        pAse.request().query(`
+          SELECT TOP (300) DISTINCT LTRIM(RTRIM(m.asesor)) AS asesor
+          FROM dbo.MasterOT_Condor m
+          ${JOIN_SUCURSAL}
+          WHERE m.EstadoOT = 'Abierto'
+            AND m.asesor IS NOT NULL
+            AND LTRIM(RTRIM(m.asesor)) <> ''
+          ORDER BY asesor
+        `),
       ]);
       filterOptions = {
-        sucursales: sucursalesRows[0].map((r: any) => String(r.suc ?? '').trim()).filter(Boolean),
-        asesores:   asesoresRows[0].map((r: any) => String(r.asesor ?? '').trim()).filter(Boolean),
+        sucursales: (sucResult.recordset as any[]).map(r => String(r.suc ?? '').trim()).filter(Boolean),
+        asesores:   (aseResult.recordset as any[]).map(r => String(r.asesor ?? '').trim()).filter(Boolean),
       };
       filterCache.ts      = Date.now();
       filterCache.payload = filterOptions;
     }
 
-    // ── 1-7. Queries principales en paralelo ──────────────────────────────
+    // ── 1–7. Main queries in parallel ────────────────────────────────────────
     const f1 = buildFilters(sucursal, asesor, estado);
     const f2 = buildFilters(sucursal, asesor, estado);
     const f3 = buildFilters(sucursal, asesor, '');
     const f4 = buildFilters(sucursal, asesor, estado);
     const f5 = buildFilters(sucursal, asesor, estado);
-    const f6h = buildFilters(sucursal, asesor, estado, { tableAlias: 'c' });
-    const f6s = buildFilters(sucursal, asesor, estado);
-    const f7  = buildFilters(sucursal, asesor, estado);
+    const f6 = buildFilters(sucursal, asesor, estado);
+    const f7 = buildFilters(sucursal, asesor, estado);
 
-    const [c1, c2, c3, c4, c5, c6, c7] = await Promise.all([
-      openConn(), openConn(), openConn(), openConn(),
-      openConn(), openConn(), openConn(),
+    const [p1, p2, p3, p4, p5, p6, p7] = await Promise.all([
+      openPool(), openPool(), openPool(), openPool(),
+      openPool(), openPool(), openPool(),
     ]);
 
-    const [
-      [snapRows],
-      [ingrRows],
-      [cerrRows],
-      [vencidosRows],
-      [proximosRows],
-      [distRows],
-      [asesorRows],
-    ] = await Promise.all([
-      // 1. Snapshot taller
-      c1.execute<any[]>(
-        `SELECT
-          COUNT(*) AS abiertas,
-          SUM(CASE WHEN DATEDIFF(CURDATE(), fechaingreso) > 30 THEN 1 ELSE 0 END) AS criticas,
-          SUM(CASE WHEN DATEDIFF(CURDATE(), fechaingreso) > 14
-                    AND DATEDIFF(CURDATE(), fechaingreso) <= 30 THEN 1 ELSE 0 END) AS en_atraso,
-          AVG(DATEDIFF(CURDATE(), fechaingreso)) AS dias_prom
-        FROM v_maestro_ot_condor
-        WHERE CONVERT(ESTADOOT USING utf8mb4) IN (${PH_ABIERTOS})
-          ${f1.sql}`,
-        [...ABIERTOS, ...f1.params],
-      ),
-      // 2. Ingresos del período
-      c2.execute<any[]>(
-        `SELECT COUNT(*) AS ingresados
-         FROM v_maestro_ot_condor
-         WHERE DATE(fechaingreso) >= ${startDate}
-           ${f2.sql}`,
-        f2.params,
-      ),
-      // 3. Cerrados en el período
-      c3.execute<any[]>(
-        `SELECT COUNT(*) AS cerrados
-         FROM v_maestro_ot_condor
-         WHERE DATE(FechaFinalizado) >= ${startDate}
-           ${f3.sql}`,
-        f3.params,
-      ),
-      // 4. Vencidos
-      c4.execute<any[]>(
-        `SELECT
-          OT,
-          TRIM(NOMBRECLIENTE)                                     AS cliente,
-          TRIM(MODELO)                                            AS modelo,
-          TRIM(ASESOR)                                            AS asesor,
-          TRIM(SUCURSAL)                                          AS sucursal,
-          DATE(FechaCompromisoClienteMaster)                      AS fecha_compromiso,
-          DATEDIFF(CURDATE(), DATE(FechaCompromisoClienteMaster)) AS dias_vencido,
-          DATEDIFF(CURDATE(), DATE(fechaingreso))                 AS dias_en_taller
-        FROM v_maestro_ot_condor
-        WHERE FechaCompromisoClienteMaster IS NOT NULL
-          AND DATE(FechaCompromisoClienteMaster) < CURDATE()
-          AND FechaFinalizado IS NULL
-          AND CONVERT(ESTADOOT USING utf8mb4) IN (${PH_ABIERTOS})
-          ${f4.sql}
-        ORDER BY dias_vencido DESC
-        LIMIT 100`,
-        [...ABIERTOS, ...f4.params],
-      ),
-      // 5. Próximos a vencer
-      c5.execute<any[]>(
-        `SELECT
-          OT,
-          TRIM(NOMBRECLIENTE)                                          AS cliente,
-          TRIM(MODELO)                                                 AS modelo,
-          TRIM(ASESOR)                                                 AS asesor,
-          DATE(FechaCompromisoClienteMaster)                           AS fecha_compromiso,
-          DATEDIFF(DATE(FechaCompromisoClienteMaster), CURDATE())      AS dias_restantes
-        FROM v_maestro_ot_condor
-        WHERE FechaCompromisoClienteMaster IS NOT NULL
-          AND DATE(FechaCompromisoClienteMaster) BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)
-          AND FechaFinalizado IS NULL
-          AND CONVERT(ESTADOOT USING utf8mb4) IN (${PH_ABIERTOS})
-          ${f5.sql}
-        ORDER BY dias_restantes ASC
-        LIMIT 30`,
-        [...ABIERTOS, ...f5.params],
-      ),
-      // 6. Distribución
-      periodo === 'hoy'
-        ? c6.execute<any[]>(
-            `SELECT
-              SUBSTRING(f.horaingreso, 1, 2) AS hora,
-              COUNT(*) AS cnt
-            FROM v_maestro_ot_condor c
-            JOIN (
-              SELECT nroot, MIN(horaingreso) AS horaingreso
-              FROM v_maestro_ot_filtros
-              WHERE horaingreso IS NOT NULL AND TRIM(horaingreso) <> ''
-              GROUP BY nroot
-            ) f ON f.nroot = c.OT
-            WHERE DATE(c.fechaingreso) = CURDATE()
-              AND f.horaingreso IS NOT NULL
-              AND f.horaingreso <> ''
-              ${f6h.sql}
-            GROUP BY hora
-            ORDER BY hora`,
-            f6h.params,
-          )
-        : c6.execute<any[]>(
-            `SELECT
-              DAYOFWEEK(fechaingreso) AS dow,
-              DATE(fechaingreso)      AS fecha,
-              COUNT(*)                AS cnt
-            FROM v_maestro_ot_condor
-            WHERE DATE(fechaingreso) >= ${startDate}
-              ${f6s.sql}
-            GROUP BY dow, fecha
-            ORDER BY fecha`,
-            f6s.params,
-          ),
-      // 7. Por asesor
-      c7.execute<any[]>(
-        `SELECT
-          TRIM(CONVERT(ASESOR USING utf8mb4)) AS asesor,
-          SUM(CASE WHEN DATE(fechaingreso)    >= ${startDate} THEN 1 ELSE 0 END) AS ingresados,
-          SUM(CASE WHEN DATE(FechaFinalizado) >= ${startDate} THEN 1 ELSE 0 END) AS cerrados,
-          SUM(CASE
-                WHEN FechaCompromisoClienteMaster IS NOT NULL
-                 AND DATE(FechaCompromisoClienteMaster) < CURDATE()
-                 AND FechaFinalizado IS NULL THEN 1 ELSE 0 END) AS vencidos,
-          AVG(CASE
-                WHEN DATE(FechaFinalizado) >= ${startDate} AND fechaingreso IS NOT NULL
-                THEN DATEDIFF(FechaFinalizado, fechaingreso) END) AS dias_prom
-        FROM v_maestro_ot_condor
-        WHERE (DATE(fechaingreso) >= ${startDate} OR DATE(FechaFinalizado) >= ${startDate}
-               OR (FechaCompromisoClienteMaster IS NOT NULL
-                   AND DATE(FechaCompromisoClienteMaster) < CURDATE()
-                   AND FechaFinalizado IS NULL))
-          AND TRIM(CONVERT(ASESOR USING utf8mb4)) <> ''
-          ${f7.sql}
-        GROUP BY asesor
-        HAVING (ingresados + cerrados + vencidos) > 0
-        ORDER BY vencidos DESC, ingresados DESC
-        LIMIT 30`,
-        f7.params,
-      ),
-    ]);
+    const [snap, ingrResult, cerrResult, vencResult, proxResult, distResult, asesorResult] =
+      await Promise.all([
+        // 1. Snapshot
+        (() => {
+          const r = p1.request();
+          r.input('startDate', sql.Date, startDateValue);
+          f1.bind(r);
+          return r.query(`
+            SELECT
+              COUNT(*)                                                                       AS abiertas,
+              SUM(CASE WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) > 30 THEN 1 ELSE 0 END) AS criticas,
+              SUM(CASE WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) > 14
+                        AND DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 30 THEN 1 ELSE 0 END) AS en_atraso,
+              AVG(CAST(DATEDIFF(DAY, m.fechaingreso, GETDATE()) AS FLOAT))                   AS dias_prom
+            FROM dbo.MasterOT_Condor m ${JOIN_SUCURSAL}
+            WHERE m.EstadoOT = 'Abierto' ${f1.sql}
+          `);
+        })(),
 
-    // ── Distribución ─────────────────────────────────────────────────────
+        // 2. Ingresos del período
+        (() => {
+          const r = p2.request();
+          r.input('startDate', sql.Date, startDateValue);
+          f2.bind(r);
+          return r.query(`
+            SELECT COUNT(*) AS ingresados
+            FROM dbo.MasterOT_Condor m ${JOIN_SUCURSAL}
+            WHERE CAST(m.fechaingreso AS DATE) >= @startDate ${f2.sql}
+          `);
+        })(),
+
+        // 3. Cerrados en el período
+        (() => {
+          const r = p3.request();
+          r.input('startDate', sql.Date, startDateValue);
+          f3.bind(r);
+          return r.query(`
+            SELECT COUNT(*) AS cerrados
+            FROM dbo.MasterOT_Condor m ${JOIN_SUCURSAL}
+            WHERE CAST(COALESCE(m.fecha_cierre_ot, m.fecha_fin_taller) AS DATE) >= @startDate ${f3.sql}
+          `);
+        })(),
+
+        // 4. Vencidos
+        (() => {
+          const r = p4.request();
+          f4.bind(r);
+          return r.query(`
+            SELECT TOP (100)
+              m.nroot                                                                             AS OT,
+              LTRIM(RTRIM(m.nombrecliente))                                                       AS cliente,
+              LTRIM(RTRIM(m.modelo))                                                              AS modelo,
+              LTRIM(RTRIM(m.asesor))                                                              AS asesor,
+              LTRIM(RTRIM(s.Descripcion))                                                         AS sucursal,
+              CAST(m.fechacompromisoCliente AS DATE)                                              AS fecha_compromiso,
+              DATEDIFF(DAY, m.fechacompromisoCliente, GETDATE())                                  AS dias_vencido,
+              DATEDIFF(DAY, m.fechaingreso, GETDATE())                                            AS dias_en_taller
+            FROM dbo.MasterOT_Condor m ${JOIN_SUCURSAL}
+            WHERE m.fechacompromisoCliente IS NOT NULL
+              AND CAST(m.fechacompromisoCliente AS DATE) < CAST(GETDATE() AS DATE)
+              AND m.fecha_cierre_ot IS NULL
+              AND m.EstadoOT = 'Abierto' ${f4.sql}
+            ORDER BY dias_vencido DESC
+          `);
+        })(),
+
+        // 5. Próximos a vencer
+        (() => {
+          const r = p5.request();
+          f5.bind(r);
+          return r.query(`
+            SELECT TOP (30)
+              m.nroot                                                                     AS OT,
+              LTRIM(RTRIM(m.nombrecliente))                                               AS cliente,
+              LTRIM(RTRIM(m.modelo))                                                      AS modelo,
+              LTRIM(RTRIM(m.asesor))                                                      AS asesor,
+              CAST(m.fechacompromisoCliente AS DATE)                                      AS fecha_compromiso,
+              DATEDIFF(DAY, GETDATE(), m.fechacompromisoCliente)                          AS dias_restantes
+            FROM dbo.MasterOT_Condor m ${JOIN_SUCURSAL}
+            WHERE m.fechacompromisoCliente IS NOT NULL
+              AND CAST(m.fechacompromisoCliente AS DATE)
+                  BETWEEN CAST(GETDATE() AS DATE) AND DATEADD(DAY, 3, CAST(GETDATE() AS DATE))
+              AND m.fecha_cierre_ot IS NULL
+              AND m.EstadoOT = 'Abierto' ${f5.sql}
+            ORDER BY dias_restantes ASC
+          `);
+        })(),
+
+        // 6. Distribución (hora del día o día de la semana)
+        (() => {
+          const r = p6.request();
+          r.input('startDate', sql.Date, startDateValue);
+          f6.bind(r);
+          if (periodo === 'hoy') {
+            return r.query(`
+              SELECT
+                SUBSTRING(m.horaingreso, 1, 2) AS hora,
+                COUNT(*)                        AS cnt
+              FROM dbo.MasterOT_Condor m ${JOIN_SUCURSAL}
+              WHERE CAST(m.fechaingreso AS DATE) = CAST(GETDATE() AS DATE)
+                AND m.horaingreso IS NOT NULL
+                AND LTRIM(RTRIM(m.horaingreso)) <> '' ${f6.sql}
+              GROUP BY SUBSTRING(m.horaingreso, 1, 2)
+              ORDER BY hora
+            `);
+          } else {
+            return r.query(`
+              SELECT
+                DATEPART(WEEKDAY, m.fechaingreso) AS dow,
+                CAST(m.fechaingreso AS DATE)        AS fecha,
+                COUNT(*)                            AS cnt
+              FROM dbo.MasterOT_Condor m ${JOIN_SUCURSAL}
+              WHERE CAST(m.fechaingreso AS DATE) >= @startDate ${f6.sql}
+              GROUP BY DATEPART(WEEKDAY, m.fechaingreso), CAST(m.fechaingreso AS DATE)
+              ORDER BY fecha
+            `);
+          }
+        })(),
+
+        // 7. Por asesor
+        (() => {
+          const r = p7.request();
+          r.input('startDate', sql.Date, startDateValue);
+          f7.bind(r);
+          return r.query(`
+            SELECT TOP (30)
+              LTRIM(RTRIM(m.asesor))                AS asesor,
+              SUM(CASE WHEN CAST(m.fechaingreso AS DATE) >= @startDate THEN 1 ELSE 0 END) AS ingresados,
+              SUM(CASE WHEN CAST(COALESCE(m.fecha_cierre_ot, m.fecha_fin_taller) AS DATE) >= @startDate THEN 1 ELSE 0 END) AS cerrados,
+              SUM(CASE
+                    WHEN m.fechacompromisoCliente IS NOT NULL
+                     AND CAST(m.fechacompromisoCliente AS DATE) < CAST(GETDATE() AS DATE)
+                     AND m.fecha_cierre_ot IS NULL THEN 1 ELSE 0 END)                     AS vencidos,
+              AVG(CASE
+                    WHEN CAST(COALESCE(m.fecha_cierre_ot, m.fecha_fin_taller) AS DATE) >= @startDate
+                     AND m.fechaingreso IS NOT NULL
+                    THEN CAST(DATEDIFF(DAY, m.fechaingreso, COALESCE(m.fecha_cierre_ot, m.fecha_fin_taller)) AS FLOAT)
+                  END)                                                                     AS dias_prom
+            FROM dbo.MasterOT_Condor m ${JOIN_SUCURSAL}
+            WHERE (
+              CAST(m.fechaingreso AS DATE) >= @startDate
+              OR CAST(COALESCE(m.fecha_cierre_ot, m.fecha_fin_taller) AS DATE) >= @startDate
+              OR (
+                m.fechacompromisoCliente IS NOT NULL
+                AND CAST(m.fechacompromisoCliente AS DATE) < CAST(GETDATE() AS DATE)
+                AND m.fecha_cierre_ot IS NULL
+              )
+            )
+            AND LTRIM(RTRIM(m.asesor)) <> '' ${f7.sql}
+            GROUP BY LTRIM(RTRIM(m.asesor))
+            HAVING (
+              SUM(CASE WHEN CAST(m.fechaingreso AS DATE) >= @startDate THEN 1 ELSE 0 END) +
+              SUM(CASE WHEN CAST(COALESCE(m.fecha_cierre_ot, m.fecha_fin_taller) AS DATE) >= @startDate THEN 1 ELSE 0 END) +
+              SUM(CASE
+                    WHEN m.fechacompromisoCliente IS NOT NULL
+                     AND CAST(m.fechacompromisoCliente AS DATE) < CAST(GETDATE() AS DATE)
+                     AND m.fecha_cierre_ot IS NULL THEN 1 ELSE 0 END)
+            ) > 0
+            ORDER BY vencidos DESC, ingresados DESC
+          `);
+        })(),
+      ]);
+
+    // ── Distribución ──────────────────────────────────────────────────────────
+    const distRows = distResult.recordset as any[];
     let distribucion: DistribucionRow[];
     if (periodo === 'hoy') {
       distribucion = distRows.map((r: any) => ({
-        label: `${String(r.hora).padStart(2, '0')}:00`,
+        label: `${String(r.hora ?? '00').padStart(2, '0')}:00`,
         count: Number(r.cnt),
       }));
     } else {
@@ -442,18 +507,21 @@ export async function GET(req: NextRequest) {
       }));
     }
 
-    // ── Respuesta ────────────────────────────────────────────────────────
-    const snap        = snapRows[0]    ?? {};
-    const ingresados  = Number(ingrRows[0]?.ingresados ?? 0);
-    const cerradosEnP = Number(cerrRows[0]?.cerrados   ?? 0);
+    // ── Build payload ─────────────────────────────────────────────────────────
+    const snapRow      = (snap.recordset as any[])[0] ?? {};
+    const ingresados   = Number((ingrResult.recordset as any[])[0]?.ingresados ?? 0);
+    const cerradosEnP  = Number((cerrResult.recordset as any[])[0]?.cerrados   ?? 0);
+    const vencidosRows = vencResult.recordset  as any[];
+    const proximosRows = proxResult.recordset  as any[];
+    const asesorRows   = asesorResult.recordset as any[];
 
     const payload: OperativoData = {
       periodo,
       generatedAt:       new Date().toISOString(),
-      otsAbiertas:       Number(snap.abiertas  ?? 0),
-      otsCriticas:       Number(snap.criticas  ?? 0),
-      otsEnAtraso:       Number(snap.en_atraso ?? 0),
-      diasPromedio:      Math.round(Number(snap.dias_prom ?? 0)),
+      otsAbiertas:       Number(snapRow.abiertas  ?? 0),
+      otsCriticas:       Number(snapRow.criticas  ?? 0),
+      otsEnAtraso:       Number(snapRow.en_atraso ?? 0),
+      diasPromedio:      Math.round(Number(snapRow.dias_prom ?? 0)),
       ingresados,
       cerradosEnPeriodo: cerradosEnP,
       tasaCierre:        ingresados > 0 ? Math.round((cerradosEnP / ingresados) * 100) : 0,
@@ -494,7 +562,6 @@ export async function GET(req: NextRequest) {
     console.error('[operativo]', err.message, err.stack);
     return NextResponse.json({ error: 'Error al consultar DMS' }, { status: 500 });
   } finally {
-    // Cerrar todas las conexiones en paralelo, ignorando errores individuales
-    await Promise.allSettled(connections.map(c => c?.end()));
+    await Promise.allSettled(pools.map(p => p.close()));
   }
 }
