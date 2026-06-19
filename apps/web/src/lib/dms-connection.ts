@@ -1,29 +1,46 @@
 /**
- * Wrapper read-only para conexiones al DMS Condor.
+ * DMS connection wrapper — SQL Server (mssql).
  *
- * Setea SESSION TRANSACTION READ ONLY apenas se conecta. Cualquier intento de
- * INSERT/UPDATE/DELETE/CREATE/DROP en esa sesión recibe el error 1792 de MySQL:
- *   "Cannot execute statement in a READ ONLY transaction".
+ * Target database: MYSQL_DW on SQL Server 2016 at DMS_HOST.
+ * This is READ-ONLY by convention — never generate INSERT/UPDATE/DELETE.
  *
- * Reemplaza `mysql.createConnection(DMS_CONFIG)` en TODOS los route handlers
- * que tocan el DMS. Defensa en profundidad: el comentario "DMS es solo lectura"
- * deja de ser disciplina y pasa a ser garantía del MySQL server.
+ * Replaces the old mysql2 wrapper. Use getDmsPool() for all new code.
+ * getDmsConnection() is kept as a deprecated stub so old imports don't break
+ * at build time (they will 500 at runtime, same as before the migration).
  */
-import * as mysql from 'mysql2/promise';
+import * as sql from 'mssql';
 
-export const DMS_CONFIG = (): mysql.ConnectionOptions => ({
-  host:           process.env.DMS_HOST,
-  port:    Number(process.env.DMS_PORT ?? 3306),
-  user:           process.env.DMS_USER,
-  password:       process.env.DMS_PASSWORD,
-  database:       process.env.DMS_DATABASE ?? 'controltiempo',
-  connectTimeout: 10_000,
+const getDmsConfig = (): sql.config => ({
+  server:   process.env.DMS_HOST ?? '',
+  port:     Number(process.env.DMS_PORT ?? 1433),
+  user:     process.env.DMS_USER,
+  password: process.env.DMS_PASSWORD,
+  database: process.env.DMS_DATABASE ?? 'MYSQL_DW',
+  options: {
+    encrypt:                false,
+    trustServerCertificate: true,
+  },
+  connectionTimeout: 10_000,
+  requestTimeout:    30_000,
 });
 
-export async function getDmsConnection(): Promise<mysql.Connection> {
-  const conn = await mysql.createConnection(DMS_CONFIG());
-  // SESSION (no GLOBAL): solo afecta esta conexión, no toda la instancia.
-  // READ ONLY: transactional read-only mode → INSERT/UPDATE/DELETE rechazados.
-  await conn.query('SET SESSION TRANSACTION READ ONLY');
-  return conn;
+/**
+ * Opens a new SQL Server connection pool and resolves when connected.
+ * Callers are responsible for calling pool.close() in a finally block.
+ */
+export async function getDmsPool(): Promise<sql.ConnectionPool> {
+  const pool = new sql.ConnectionPool(getDmsConfig());
+  await pool.connect();
+  return pool;
+}
+
+/**
+ * @deprecated Use getDmsPool() instead.
+ * Kept only to avoid build failures on routes not yet migrated.
+ * Any call to this function will throw at runtime.
+ */
+export async function getDmsConnection(): Promise<never> {
+  throw new Error(
+    'getDmsConnection() is deprecated. Migrate this route to use getDmsPool() with mssql.',
+  );
 }

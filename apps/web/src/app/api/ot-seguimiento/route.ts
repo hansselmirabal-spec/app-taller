@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import mysql from 'mysql2/promise';
+import * as sql from 'mssql';
 import { resolveEstado, isFacturada } from '@/lib/ot-estados';
-import { getDmsConnection } from '@/lib/dms-connection';
+import { getDmsPool } from '@/lib/dms-connection';
 
 // ── Mock data (solo dev) ──────────────────────────────────────────────────────
 
@@ -69,7 +69,7 @@ const ALLOWED_DAYS = new Set([30, 90, 180, 365, 0]);
 
 // El cache guarda la PROMESA en curso (single-flight). Si dos requests llegan
 // simultáneos con la misma key, la 2da espera al resultado de la 1ra en lugar
-// de abrir una segunda conexión MySQL.
+// de abrir una segunda conexión al DMS.
 type CacheEntry = { ts: number; payload: Promise<unknown> };
 const cache = new Map<string, CacheEntry>();
 
@@ -106,46 +106,59 @@ export interface OtRow {
 }
 
 async function fetchFromDms(estado: string, soloAbiertas: boolean, days: number) {
-  let connection: mysql.Connection | null = null;
+  let pool: sql.ConnectionPool | null = null;
   try {
-    connection = await getDmsConnection();
+    pool = await getDmsPool();
 
+    const request = pool.request();
+
+    // Build WHERE conditions using named parameters (@estado, @days)
     const conditions: string[] = [];
-    const params: any[] = [];
 
     if (estado) {
-      conditions.push('CONVERT(c.ESTADOOT USING utf8mb4) = ?');
-      params.push(estado);
+      conditions.push('LTRIM(RTRIM(m.EstadoTaller)) = @estado');
+      request.input('estado', sql.NVarChar(255), estado);
     } else if (soloAbiertas) {
-      conditions.push("CONVERT(c.ESTADOOT USING utf8mb4) != 'Finalizado'");
+      conditions.push("m.EstadoOT = 'Abierto'");
     }
 
     if (days > 0) {
-      conditions.push('c.fechaingreso >= DATE_SUB(CURDATE(), INTERVAL ? DAY)');
-      params.push(days);
+      conditions.push('m.fechaingreso >= DATEADD(DAY, -@days, CAST(GETDATE() AS DATE))');
+      request.input('days', sql.Int, days);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const [rows] = await connection.execute<mysql.RowDataPacket[]>(
-      `SELECT
-        c.OT, c.CODCLIENTE, TRIM(c.NOMBRECLIENTE) AS NOMBRECLIENTE,
-        TRIM(c.CHASIS) AS CHASIS, TRIM(c.MODELO) AS MODELO,
-        c.ESTADOOT, c.ESTADOIDIS, c.ESTADOFINANCIERO,
-        TRIM(c.ASESOR) AS ASESOR, TRIM(c.SUCURSAL) AS SUCURSAL,
-        c.DIASINGRESO, c.fechaingreso,
-        c.FechaCompromisoClienteMaster, c.FechaCompromisoTaller,
-        c.FechaFinalizado, c.MONTOTOTAL,
-        TRIM(c.OBSERVACIONES) AS OBSERVACIONES,
-        TRIM(c.TipoServicio) AS TipoServicio,
-        f.horaingreso
-      FROM v_maestro_ot_condor c
-      LEFT JOIN (SELECT nroot, MIN(horaingreso) AS horaingreso FROM v_maestro_ot_filtros WHERE horaingreso IS NOT NULL AND TRIM(horaingreso) <> '' GROUP BY nroot) f ON f.nroot = c.OT
+    // JOIN on DimTipoServicio to get abreviatura (TipoServicio short code)
+    const result = await request.query(`
+      SELECT TOP (${HARD_LIMIT})
+        m.nroot                                                              AS OT,
+        LTRIM(RTRIM(m.nrocliente))                                           AS CODCLIENTE,
+        LTRIM(RTRIM(m.nombrecliente))                                        AS NOMBRECLIENTE,
+        LTRIM(RTRIM(m.chasis))                                               AS CHASIS,
+        LTRIM(RTRIM(m.modelo))                                               AS MODELO,
+        LTRIM(RTRIM(m.EstadoTaller))                                         AS ESTADOOT,
+        ''                                                                   AS ESTADOIDIS,
+        LTRIM(RTRIM(m.Estadofinanciero))                                     AS ESTADOFINANCIERO,
+        LTRIM(RTRIM(m.asesor))                                               AS ASESOR,
+        LTRIM(RTRIM(s.Descripcion))                                          AS SUCURSAL,
+        DATEDIFF(DAY, m.fechaingreso, GETDATE())                             AS DIASINGRESO,
+        m.fechaingreso,
+        m.fechacompromisoCliente                                             AS FechaCompromisoClienteMaster,
+        m.fecha_compromiso_taller                                            AS FechaCompromisoTaller,
+        COALESCE(m.fecha_cierre_ot, m.fecha_fin_taller)                      AS FechaFinalizado,
+        CAST(m.monto AS FLOAT)                                               AS MONTOTOTAL,
+        LTRIM(RTRIM(m.observaciones))                                        AS OBSERVACIONES,
+        ISNULL(LTRIM(RTRIM(ts.abreviatura)), '')                             AS TipoServicio,
+        m.horaingreso
+      FROM dbo.MasterOT_Condor m
+      LEFT JOIN dbo.controltiempo_DimSucursal s ON s.IdSucursal = m.taller
+      LEFT JOIN dbo.controltiempo_DimTipoServicio ts ON ts.idtipo_servicio = m.idtiposervicio
       ${whereClause}
-      ORDER BY c.fechaingreso DESC
-      LIMIT ${HARD_LIMIT}`,
-      params,
-    );
+      ORDER BY m.fechaingreso DESC
+    `);
+
+    const rows = result.recordset as any[];
 
     const data: OtRow[] = rows.map(r => {
       // Calculamos los días desde fechaingreso. NO confiamos en DIASINGRESO del DMS:
@@ -173,10 +186,10 @@ async function fetchFromDms(estado: string, soloAbiertas: boolean, days: number)
         diasIngreso:           Math.max(0, diasCalc),
         diasEnEstado:          Number(r.DIASINGRESO ?? 0),
         fechaIngreso:          fechaIngresoIso,
-        horaIngreso:           r.horaingreso ? String(r.horaingreso).trim() : null,
+        horaIngreso:           r.horaingreso ? String(r.horaingreso).trim() || null : null,
         fechaCompromisoCliente: r.FechaCompromisoClienteMaster ? new Date(r.FechaCompromisoClienteMaster).toISOString().split('T')[0] : null,
-        fechaCompromisoTaller:  r.FechaCompromisoTaller ? new Date(r.FechaCompromisoTaller).toISOString().split('T')[0] : null,
-        fechaFinalizado:        r.FechaFinalizado ? new Date(r.FechaFinalizado).toISOString().split('T')[0] : null,
+        fechaCompromisoTaller:  r.FechaCompromisoTaller        ? new Date(r.FechaCompromisoTaller).toISOString().split('T')[0]        : null,
+        fechaFinalizado:        r.FechaFinalizado               ? new Date(r.FechaFinalizado).toISOString().split('T')[0]               : null,
         montoTotal:            Number(r.MONTOTOTAL ?? 0),
         observaciones:         String(r.OBSERVACIONES ?? '').trim(),
         tipoServicio:          String(r.TipoServicio ?? '').trim(),
@@ -196,7 +209,7 @@ async function fetchFromDms(estado: string, soloAbiertas: boolean, days: number)
     const truncated = data.length === HARD_LIMIT;
     return { data, summary, facturadas, total: data.length, truncated, days, cachedAt: new Date().toISOString() };
   } finally {
-    await connection?.end();
+    await pool?.close();
   }
 }
 
