@@ -69,7 +69,7 @@ jobs:
         run: |
           for i in $(seq 1 12); do
             echo "Attempt $i/12..."
-            if curl -sf http://localhost:8090/api/v1/health; then
+            if curl -sf http://53.103.13.238:8090/api/v1/health; then
               echo "QAS healthy!"
               exit 0
             fi
