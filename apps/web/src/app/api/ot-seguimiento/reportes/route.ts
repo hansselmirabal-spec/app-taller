@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import mysql from 'mysql2/promise';
-import { OT_ESTADOS_QUERY_KEYS } from '@/lib/ot-estados';
-import { getDmsConnection } from '@/lib/dms-connection';
+import * as sql from 'mssql';
+import { getDmsPool } from '@/lib/dms-connection';
 
 const CACHE_TTL_MS = 60_000;
 const CACHE_MAX_ENTRIES = 30;
@@ -35,14 +34,12 @@ export interface AsesorReportRow {
   montoTotal: number;
 }
 
-// Detalle profundo cuando se filtra por uno o más asesores: el listado pierde
-// sentido y mostramos un dashboard ejecutivo de esos asesores.
 export interface AsesorDetail {
   asesores: string[];
   totalOts: number;
   finalizadas: number;
   abiertas: number;
-  tasaCierre: number;        // 0-100
+  tasaCierre: number;
   diasPromedioCierre: number;
   montoTotal: number;
   bySucursal: { sucursal: string; count: number }[];
@@ -52,8 +49,6 @@ export interface AsesorDetail {
   monthlyIn:  { month: string; ingresos: number; finalizadas: number }[];
 }
 
-// Detalle profundo cuando se filtra por una sola sucursal: el listado por sucursal
-// pierde sentido (1 fila), entonces mostramos un dashboard rico de esa sucursal.
 export interface SucursalDetail {
   sucursal: string;
   byState:    { estado: string; count: number }[];
@@ -62,12 +57,30 @@ export interface SucursalDetail {
   monthlyIn:  { month: string; ingresos: number; finalizadas: number }[];
 }
 
+function addOptionalFilters(
+  req: sql.Request,
+  sucursal: string,
+  asesores: string[],
+): { sucursalCond: string; asesorCond: string } {
+  let sucursalCond = '';
+  let asesorCond   = '';
+  if (sucursal) {
+    req.input('sucursal', sql.NVarChar(255), sucursal);
+    sucursalCond = 'AND d.Descripcion = @sucursal';
+  }
+  if (asesores.length > 0) {
+    asesores.forEach((a, i) => req.input(`asesor${i}`, sql.NVarChar(255), a));
+    const inList = asesores.map((_, i) => `@asesor${i}`).join(',');
+    asesorCond = `AND m.asesor IN (${inList})`;
+  }
+  return { sucursalCond, asesorCond };
+}
+
 export async function GET(req: NextRequest) {
-  const force    = req.nextUrl.searchParams.get('force') === '1';
-  const sucursal = req.nextUrl.searchParams.get('sucursal')?.trim() ?? '';
-  // `asesor` ahora acepta múltiples valores en CSV: ?asesor=PA,BV,GH
+  const force     = req.nextUrl.searchParams.get('force') === '1';
+  const sucursal  = req.nextUrl.searchParams.get('sucursal')?.trim() ?? '';
   const asesorRaw = req.nextUrl.searchParams.get('asesor')?.trim() ?? '';
-  const asesores = asesorRaw
+  const asesores  = asesorRaw
     ? Array.from(new Set(asesorRaw.split(',').map(s => s.trim()).filter(Boolean))).sort()
     : [];
 
@@ -79,86 +92,79 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const estadosAbiertos = OT_ESTADOS_QUERY_KEYS.filter(k => k !== 'Finalizado');
-  const placeholders = estadosAbiertos.map(() => '?').join(', ');
-
-  // Filtros opcionales sobre la vista. Construimos cláusulas reusables.
-  const sucursalCond = sucursal ? `AND TRIM(CONVERT(SUCURSAL USING utf8mb4)) = ?` : '';
-  const asesorCond   = asesores.length > 0
-    ? `AND TRIM(CONVERT(ASESOR USING utf8mb4)) IN (${asesores.map(() => '?').join(',')})`
-    : '';
-  const filterParams: string[] = [];
-  if (sucursal) filterParams.push(sucursal);
-  if (asesores.length) filterParams.push(...asesores);
-
-  let connection: mysql.Connection | null = null;
+  let pool: sql.ConnectionPool | null = null;
   try {
-    connection = await getDmsConnection();
+    pool = await getDmsPool();
 
-    // Listas de opciones — sin aplicar filtros (siempre completas para los selectores).
-    // 365 días de ventana para acotar el universo.
-    const [optionsRows] = await connection.execute<mysql.RowDataPacket[]>(
-      `SELECT
-         GROUP_CONCAT(DISTINCT NULLIF(TRIM(CONVERT(SUCURSAL USING utf8mb4)), '') ORDER BY 1 SEPARATOR '||') AS sucursales,
-         GROUP_CONCAT(DISTINCT NULLIF(TRIM(CONVERT(ASESOR   USING utf8mb4)), '') ORDER BY 1 SEPARATOR '||') AS asesores
-       FROM v_maestro_ot_condor
-       WHERE fechaingreso >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)`,
-    );
-    const splitOpts = (s: any): string[] =>
-      String(s ?? '').split('||').map(x => x.trim()).filter(Boolean);
-    const availableSucursales = splitOpts(optionsRows[0]?.sucursales);
-    const availableAsesores   = splitOpts(optionsRows[0]?.asesores);
+    // Options: distinct sucursales and asesores for dropdowns (last 365 days)
+    const [sucOpts, aseOpts] = await Promise.all([
+      pool.request().query<{ sucursal: string }>(`
+        SELECT DISTINCT d.Descripcion AS sucursal
+        FROM MYSQL_DW.dbo.MasterOT_Condor m
+        INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+        WHERE m.fechaingreso >= DATEADD(DAY, -365, GETDATE())
+          AND d.Descripcion IS NOT NULL AND d.Descripcion <> ''
+        ORDER BY d.Descripcion
+      `),
+      pool.request().query<{ asesor: string }>(`
+        SELECT DISTINCT m.asesor
+        FROM MYSQL_DW.dbo.MasterOT_Condor m
+        WHERE m.fechaingreso >= DATEADD(DAY, -365, GETDATE())
+          AND m.asesor IS NOT NULL AND m.asesor <> ''
+        ORDER BY m.asesor
+      `),
+    ]);
+    const availableSucursales = sucOpts.recordset.map(r => r.sucursal);
+    const availableAsesores   = aseOpts.recordset.map(r => r.asesor);
 
-    // Reporte 1: OTs abiertas por sucursal (snapshot actual, todas las abiertas).
-    // Si hay filtro de sucursal, devuelve esa única fila; si hay filtro de asesor,
-    // las filas se restringen a OTs gestionadas por ese asesor (distribuidas por sucursal).
-    const [sucursalesRows] = await connection.execute<mysql.RowDataPacket[]>(
-      `SELECT
-        TRIM(CONVERT(SUCURSAL USING utf8mb4)) AS sucursal,
+    // Report 1: open OTs by sucursal
+    const rSucursal = pool.request();
+    const { sucursalCond: scS, asesorCond: acS } = addOptionalFilters(rSucursal, sucursal, asesores);
+    const sucursalesResult = await rSucursal.query(`
+      SELECT
+        d.Descripcion AS sucursal,
         COUNT(*) AS total,
-        SUM(CASE WHEN CONVERT(ESTADOOT USING utf8mb4) IN (${placeholders}) THEN 1 ELSE 0 END) AS abiertas,
+        SUM(CASE WHEN m.EstadoOT = 'Abierto' THEN 1 ELSE 0 END) AS abiertas,
         SUM(CASE
-              WHEN FechaCompromisoClienteMaster IS NOT NULL
-                AND FechaCompromisoClienteMaster < CURDATE()
-                AND FechaFinalizado IS NULL
+              WHEN m.fechacompromisoCliente < CAST(GETDATE() AS DATE)
+               AND m.fecha_cierre_ot IS NULL
               THEN 1 ELSE 0 END) AS vencidas,
-        AVG(DIASINGRESO) AS dias_promedio,
-        SUM(MONTOTOTAL) AS monto_total
-      FROM v_maestro_ot_condor
-      WHERE CONVERT(ESTADOOT USING utf8mb4) IN (${placeholders})
-        AND fechaingreso >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
-        ${sucursalCond}
-        ${asesorCond}
-      GROUP BY TRIM(CONVERT(SUCURSAL USING utf8mb4))
-      HAVING sucursal <> ''
-      ORDER BY abiertas DESC`,
-      [...estadosAbiertos, ...estadosAbiertos, ...filterParams],
-    );
+        AVG(CAST(DATEDIFF(DAY, m.fechaingreso, GETDATE()) AS FLOAT)) AS dias_promedio,
+        SUM(ISNULL(CAST(m.monto AS FLOAT), 0)) AS monto_total
+      FROM MYSQL_DW.dbo.MasterOT_Condor m
+      INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+      WHERE m.EstadoOT = 'Abierto'
+        AND m.fechaingreso >= DATEADD(DAY, -365, GETDATE())
+        ${scS} ${acS}
+      GROUP BY d.Descripcion
+      HAVING d.Descripcion <> ''
+      ORDER BY abiertas DESC
+    `);
 
-    // Reporte 2: Productividad de asesores en el último mes.
-    const [asesoresRows] = await connection.execute<mysql.RowDataPacket[]>(
-      `SELECT
-        TRIM(CONVERT(ASESOR USING utf8mb4)) AS asesor,
-        TRIM(CONVERT(SUCURSAL USING utf8mb4)) AS sucursal,
+    // Report 2: advisor productivity last 30 days
+    const rAsesor = pool.request();
+    const { sucursalCond: scA, asesorCond: acA } = addOptionalFilters(rAsesor, sucursal, asesores);
+    const asesoresResult = await rAsesor.query(`
+      SELECT TOP 50
+        m.asesor,
+        d.Descripcion AS sucursal,
         COUNT(*) AS total_ots,
-        SUM(CASE WHEN FechaFinalizado IS NOT NULL THEN 1 ELSE 0 END) AS finalizadas,
-        SUM(CASE WHEN FechaFinalizado IS NULL THEN 1 ELSE 0 END) AS abiertas,
-        AVG(CASE WHEN FechaFinalizado IS NOT NULL AND fechaingreso IS NOT NULL
-                 THEN DATEDIFF(FechaFinalizado, fechaingreso) END) AS dias_promedio_cierre,
-        SUM(MONTOTOTAL) AS monto_total
-      FROM v_maestro_ot_condor
-      WHERE fechaingreso >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-        AND TRIM(CONVERT(ASESOR USING utf8mb4)) <> ''
-        ${sucursalCond}
-        ${asesorCond}
-      GROUP BY TRIM(CONVERT(ASESOR USING utf8mb4)), TRIM(CONVERT(SUCURSAL USING utf8mb4))
+        SUM(CASE WHEN m.fecha_cierre_ot IS NOT NULL THEN 1 ELSE 0 END) AS finalizadas,
+        SUM(CASE WHEN m.fecha_cierre_ot IS NULL THEN 1 ELSE 0 END) AS abiertas,
+        AVG(CASE WHEN m.fecha_cierre_ot IS NOT NULL AND m.fechaingreso IS NOT NULL
+                 THEN CAST(DATEDIFF(DAY, m.fechaingreso, m.fecha_cierre_ot) AS FLOAT) END) AS dias_promedio_cierre,
+        SUM(ISNULL(CAST(m.monto AS FLOAT), 0)) AS monto_total
+      FROM MYSQL_DW.dbo.MasterOT_Condor m
+      INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+      WHERE m.fechaingreso >= DATEADD(DAY, -30, GETDATE())
+        AND m.asesor IS NOT NULL AND m.asesor <> ''
+        ${scA} ${acA}
+      GROUP BY m.asesor, d.Descripcion
       ORDER BY total_ots DESC
-      LIMIT 50`,
-      filterParams,
-    );
+    `);
 
-    const sucursales: SucursalReportRow[] = sucursalesRows.map(r => ({
-      sucursal:     String(r.sucursal),
+    const sucursales: SucursalReportRow[] = sucursalesResult.recordset.map(r => ({
+      sucursal:     String(r.sucursal ?? ''),
       total:        Number(r.total ?? 0),
       abiertas:     Number(r.abiertas ?? 0),
       vencidas:     Number(r.vencidas ?? 0),
@@ -166,9 +172,8 @@ export async function GET(req: NextRequest) {
       montoTotal:   Number(r.monto_total ?? 0),
     }));
 
-    // Renombrado a asesoresReport para no chocar con el array del filtro CSV.
-    const asesoresReport: AsesorReportRow[] = asesoresRows.map(r => ({
-      asesor:             String(r.asesor),
+    const asesoresReport: AsesorReportRow[] = asesoresResult.recordset.map(r => ({
+      asesor:             String(r.asesor ?? ''),
       sucursal:           String(r.sucursal ?? ''),
       totalOts:           Number(r.total_ots ?? 0),
       finalizadas:        Number(r.finalizadas ?? 0),
@@ -177,76 +182,84 @@ export async function GET(req: NextRequest) {
       montoTotal:         Number(r.monto_total ?? 0),
     }));
 
-    // Detalle de sucursal: solo cuando se filtra por UNA sucursal específica.
-    // 4 queries en paralelo para no penalizar el load time.
+    // Sucursal detail (only when filtering by a single sucursal)
     let sucursalDetail: SucursalDetail | null = null;
     if (sucursal) {
-      const sucursalParams = [sucursal];
-      const [byStateRows, byAgeRows, oldestRows, monthlyRows] = await Promise.all([
-        connection.execute<mysql.RowDataPacket[]>(
-          `SELECT TRIM(CONVERT(ESTADOOT USING utf8mb4)) AS estado, COUNT(*) AS cnt
-           FROM v_maestro_ot_condor
-           WHERE FechaFinalizado IS NULL
-             AND TRIM(CONVERT(SUCURSAL USING utf8mb4)) = ?
-             ${asesorCond}
-           GROUP BY TRIM(CONVERT(ESTADOOT USING utf8mb4))
-           ORDER BY cnt DESC`,
-          asesores.length ? [...sucursalParams, ...asesores] : sucursalParams,
-        ),
-        connection.execute<mysql.RowDataPacket[]>(
-          `SELECT
-              CASE
-                WHEN DATEDIFF(CURDATE(), fechaingreso) <= 7   THEN '0-7 días'
-                WHEN DATEDIFF(CURDATE(), fechaingreso) <= 30  THEN '8-30 días'
-                WHEN DATEDIFF(CURDATE(), fechaingreso) <= 90  THEN '1-3 meses'
-                WHEN DATEDIFF(CURDATE(), fechaingreso) <= 180 THEN '3-6 meses'
-                ELSE '+6 meses'
-              END AS bucket,
-              COUNT(*) AS cnt
-           FROM v_maestro_ot_condor
-           WHERE FechaFinalizado IS NULL
-             AND fechaingreso IS NOT NULL
-             AND TRIM(CONVERT(SUCURSAL USING utf8mb4)) = ?
-             ${asesorCond}
-           GROUP BY bucket
-           ORDER BY MIN(DATEDIFF(CURDATE(), fechaingreso))`,
-          asesores.length ? [...sucursalParams, ...asesores] : sucursalParams,
-        ),
-        connection.execute<mysql.RowDataPacket[]>(
-          `SELECT OT, DATEDIFF(CURDATE(), fechaingreso) AS dias,
-                  TRIM(CONVERT(NOMBRECLIENTE USING utf8mb4)) AS cliente,
-                  TRIM(CONVERT(ESTADOOT USING utf8mb4))      AS estado,
-                  TRIM(CONVERT(ASESOR USING utf8mb4))        AS asesor,
-                  TRIM(CONVERT(MODELO USING utf8mb4))        AS modelo,
-                  MONTOTOTAL
-           FROM v_maestro_ot_condor
-           WHERE FechaFinalizado IS NULL
-             AND fechaingreso IS NOT NULL
-             AND TRIM(CONVERT(SUCURSAL USING utf8mb4)) = ?
-             ${asesorCond}
-           ORDER BY fechaingreso ASC
-           LIMIT 10`,
-          asesores.length ? [...sucursalParams, ...asesores] : sucursalParams,
-        ),
-        connection.execute<mysql.RowDataPacket[]>(
-          `SELECT DATE_FORMAT(fechaingreso, '%Y-%m') AS month,
-                  COUNT(*) AS ingresos,
-                  SUM(CASE WHEN FechaFinalizado IS NOT NULL THEN 1 ELSE 0 END) AS finalizadas
-           FROM v_maestro_ot_condor
-           WHERE fechaingreso >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
-             AND TRIM(CONVERT(SUCURSAL USING utf8mb4)) = ?
-             ${asesorCond}
-           GROUP BY DATE_FORMAT(fechaingreso, '%Y-%m')
-           ORDER BY month ASC`,
-          asesores.length ? [...sucursalParams, ...asesores] : sucursalParams,
-        ),
+      const mkReq = () => {
+        const r = pool!.request();
+        r.input('sucursal', sql.NVarChar(255), sucursal);
+        if (asesores.length) asesores.forEach((a, i) => r.input(`asesor${i}`, sql.NVarChar(255), a));
+        return r;
+      };
+      const aeFilter = asesores.length
+        ? `AND m.asesor IN (${asesores.map((_, i) => `@asesor${i}`).join(',')})`
+        : '';
+
+      const [byStateR, byAgeR, oldestR, monthlyR] = await Promise.all([
+        mkReq().query(`
+          SELECT m.EstadoTaller AS estado, COUNT(*) AS cnt
+          FROM MYSQL_DW.dbo.MasterOT_Condor m
+          INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+          WHERE m.fecha_cierre_ot IS NULL
+            AND d.Descripcion = @sucursal ${aeFilter}
+          GROUP BY m.EstadoTaller ORDER BY cnt DESC
+        `),
+        mkReq().query(`
+          SELECT
+            CASE
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 7   THEN '0-7 días'
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 30  THEN '8-30 días'
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 90  THEN '1-3 meses'
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 180 THEN '3-6 meses'
+              ELSE '+6 meses'
+            END AS bucket, COUNT(*) AS cnt
+          FROM MYSQL_DW.dbo.MasterOT_Condor m
+          INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+          WHERE m.fecha_cierre_ot IS NULL AND m.fechaingreso IS NOT NULL
+            AND d.Descripcion = @sucursal ${aeFilter}
+          GROUP BY
+            CASE
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 7   THEN '0-7 días'
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 30  THEN '8-30 días'
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 90  THEN '1-3 meses'
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 180 THEN '3-6 meses'
+              ELSE '+6 meses'
+            END
+        `),
+        mkReq().query(`
+          SELECT TOP 10
+            m.nroot AS OT,
+            DATEDIFF(DAY, m.fechaingreso, GETDATE()) AS dias,
+            m.nombrecliente AS cliente,
+            m.EstadoTaller AS estado,
+            m.asesor,
+            m.modelo,
+            ISNULL(CAST(m.monto AS FLOAT), 0) AS MONTOTOTAL
+          FROM MYSQL_DW.dbo.MasterOT_Condor m
+          INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+          WHERE m.fecha_cierre_ot IS NULL AND m.fechaingreso IS NOT NULL
+            AND d.Descripcion = @sucursal ${aeFilter}
+          ORDER BY m.fechaingreso ASC
+        `),
+        mkReq().query(`
+          SELECT
+            FORMAT(m.fechaingreso, 'yyyy-MM') AS month,
+            COUNT(*) AS ingresos,
+            SUM(CASE WHEN m.fecha_cierre_ot IS NOT NULL THEN 1 ELSE 0 END) AS finalizadas
+          FROM MYSQL_DW.dbo.MasterOT_Condor m
+          INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+          WHERE m.fechaingreso >= DATEADD(MONTH, -12, GETDATE())
+            AND d.Descripcion = @sucursal ${aeFilter}
+          GROUP BY FORMAT(m.fechaingreso, 'yyyy-MM')
+          ORDER BY month ASC
+        `),
       ]);
 
       sucursalDetail = {
         sucursal,
-        byState: byStateRows[0].map(r => ({ estado: String(r.estado), count: Number(r.cnt) })),
-        byAge:   byAgeRows[0].map(r => ({ bucket: String(r.bucket), count: Number(r.cnt) })),
-        topOldest: oldestRows[0].map(r => ({
+        byState:   byStateR.recordset.map(r => ({ estado: String(r.estado ?? ''), count: Number(r.cnt) })),
+        byAge:     byAgeR.recordset.map(r => ({ bucket: String(r.bucket), count: Number(r.cnt) })),
+        topOldest: oldestR.recordset.map(r => ({
           ot: Number(r.OT), dias: Number(r.dias),
           cliente: String(r.cliente ?? '').trim(),
           estado:  String(r.estado ?? '').trim(),
@@ -254,7 +267,7 @@ export async function GET(req: NextRequest) {
           modelo:  String(r.modelo ?? '').trim(),
           montoTotal: Number(r.MONTOTOTAL ?? 0),
         })),
-        monthlyIn: monthlyRows[0].map(r => ({
+        monthlyIn: monthlyR.recordset.map(r => ({
           month: String(r.month),
           ingresos: Number(r.ingresos),
           finalizadas: Number(r.finalizadas),
@@ -262,103 +275,103 @@ export async function GET(req: NextRequest) {
       };
     }
 
-    // Detalle de asesor(es): cuando hay 1+ asesores filtrados.
-    // El listado tabular pierde sentido; mostramos un dashboard ejecutivo.
+    // Asesor detail (when one or more asesores filtered)
     let asesorDetail: AsesorDetail | null = null;
     if (asesores.length > 0) {
-      const aPlaceholders = asesores.map(() => '?').join(',');
-      const baseAsesoresParams = [...asesores];
-      const withSucursalParams = sucursal ? [...baseAsesoresParams, sucursal] : baseAsesoresParams;
-      const sucursalCondInner = sucursal ? `AND TRIM(CONVERT(SUCURSAL USING utf8mb4)) = ?` : '';
+      const mkReqA = () => {
+        const r = pool!.request();
+        asesores.forEach((a, i) => r.input(`asesor${i}`, sql.NVarChar(255), a));
+        if (sucursal) r.input('sucursal', sql.NVarChar(255), sucursal);
+        return r;
+      };
+      const inList     = asesores.map((_, i) => `@asesor${i}`).join(',');
+      const sucFilter  = sucursal ? 'AND d.Descripcion = @sucursal' : '';
 
-      const [resumenRows, bySucursalRows, byStateRows, byAgeRows, oldestRows, monthlyRows] = await Promise.all([
-        connection.execute<mysql.RowDataPacket[]>(
-          `SELECT
-              COUNT(*) AS total_ots,
-              SUM(CASE WHEN FechaFinalizado IS NOT NULL THEN 1 ELSE 0 END) AS finalizadas,
-              SUM(CASE WHEN FechaFinalizado IS NULL     THEN 1 ELSE 0 END) AS abiertas,
-              AVG(CASE WHEN FechaFinalizado IS NOT NULL AND fechaingreso IS NOT NULL
-                       THEN DATEDIFF(FechaFinalizado, fechaingreso) END) AS dias_cierre,
-              SUM(MONTOTOTAL) AS monto_total
-           FROM v_maestro_ot_condor
-           WHERE fechaingreso >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
-             AND TRIM(CONVERT(ASESOR USING utf8mb4)) IN (${aPlaceholders})
-             ${sucursalCondInner}`,
-          withSucursalParams,
-        ),
-        connection.execute<mysql.RowDataPacket[]>(
-          `SELECT TRIM(CONVERT(SUCURSAL USING utf8mb4)) AS sucursal, COUNT(*) AS cnt
-           FROM v_maestro_ot_condor
-           WHERE FechaFinalizado IS NULL
-             AND TRIM(CONVERT(ASESOR USING utf8mb4)) IN (${aPlaceholders})
-             ${sucursalCondInner}
-           GROUP BY TRIM(CONVERT(SUCURSAL USING utf8mb4))
-           HAVING sucursal <> ''
-           ORDER BY cnt DESC`,
-          withSucursalParams,
-        ),
-        connection.execute<mysql.RowDataPacket[]>(
-          `SELECT TRIM(CONVERT(ESTADOOT USING utf8mb4)) AS estado, COUNT(*) AS cnt
-           FROM v_maestro_ot_condor
-           WHERE FechaFinalizado IS NULL
-             AND TRIM(CONVERT(ASESOR USING utf8mb4)) IN (${aPlaceholders})
-             ${sucursalCondInner}
-           GROUP BY TRIM(CONVERT(ESTADOOT USING utf8mb4))
-           ORDER BY cnt DESC`,
-          withSucursalParams,
-        ),
-        connection.execute<mysql.RowDataPacket[]>(
-          `SELECT
-              CASE
-                WHEN DATEDIFF(CURDATE(), fechaingreso) <= 7   THEN '0-7 días'
-                WHEN DATEDIFF(CURDATE(), fechaingreso) <= 30  THEN '8-30 días'
-                WHEN DATEDIFF(CURDATE(), fechaingreso) <= 90  THEN '1-3 meses'
-                WHEN DATEDIFF(CURDATE(), fechaingreso) <= 180 THEN '3-6 meses'
-                ELSE '+6 meses'
-              END AS bucket,
-              COUNT(*) AS cnt
-           FROM v_maestro_ot_condor
-           WHERE FechaFinalizado IS NULL
-             AND fechaingreso IS NOT NULL
-             AND TRIM(CONVERT(ASESOR USING utf8mb4)) IN (${aPlaceholders})
-             ${sucursalCondInner}
-           GROUP BY bucket
-           ORDER BY MIN(DATEDIFF(CURDATE(), fechaingreso))`,
-          withSucursalParams,
-        ),
-        connection.execute<mysql.RowDataPacket[]>(
-          `SELECT OT, DATEDIFF(CURDATE(), fechaingreso) AS dias,
-                  TRIM(CONVERT(NOMBRECLIENTE USING utf8mb4)) AS cliente,
-                  TRIM(CONVERT(ESTADOOT USING utf8mb4))      AS estado,
-                  TRIM(CONVERT(ASESOR USING utf8mb4))        AS asesor,
-                  TRIM(CONVERT(SUCURSAL USING utf8mb4))      AS sucursal,
-                  TRIM(CONVERT(MODELO USING utf8mb4))        AS modelo,
-                  MONTOTOTAL
-           FROM v_maestro_ot_condor
-           WHERE FechaFinalizado IS NULL
-             AND fechaingreso IS NOT NULL
-             AND TRIM(CONVERT(ASESOR USING utf8mb4)) IN (${aPlaceholders})
-             ${sucursalCondInner}
-           ORDER BY fechaingreso ASC
-           LIMIT 10`,
-          withSucursalParams,
-        ),
-        connection.execute<mysql.RowDataPacket[]>(
-          `SELECT DATE_FORMAT(fechaingreso, '%Y-%m') AS month,
-                  COUNT(*) AS ingresos,
-                  SUM(CASE WHEN FechaFinalizado IS NOT NULL THEN 1 ELSE 0 END) AS finalizadas
-           FROM v_maestro_ot_condor
-           WHERE fechaingreso >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
-             AND TRIM(CONVERT(ASESOR USING utf8mb4)) IN (${aPlaceholders})
-             ${sucursalCondInner}
-           GROUP BY DATE_FORMAT(fechaingreso, '%Y-%m')
-           ORDER BY month ASC`,
-          withSucursalParams,
-        ),
+      const [resumenR, bySucursalR, byStateR, byAgeR, oldestR, monthlyR] = await Promise.all([
+        mkReqA().query(`
+          SELECT
+            COUNT(*) AS total_ots,
+            SUM(CASE WHEN m.fecha_cierre_ot IS NOT NULL THEN 1 ELSE 0 END) AS finalizadas,
+            SUM(CASE WHEN m.fecha_cierre_ot IS NULL THEN 1 ELSE 0 END) AS abiertas,
+            AVG(CASE WHEN m.fecha_cierre_ot IS NOT NULL AND m.fechaingreso IS NOT NULL
+                     THEN CAST(DATEDIFF(DAY, m.fechaingreso, m.fecha_cierre_ot) AS FLOAT) END) AS dias_cierre,
+            SUM(ISNULL(CAST(m.monto AS FLOAT), 0)) AS monto_total
+          FROM MYSQL_DW.dbo.MasterOT_Condor m
+          INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+          WHERE m.fechaingreso >= DATEADD(DAY, -365, GETDATE())
+            AND m.asesor IN (${inList}) ${sucFilter}
+        `),
+        mkReqA().query(`
+          SELECT d.Descripcion AS sucursal, COUNT(*) AS cnt
+          FROM MYSQL_DW.dbo.MasterOT_Condor m
+          INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+          WHERE m.fecha_cierre_ot IS NULL
+            AND m.asesor IN (${inList}) ${sucFilter}
+            AND d.Descripcion <> ''
+          GROUP BY d.Descripcion ORDER BY cnt DESC
+        `),
+        mkReqA().query(`
+          SELECT m.EstadoTaller AS estado, COUNT(*) AS cnt
+          FROM MYSQL_DW.dbo.MasterOT_Condor m
+          INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+          WHERE m.fecha_cierre_ot IS NULL
+            AND m.asesor IN (${inList}) ${sucFilter}
+          GROUP BY m.EstadoTaller ORDER BY cnt DESC
+        `),
+        mkReqA().query(`
+          SELECT
+            CASE
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 7   THEN '0-7 días'
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 30  THEN '8-30 días'
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 90  THEN '1-3 meses'
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 180 THEN '3-6 meses'
+              ELSE '+6 meses'
+            END AS bucket, COUNT(*) AS cnt
+          FROM MYSQL_DW.dbo.MasterOT_Condor m
+          INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+          WHERE m.fecha_cierre_ot IS NULL AND m.fechaingreso IS NOT NULL
+            AND m.asesor IN (${inList}) ${sucFilter}
+          GROUP BY
+            CASE
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 7   THEN '0-7 días'
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 30  THEN '8-30 días'
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 90  THEN '1-3 meses'
+              WHEN DATEDIFF(DAY, m.fechaingreso, GETDATE()) <= 180 THEN '3-6 meses'
+              ELSE '+6 meses'
+            END
+        `),
+        mkReqA().query(`
+          SELECT TOP 10
+            m.nroot AS OT,
+            DATEDIFF(DAY, m.fechaingreso, GETDATE()) AS dias,
+            m.nombrecliente AS cliente,
+            m.EstadoTaller AS estado,
+            m.asesor,
+            d.Descripcion AS sucursal,
+            m.modelo,
+            ISNULL(CAST(m.monto AS FLOAT), 0) AS MONTOTOTAL
+          FROM MYSQL_DW.dbo.MasterOT_Condor m
+          INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+          WHERE m.fecha_cierre_ot IS NULL AND m.fechaingreso IS NOT NULL
+            AND m.asesor IN (${inList}) ${sucFilter}
+          ORDER BY m.fechaingreso ASC
+        `),
+        mkReqA().query(`
+          SELECT
+            FORMAT(m.fechaingreso, 'yyyy-MM') AS month,
+            COUNT(*) AS ingresos,
+            SUM(CASE WHEN m.fecha_cierre_ot IS NOT NULL THEN 1 ELSE 0 END) AS finalizadas
+          FROM MYSQL_DW.dbo.MasterOT_Condor m
+          INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+          WHERE m.fechaingreso >= DATEADD(MONTH, -12, GETDATE())
+            AND m.asesor IN (${inList}) ${sucFilter}
+          GROUP BY FORMAT(m.fechaingreso, 'yyyy-MM')
+          ORDER BY month ASC
+        `),
       ]);
 
-      const r0 = resumenRows[0][0] ?? {};
-      const totalOts    = Number(r0.total_ots ?? 0);
+      const r0        = resumenR.recordset[0] ?? {};
+      const totalOts  = Number(r0.total_ots ?? 0);
       const finalizadas = Number(r0.finalizadas ?? 0);
       asesorDetail = {
         asesores,
@@ -368,19 +381,19 @@ export async function GET(req: NextRequest) {
         tasaCierre:         totalOts > 0 ? (finalizadas / totalOts) * 100 : 0,
         diasPromedioCierre: Math.round(Number(r0.dias_cierre ?? 0)),
         montoTotal:         Number(r0.monto_total ?? 0),
-        bySucursal: bySucursalRows[0].map(r => ({ sucursal: String(r.sucursal), count: Number(r.cnt) })),
-        byState:    byStateRows[0].map(r => ({ estado: String(r.estado), count: Number(r.cnt) })),
-        byAge:      byAgeRows[0].map(r => ({ bucket: String(r.bucket), count: Number(r.cnt) })),
-        topOldest:  oldestRows[0].map(r => ({
+        bySucursal: bySucursalR.recordset.map(r => ({ sucursal: String(r.sucursal), count: Number(r.cnt) })),
+        byState:    byStateR.recordset.map(r => ({ estado: String(r.estado ?? ''), count: Number(r.cnt) })),
+        byAge:      byAgeR.recordset.map(r => ({ bucket: String(r.bucket), count: Number(r.cnt) })),
+        topOldest:  oldestR.recordset.map(r => ({
           ot: Number(r.OT), dias: Number(r.dias),
-          cliente: String(r.cliente ?? '').trim(),
-          estado:  String(r.estado ?? '').trim(),
-          asesor:  String(r.asesor ?? '').trim(),
+          cliente:  String(r.cliente ?? '').trim(),
+          estado:   String(r.estado ?? '').trim(),
+          asesor:   String(r.asesor ?? '').trim(),
           sucursal: String(r.sucursal ?? '').trim(),
-          modelo:  String(r.modelo ?? '').trim(),
+          modelo:   String(r.modelo ?? '').trim(),
           montoTotal: Number(r.MONTOTOTAL ?? 0),
         })),
-        monthlyIn: monthlyRows[0].map(r => ({
+        monthlyIn: monthlyR.recordset.map(r => ({
           month: String(r.month),
           ingresos: Number(r.ingresos),
           finalizadas: Number(r.finalizadas),
@@ -401,10 +414,11 @@ export async function GET(req: NextRequest) {
 
     cacheSet(cacheKey, payload);
     return NextResponse.json(payload);
+
   } catch (err: any) {
     console.error('[ot-seguimiento/reportes]', err.message);
     return NextResponse.json({ error: 'Error al generar el reporte' }, { status: 500 });
   } finally {
-    await connection?.end();
+    await pool?.close();
   }
 }

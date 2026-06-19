@@ -1,27 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import mysql from 'mysql2/promise';
-
-const DMS_CONFIG = {
-  host:           process.env.DMS_HOST,
-  port:    Number(process.env.DMS_PORT ?? 3306),
-  user:           process.env.DMS_USER,
-  password:       process.env.DMS_PASSWORD,
-  database:       process.env.DMS_DATABASE ?? 'controltiempo',
-  connectTimeout: 20000,
-};
+import * as sql from 'mssql';
+import { getDmsPool } from '@/lib/dms-connection';
 
 const CACHE_TTL_MS = 60_000;
 const cache = new Map<string, { ts: number; payload: unknown }>();
 
 export type KpiKind =
-  | 'abiertas'        // todas las OTs abiertas (excluye facturadas)
-  | 'vencidas'        // compromiso vencido y abiertas
-  | 'atrasoCritico'   // > 30 días en taller, abiertas
-  | 'diasPromedio'    // mismo set que abiertas pero ordenado por días desc
-  | 'montoTotal'      // abiertas, ordenadas por monto desc
-  | 'tasaCierre30d'   // todas las del último mes
-  | 'antiguedad'      // OTs abiertas filtradas por bucket de DIASINGRESO (param bucket=...)
-  | 'facturadas'      // OTs abiertas y facturadas (cliente OK · solo cierre operativo pendiente)
+  | 'abiertas'
+  | 'vencidas'
+  | 'atrasoCritico'
+  | 'diasPromedio'
+  | 'montoTotal'
+  | 'tasaCierre30d'
+  | 'antiguedad'
+  | 'facturadas'
 ;
 
 const KPI_TITLES: Record<KpiKind, string> = {
@@ -35,7 +27,6 @@ const KPI_TITLES: Record<KpiKind, string> = {
   facturadas:     'OTs facturadas · cliente OK · cierre operativo pendiente',
 };
 
-// Buckets de antigüedad → predicado SQL sobre DIASINGRESO
 export type AntiguedadBucket =
   | 'Reciente · 0-7 d'
   | 'Normal · 8-14 d'
@@ -44,47 +35,58 @@ export type AntiguedadBucket =
   | 'Atraso crítico · 61-90 d'
   | 'Congelada · +90 d';
 
+const DIAS = `DATEDIFF(DAY, m.fechaingreso, GETDATE())`;
+
 const ANTIGUEDAD_PREDICATE: Record<AntiguedadBucket, string> = {
-  'Reciente · 0-7 d':         'DIASINGRESO BETWEEN 0 AND 7',
-  'Normal · 8-14 d':          'DIASINGRESO BETWEEN 8 AND 14',
-  'Demora · 15-30 d':         'DIASINGRESO BETWEEN 15 AND 30',
-  'Atraso alto · 31-60 d':    'DIASINGRESO BETWEEN 31 AND 60',
-  'Atraso crítico · 61-90 d': 'DIASINGRESO BETWEEN 61 AND 90',
-  'Congelada · +90 d':        'DIASINGRESO > 90',
+  'Reciente · 0-7 d':         `${DIAS} BETWEEN 0 AND 7`,
+  'Normal · 8-14 d':          `${DIAS} BETWEEN 8 AND 14`,
+  'Demora · 15-30 d':         `${DIAS} BETWEEN 15 AND 30`,
+  'Atraso alto · 31-60 d':    `${DIAS} BETWEEN 31 AND 60`,
+  'Atraso crítico · 61-90 d': `${DIAS} BETWEEN 61 AND 90`,
+  'Congelada · +90 d':        `${DIAS} > 90`,
 };
 
 export interface DetailRow {
-  ot: number;
-  cliente: string;
-  modelo: string;
-  chasis: string;
-  sucursal: string;
-  estadoOt: string;
-  tipoServicio: string;
-  asesor: string;
-  fechaIngreso: string | null;
-  horaIngreso: string | null;
+  ot:              number;
+  cliente:         string;
+  modelo:          string;
+  chasis:          string;
+  sucursal:        string;
+  estadoOt:        string;
+  tipoServicio:    string;
+  asesor:          string;
+  fechaIngreso:    string | null;
+  horaIngreso:     string | null;
   fechaCompromiso: string | null;
   fechaFinalizado: string | null;
-  diasIngreso: number;
-  diasRetraso: number;
-  monto: number;
+  diasIngreso:     number;
+  diasRetraso:     number;
+  monto:           number;
 }
 
 export interface DetailPayload {
-  kpi:     KpiKind;
-  title:   string;
-  total:   number;
-  rows:    DetailRow[];
-  filters: { days: number; sucursal: string; tipo: string };
+  kpi:         KpiKind;
+  title:       string;
+  total:       number;
+  rows:        DetailRow[];
+  filters:     { days: number; sucursal: string; tipo: string };
   generatedAt: string;
 }
+
+const baseJoin = `
+  INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+  LEFT  JOIN MYSQL_DW.dbo.controltiempo_DimTipoServicio ts ON ts.idtipo_servicio = m.idtiposervicio
+`;
+
+const abierta     = `m.EstadoOT = 'Abierto'`;
+const noFacturada = `(m.Estadofinanciero IS NULL OR UPPER(LTRIM(RTRIM(m.Estadofinanciero))) <> 'FACTURADO')`;
+const facturada   = `UPPER(LTRIM(RTRIM(ISNULL(m.Estadofinanciero, '')))) = 'FACTURADO'`;
 
 export async function GET(req: NextRequest) {
   const kpi         = (req.nextUrl.searchParams.get('kpi') ?? 'abiertas') as KpiKind;
   const days        = Math.max(1, Math.min(720, Number(req.nextUrl.searchParams.get('days') ?? 365)));
   const sucursal    = req.nextUrl.searchParams.get('sucursal')?.trim() ?? '';
-  const tipo        = req.nextUrl.searchParams.get('tipo')?.trim() ?? '';
+  const tipo        = req.nextUrl.searchParams.get('tipo')?.trim()     ?? '';
   const bucket      = (req.nextUrl.searchParams.get('bucket')?.trim() ?? '') as AntiguedadBucket | '';
   const estadoDrill = req.nextUrl.searchParams.get('estadoDrill')?.trim() ?? '';
   const force       = req.nextUrl.searchParams.get('force') === '1';
@@ -92,101 +94,103 @@ export async function GET(req: NextRequest) {
   if (!KPI_TITLES[kpi]) {
     return NextResponse.json({ error: 'KPI inválido' }, { status: 400 });
   }
-  if (kpi === 'antiguedad' && (!bucket || !ANTIGUEDAD_PREDICATE[bucket])) {
+  if (kpi === 'antiguedad' && (!bucket || !ANTIGUEDAD_PREDICATE[bucket as AntiguedadBucket])) {
     return NextResponse.json({ error: 'Bucket de antigüedad inválido' }, { status: 400 });
   }
 
   const cacheKey = `${kpi}|d=${days}|s=${sucursal}|t=${tipo}|b=${bucket}|e=${estadoDrill}`;
   if (!force) {
     const hit = cache.get(cacheKey);
-    if (hit && Date.now() - hit.ts < CACHE_TTL_MS) {
-      return NextResponse.json(hit.payload);
-    }
+    if (hit && Date.now() - hit.ts < CACHE_TTL_MS) return NextResponse.json(hit.payload);
   }
 
-  const params: any[] = [];
-  let baseWhere = '';
-  const abiertaCond     = `(CONVERT(ESTADOOT USING utf8mb4) <> 'Finalizado' AND FechaFinalizado IS NULL)`;
-  const noFacturadaCond = `(ESTADOFINANCIERO IS NULL OR TRIM(UPPER(CONVERT(ESTADOFINANCIERO USING utf8mb4))) <> 'FACTURADO')`;
-  const facturadaCond   = `TRIM(UPPER(CONVERT(ESTADOFINANCIERO USING utf8mb4))) = 'FACTURADO'`;
-
-  // Construir WHERE según el KPI
-  let kpiWhere = '';
-  let orderBy  = 'fechaingreso DESC';
-  let limit    = 500;
+  const limit = 500;
+  const andConditions: string[] = [];
+  let dateWhere = '';
+  let orderBy   = 'm.fechaingreso DESC';
 
   if (kpi === 'tasaCierre30d') {
-    baseWhere = 'WHERE fechaingreso >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)';
-    orderBy   = 'fechaingreso DESC';
+    dateWhere = `m.fechaingreso >= DATEADD(DAY, -30, GETDATE())`;
   } else {
-    baseWhere = 'WHERE fechaingreso >= DATE_SUB(CURDATE(), INTERVAL ? DAY)';
-    params.push(days);
+    dateWhere = `m.fechaingreso >= DATEADD(DAY, -@days, GETDATE())`;
 
-    if (kpi === 'abiertas')      { kpiWhere = ` AND ${abiertaCond} AND ${noFacturadaCond}`; }
-    if (kpi === 'vencidas')      { kpiWhere = ` AND FechaCompromisoClienteMaster IS NOT NULL AND FechaCompromisoClienteMaster < CURDATE() AND FechaFinalizado IS NULL AND ${noFacturadaCond}`; }
-    if (kpi === 'atrasoCritico') { kpiWhere = ` AND ${abiertaCond} AND DIASINGRESO > 30 AND ${noFacturadaCond}`; }
-    if (kpi === 'diasPromedio')  { kpiWhere = ` AND ${abiertaCond} AND ${noFacturadaCond}`; orderBy = 'DIASINGRESO DESC'; }
-    if (kpi === 'montoTotal')    { kpiWhere = ` AND ${abiertaCond} AND ${noFacturadaCond}`; orderBy = 'MONTOTOTAL DESC'; }
-    if (kpi === 'facturadas')    { kpiWhere = ` AND ${abiertaCond} AND ${facturadaCond}`;   orderBy = 'DIASINGRESO DESC'; }
+    if (kpi === 'abiertas')      { andConditions.push(abierta, noFacturada); }
+    if (kpi === 'vencidas')      {
+      andConditions.push(
+        `m.fechacompromisoCliente IS NOT NULL`,
+        `m.fechacompromisoCliente < CAST(GETDATE() AS DATE)`,
+        `m.fecha_cierre_ot IS NULL`,
+        noFacturada,
+      );
+    }
+    if (kpi === 'atrasoCritico') { andConditions.push(abierta, `${DIAS} > 30`, noFacturada); }
+    if (kpi === 'diasPromedio')  { andConditions.push(abierta, noFacturada); orderBy = `${DIAS} DESC`; }
+    if (kpi === 'montoTotal')    { andConditions.push(abierta, noFacturada); orderBy = `ISNULL(CAST(m.monto AS FLOAT), 0) DESC`; }
+    if (kpi === 'facturadas')    { andConditions.push(abierta, facturada);   orderBy = `${DIAS} DESC`; }
     if (kpi === 'antiguedad' && bucket) {
-      kpiWhere = ` AND ${abiertaCond} AND ${noFacturadaCond} AND ${ANTIGUEDAD_PREDICATE[bucket]}`;
-      orderBy  = 'DIASINGRESO DESC';
+      andConditions.push(abierta, noFacturada, ANTIGUEDAD_PREDICATE[bucket as AntiguedadBucket]);
+      orderBy = `${DIAS} DESC`;
     }
   }
 
-  if (sucursal)    { baseWhere += ' AND TRIM(CONVERT(SUCURSAL USING utf8mb4)) = ?';     params.push(sucursal); }
-  if (tipo)        { baseWhere += ' AND TRIM(CONVERT(TipoServicio USING utf8mb4)) = ?'; params.push(tipo); }
-  if (estadoDrill) { kpiWhere  += ' AND TRIM(CONVERT(ESTADOOT USING utf8mb4)) = ?';     params.push(estadoDrill); }
+  if (sucursal)    andConditions.push(`d.Descripcion = @sucursal`);
+  if (tipo)        andConditions.push(`ISNULL(ts.descripcion, '') = @tipo`);
+  if (estadoDrill) andConditions.push(`LTRIM(RTRIM(ISNULL(m.EstadoTaller, ''))) = @estadoDrill`);
 
-  let connection: mysql.Connection | null = null;
+  const whereClause = [dateWhere, ...andConditions].filter(Boolean).join(' AND ');
+
+  let pool: sql.ConnectionPool | null = null;
   try {
-    connection = await mysql.createConnection(DMS_CONFIG);
+    pool = await getDmsPool();
+    const r = pool.request();
+    if (kpi !== 'tasaCierre30d') r.input('days',        sql.Int,         days);
+    if (sucursal)                r.input('sucursal',    sql.NVarChar(255), sucursal);
+    if (tipo)                    r.input('tipo',        sql.NVarChar(255), tipo);
+    if (estadoDrill)             r.input('estadoDrill', sql.NVarChar(255), estadoDrill);
 
-    const [rows] = await connection.execute<mysql.RowDataPacket[]>(
-      `SELECT
-        OT,
-        TRIM(CONVERT(NOMBRECLIENTE USING utf8mb4)) AS cliente,
-        TRIM(CONVERT(MODELO USING utf8mb4))        AS modelo,
-        TRIM(CONVERT(CHASIS USING utf8mb4))        AS chasis,
-        TRIM(CONVERT(SUCURSAL USING utf8mb4))      AS sucursal,
-        TRIM(CONVERT(ESTADOOT USING utf8mb4))      AS estado_ot,
-        TRIM(CONVERT(TipoServicio USING utf8mb4))  AS tipo_servicio,
-        TRIM(CONVERT(ASESOR USING utf8mb4))        AS asesor,
-        fechaingreso,
-        TRIM(f.horaingreso)          AS hora_ingreso,
-        FechaCompromisoClienteMaster AS fecha_compromiso,
-        FechaFinalizado              AS fecha_finalizado,
-        DIASINGRESO                   AS dias_ingreso,
+    const result = await r.query<any>(`
+      SELECT TOP ${limit}
+        m.nroot                                       AS OT,
+        ISNULL(m.nombrecliente, '')                   AS cliente,
+        ISNULL(m.modelo, '')                          AS modelo,
+        ISNULL(m.chasis, '')                          AS chasis,
+        d.Descripcion                                 AS sucursal,
+        ISNULL(m.EstadoTaller, '')                    AS estado_ot,
+        ISNULL(ts.descripcion, '')                    AS tipo_servicio,
+        ISNULL(m.asesor, '')                          AS asesor,
+        m.fechaingreso,
+        m.horaingreso                                 AS hora_ingreso,
+        m.fechacompromisoCliente                      AS fecha_compromiso,
+        m.fecha_cierre_ot                             AS fecha_finalizado,
+        ${DIAS}                                       AS dias_ingreso,
         CASE
-          WHEN FechaCompromisoClienteMaster IS NOT NULL AND FechaFinalizado IS NULL
-            THEN DATEDIFF(CURDATE(), FechaCompromisoClienteMaster)
+          WHEN m.fechacompromisoCliente IS NOT NULL AND m.fecha_cierre_ot IS NULL
+            THEN DATEDIFF(DAY, m.fechacompromisoCliente, GETDATE())
           ELSE 0
-        END AS dias_retraso,
-        MONTOTOTAL AS monto
-      FROM v_maestro_ot_condor
-      LEFT JOIN (SELECT nroot, MIN(horaingreso) AS horaingreso FROM v_maestro_ot_filtros WHERE horaingreso IS NOT NULL AND TRIM(horaingreso) <> '' GROUP BY nroot) f ON f.nroot = OT
-      ${baseWhere}${kpiWhere}
+        END                                           AS dias_retraso,
+        ISNULL(CAST(m.monto AS FLOAT), 0)             AS MONTOTOTAL
+      FROM MYSQL_DW.dbo.MasterOT_Condor m
+      ${baseJoin}
+      WHERE ${whereClause}
       ORDER BY ${orderBy}
-      LIMIT ${limit}`,
-      params,
-    );
+    `);
 
-    const detailRows: DetailRow[] = rows.map(r => ({
-      ot:              Number(r.OT),
-      cliente:         String(r.cliente ?? ''),
-      modelo:          String(r.modelo ?? ''),
-      chasis:          String(r.chasis ?? ''),
-      sucursal:        String(r.sucursal ?? ''),
-      estadoOt:        String(r.estado_ot ?? ''),
-      tipoServicio:    String(r.tipo_servicio ?? ''),
-      asesor:          String(r.asesor ?? ''),
-      fechaIngreso:    r.fechaingreso     ? new Date(r.fechaingreso).toISOString().split('T')[0]     : null,
-      horaIngreso:     r.hora_ingreso     ? String(r.hora_ingreso).trim() || null : null,
-      fechaCompromiso: r.fecha_compromiso ? new Date(r.fecha_compromiso).toISOString().split('T')[0] : null,
-      fechaFinalizado: r.fecha_finalizado ? new Date(r.fecha_finalizado).toISOString().split('T')[0] : null,
-      diasIngreso:     Number(r.dias_ingreso ?? 0),
-      diasRetraso:     Number(r.dias_retraso ?? 0),
-      monto:           Number(r.monto ?? 0),
+    const detailRows: DetailRow[] = result.recordset.map((row: any) => ({
+      ot:              Number(row.OT),
+      cliente:         String(row.cliente ?? ''),
+      modelo:          String(row.modelo ?? ''),
+      chasis:          String(row.chasis ?? ''),
+      sucursal:        String(row.sucursal ?? ''),
+      estadoOt:        String(row.estado_ot ?? ''),
+      tipoServicio:    String(row.tipo_servicio ?? ''),
+      asesor:          String(row.asesor ?? ''),
+      fechaIngreso:    row.fechaingreso     ? new Date(row.fechaingreso).toISOString().split('T')[0]     : null,
+      horaIngreso:     row.hora_ingreso     ? String(row.hora_ingreso).trim() || null : null,
+      fechaCompromiso: row.fecha_compromiso ? new Date(row.fecha_compromiso).toISOString().split('T')[0] : null,
+      fechaFinalizado: row.fecha_finalizado ? new Date(row.fecha_finalizado).toISOString().split('T')[0] : null,
+      diasIngreso:     Number(row.dias_ingreso ?? 0),
+      diasRetraso:     Number(row.dias_retraso ?? 0),
+      monto:           Number(row.MONTOTOTAL ?? 0),
     }));
 
     const title = kpi === 'antiguedad' && bucket
@@ -196,8 +200,7 @@ export async function GET(req: NextRequest) {
       : KPI_TITLES[kpi];
 
     const payload: DetailPayload = {
-      kpi,
-      title,
+      kpi, title,
       total:       detailRows.length,
       rows:        detailRows,
       filters:     { days, sucursal, tipo },
@@ -206,10 +209,11 @@ export async function GET(req: NextRequest) {
 
     cache.set(cacheKey, { ts: Date.now(), payload });
     return NextResponse.json(payload);
+
   } catch (err: any) {
     console.error('[reportes/dashboard/detail]', err.message);
     return NextResponse.json({ error: 'Error al cargar el detalle del KPI' }, { status: 500 });
   } finally {
-    await connection?.end();
+    await pool?.close();
   }
 }
