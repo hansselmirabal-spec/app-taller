@@ -1,0 +1,89 @@
+name: Deploy QAS
+
+on:
+  push:
+    branches: [develop]
+
+env:
+  REGISTRY: ghcr.io
+  ORG: hansselmirabal-spec
+
+jobs:
+  build-api:
+    name: Build API image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: ./apps/api
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.ORG }}/app-taller-api:qas
+            ${{ env.REGISTRY }}/${{ env.ORG }}/app-taller-api:qas-${{ github.sha }}
+
+  build-web:
+    name: Build Web image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: ./apps/web
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=http://53.103.13.238:8090/api/v1
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.ORG }}/app-taller-web:qas
+            ${{ env.REGISTRY }}/${{ env.ORG }}/app-taller-web:qas-${{ github.sha }}
+
+  deploy:
+    name: Deploy to QAS server
+    needs: [build-api, build-web]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull and restart QAS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.QAS_HOST }}
+          username: ${{ secrets.QAS_USER }}
+          key: ${{ secrets.QAS_SSH_KEY }}
+          script: |
+            cd /opt/stacks/app-taller
+            docker compose -f docker-compose.qas.yml --project-name app-taller-qas pull
+            docker compose -f docker-compose.qas.yml --project-name app-taller-qas up -d
+            docker image prune -f
+
+      - name: Health check QAS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.QAS_HOST }}
+          username: ${{ secrets.QAS_USER }}
+          key: ${{ secrets.QAS_SSH_KEY }}
+          script: |
+            for i in $(seq 1 12); do
+              echo "Attempt $i/12..."
+              if curl -sf http://localhost:8090/api/v1/health; then
+                echo "QAS healthy!"
+                exit 0
+              fi
+              sleep 5
+            done
+            echo "Health check failed after 60s"
+            exit 1
