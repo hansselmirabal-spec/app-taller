@@ -17,7 +17,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
       credentials: 'include',
     }).then(res => {
       if (res.status === 401) {
-        clearAuth().finally(() => router.replace('/login?expired=1'));
+        clearAuth().finally(() => router.replace('/login'));
       }
     }).catch(() => {});
   }, [router]);
