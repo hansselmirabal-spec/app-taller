@@ -32,7 +32,7 @@
     "react-grid-layout": "^2.2.3",
     "recharts": "^3.8.1",
     "tailwind-merge": "^2.3.0",
-    "mssql": "^11.0.1"
+    "mssql": "^10.0.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.45.0",

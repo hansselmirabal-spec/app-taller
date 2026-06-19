@@ -17,7 +17,7 @@ ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_MOCK_MODE=false
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_MOCK_MODE=$NEXT_PUBLIC_MOCK_MODE
-RUN pnpm add mysql2 mssql
+RUN pnpm add mysql2 mssql@10
 RUN pnpm build
 
 # ── imagen final (standalone) ─────────────────────────────────────────────────
