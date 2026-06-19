@@ -32,7 +32,7 @@ export function proxy(request: NextRequest) {
 
   if (!isTokenValid(token)) {
     const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('expired', '1');
+    if (token) loginUrl.searchParams.set('expired', '1');
     return NextResponse.redirect(loginUrl);
   }
 
