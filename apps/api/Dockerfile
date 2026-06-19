@@ -1,24 +1,32 @@
+# ── base ──────────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS base
 WORKDIR /app
 RUN npm install -g pnpm
 
+# ── deps (dev+prod para build) ────────────────────────────────────────────────
 FROM base AS deps
 COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm install
 
-FROM base AS dev
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-EXPOSE 3001
-CMD ["pnpm", "dev"]
-
+# ── build ─────────────────────────────────────────────────────────────────────
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+RUN pnpm add -D @types/express dotenv
 RUN pnpm build
 
-FROM base AS production
+# ── prod deps solo ────────────────────────────────────────────────────────────
+FROM base AS prod-deps
+COPY package.json pnpm-lock.yaml* ./
+RUN pnpm install --prod
+
+# ── imagen final ──────────────────────────────────────────────────────────────
+FROM node:20-alpine AS production
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
-COPY --from=deps /app/node_modules ./node_modules
+
 EXPOSE 3001
 CMD ["node", "dist/main"]

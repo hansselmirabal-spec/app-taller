@@ -34,17 +34,32 @@ export class Appointment {
   @Column({ name: 'customer_name', length: 100 })
   customerName: string;
 
-  @Column({ length: 20 })
+  @Column({ length: 50 })
   plate: string;
 
   @Column({ default: 'scheduled' })
-  status: 'scheduled' | 'in_progress' | 'done' | 'cancelled';
+  status: 'scheduled' | 'in_progress' | 'done' | 'cancelled' | 'paused';
+
+  @Column({ name: 'advisor_code', type: 'varchar', length: 30, nullable: true })
+  advisorCode: string | null;
+
+  @Column({ name: 'advisor_name', type: 'varchar', length: 100, nullable: true })
+  advisorName: string | null;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  phone: string | null;
+
+  @Column({ name: 'vehicle_description', type: 'varchar', length: 120, nullable: true })
+  vehicleDescription: string | null;
 
   @Column({ type: 'text', nullable: true })
   notes: string;
 
   @Column({ name: 'created_by' })
   createdBy: string;
+
+  @Column({ name: 'estimated_finish_date', type: 'date', nullable: true })
+  estimatedFinishDate: string | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

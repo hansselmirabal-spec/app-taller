@@ -6,7 +6,7 @@ const AppDataSource = new DataSource({
   type: 'postgres',
   url: process.env.DATABASE_URL || 'postgresql://taller_user:taller_pass@localhost:5432/taller_db',
   entities: [__dirname + '/../**/*.entity.ts'],
-  synchronize: true,
+  synchronize: process.env.NODE_ENV !== 'production',
 });
 
 async function seed() {
@@ -14,7 +14,44 @@ async function seed() {
 
   const userRepo = AppDataSource.getRepository('users');
   const techRepo = AppDataSource.getRepository('technicians');
-  const stRepo = AppDataSource.getRepository('service_types');
+  const stRepo   = AppDataSource.getRepository('service_types');
+  const roleRepo = AppDataSource.getRepository('roles');
+
+  const defaultRoles = [
+    {
+      name: 'Recepcionista (Default)',
+      defaultFor: 'receptionist',
+      permissions: {
+        dashboard:    { view: true,  edit: false },
+        capacity:     { view: true,  edit: false },
+        appointments: { view: true,  edit: true  },
+        kanban:       { view: true,  edit: false },
+        reports:      { view: false, edit: false },
+        settings:     { view: false, edit: false },
+        presupuesto:  { view: false, edit: false },
+      },
+    },
+    {
+      name: 'Perito (Default)',
+      defaultFor: 'perito',
+      permissions: {
+        dashboard:    { view: true,  edit: false },
+        capacity:     { view: false, edit: false },
+        appointments: { view: false, edit: false },
+        kanban:       { view: false, edit: false },
+        reports:      { view: false, edit: false },
+        settings:     { view: false, edit: false },
+        presupuesto:  { view: true,  edit: true  },
+      },
+    },
+  ];
+  for (const r of defaultRoles) {
+    const exists = await roleRepo.findOne({ where: { defaultFor: r.defaultFor } });
+    if (!exists) {
+      await roleRepo.save(r);
+      console.log(`Default role created: ${r.name}`);
+    }
+  }
 
   const adminExists = await userRepo.findOne({ where: { email: 'admin@taller.com' } });
   if (!adminExists) {
@@ -24,7 +61,7 @@ async function seed() {
       passwordHash: await bcrypt.hash('admin1234', 10),
       role: 'admin',
     });
-    console.log('Admin created: admin@taller.com / admin1234');
+    console.log('Admin created: admin@taller.com');
   }
 
   const recepExists = await userRepo.findOne({ where: { email: 'recepcion@taller.com' } });
@@ -35,7 +72,7 @@ async function seed() {
       passwordHash: await bcrypt.hash('recep1234', 10),
       role: 'receptionist',
     });
-    console.log('Receptionist created: recepcion@taller.com / recep1234');
+    console.log('Receptionist created: recepcion@taller.com');
   }
 
   const techCount = await techRepo.count();

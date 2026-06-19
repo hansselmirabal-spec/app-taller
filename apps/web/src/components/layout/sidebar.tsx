@@ -1,40 +1,74 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, CalendarDays, ClipboardList, BookOpen,
-  Settings, LogOut, Wrench, ChevronRight, ChevronDown,
-  Users, Wrench as WrenchIcon, CalendarOff, BarChart3,
+  Settings, LogOut, ChevronRight, ChevronDown,
+  Users, Wrench, CalendarOff, BarChart3, Building2, KanbanSquare, ShieldCheck, Layers, FileSearch,
+  FileText, Package,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { clearAuth, getStoredUser } from '@/lib/auth';
+import { clearAuth, getStoredUser, getEffectivePermissions } from '@/lib/auth';
+import { can } from '@/lib/permissions';
+import { WorkshopSwitcher } from './workshop-switcher';
+import { useActiveWorkshop } from '@/hooks/use-active-workshop';
+import type { ModuleId } from '@/types';
 
-const navMain = [
-  { href: '/dashboard', label: 'Panel de Control', icon: LayoutDashboard },
-  { href: '/capacity', label: 'Calendario de Capacidad', icon: CalendarDays },
-  { href: '/appointments', label: 'Agenda', icon: ClipboardList },
-  { href: '/appointments/new', label: 'Reservas', icon: BookOpen },
-  { href: '/porteria', label: 'Reportería', icon: BarChart3 },
-];
-
-const navSettings = [
-  { href: '/settings/technicians', label: 'Técnicos', icon: Users },
-  { href: '/settings/service-types', label: 'Tipos de Servicio', icon: WrenchIcon },
-  { href: '/settings/calendar', label: 'Calendario', icon: CalendarOff },
+const NAV_MAIN: Array<{ href: string; label: string; icon: any; module: ModuleId | null; requireEdit?: boolean; bodyshopOnly?: boolean; mechanicOnly?: boolean }> = [
+  { href: '/dashboard',    label: 'Panel de Control',        icon: LayoutDashboard, module: 'dashboard'    },
+  { href: '/capacity',     label: 'Calendario de Capacidad', icon: CalendarDays,    module: 'capacity'     },
+  { href: '/calendario',   label: 'Calendario',              icon: CalendarDays,    module: 'appointments', mechanicOnly: true },
+  { href: '/appointments', label: 'Agenda',                  icon: ClipboardList,   module: 'appointments', bodyshopOnly: true },
+  { href: '/presupuesto',  label: 'Presupuestos',            icon: FileText,        module: 'presupuesto',  bodyshopOnly: true },
+  { href: '/recursos',     label: 'Recursos',                icon: Package,         module: null,           bodyshopOnly: true },
+  { href: '/porteria',     label: 'Reportería',              icon: BarChart3,       module: 'reports'      },
+  { href: '/kanban',       label: 'Seguimiento',             icon: KanbanSquare,    module: 'kanban'       },
+  { href: '/seguimiento',  label: 'OTs Abiertas',            icon: FileSearch,      module: null           },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const user = getStoredUser();
+  const [mounted, setMounted] = useState(false);
   const inSettings = pathname.startsWith('/settings');
   const [settingsOpen, setSettingsOpen] = useState(inSettings);
+  const { isBodyshop } = useActiveWorkshop();
 
-  if (!user) return null;
+  useEffect(() => { setMounted(true); }, []);
 
-  function handleLogout() {
-    clearAuth();
+  const user = mounted ? getStoredUser() : null;
+  if (!mounted || !user) return <div style={{ width: 'var(--sidebar-width)', minWidth: 'var(--sidebar-width)' }} />;
+
+  const permissions = mounted ? getEffectivePermissions() : null;
+  const isUserAdmin = user.role === 'admin';
+
+  const navMain = NAV_MAIN.filter(item => {
+    if (item.bodyshopOnly && !isBodyshop) return false;
+    if (item.mechanicOnly && isBodyshop) return false;
+    if (!item.module || !permissions) return true;
+    if (item.requireEdit) return can(permissions, item.module, 'edit');
+    return can(permissions, item.module, 'view');
+  });
+
+  const canSeeSettings = isUserAdmin || (permissions ? can(permissions, 'settings', 'view') : false);
+
+  const navSettings = [
+    { href: '/settings/technicians',   label: 'Técnicos',                                      icon: Users      },
+    { href: '/settings/service-types', label: isBodyshop ? 'Tipos de Trabajo' : 'Tipos de Servicio', icon: Wrench },
+    { href: '/settings/calendar',      label: 'Calendario',                                    icon: CalendarOff },
+    { href: '/settings/workshops',     label: 'Talleres',                                      icon: Building2  },
+    ...(isBodyshop ? [
+      { href: '/settings/catalog', label: 'Catálogo Chapería', icon: Layers },
+    ] : []),
+    ...(isUserAdmin ? [
+      { href: '/settings/users',  label: 'Usuarios y Permisos', icon: ShieldCheck },
+      { href: '/settings/roles',  label: 'Roles',               icon: ShieldCheck },
+    ] : []),
+  ];
+
+  async function handleLogout() {
+    await clearAuth();
     router.push('/login');
   }
 
@@ -46,12 +80,9 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-screen flex-col bg-white border-r border-slate-200" style={{ width: 'var(--sidebar-width)', minWidth: 'var(--sidebar-width)' }}>
-      {/* Logo */}
-      <div className="flex items-center gap-2.5 px-5 h-14 border-b border-slate-100 flex-shrink-0">
-        <div className="h-7 w-7 rounded-lg bg-blue-600 flex items-center justify-center flex-shrink-0">
-          <Wrench className="h-3.5 w-3.5 text-white" />
-        </div>
-        <span className="text-sm font-bold text-slate-900 tracking-tight">Atelier Ops</span>
+      {/* Workshop switcher */}
+      <div className="px-3 pt-3 pb-2 border-b border-slate-100 flex-shrink-0">
+        <WorkshopSwitcher />
       </div>
 
       {/* Nav */}
@@ -74,8 +105,8 @@ export function Sidebar() {
           );
         })}
 
-        {/* Configuraciones — expandible */}
-        <div className="pt-2">
+        {/* Configuraciones */}
+        {canSeeSettings && <div className="pt-2">
           <button
             onClick={() => setSettingsOpen(o => !o)}
             className={cn(
@@ -111,7 +142,7 @@ export function Sidebar() {
               })}
             </div>
           )}
-        </div>
+        </div>}
       </nav>
 
       {/* User */}
@@ -122,7 +153,9 @@ export function Sidebar() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-semibold text-slate-900 truncate">{user.name}</p>
-            <p className="text-xs text-slate-400">{user.role === 'admin' ? 'Administrador' : 'Recepcion'}</p>
+            <p className="text-xs text-slate-400">
+              {user.role === 'admin' ? 'Administrador' : user.role === 'perito' ? 'Perito' : 'Recepcion'}
+            </p>
           </div>
           <button onClick={handleLogout} className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors" title="Cerrar sesion">
             <LogOut className="h-3.5 w-3.5" />

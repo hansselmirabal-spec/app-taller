@@ -1,16 +1,20 @@
 'use client';
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Wrench } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Wrench, Eye, EyeOff } from 'lucide-react';
 import { login } from '@/lib/api';
-import { storeAuth } from '@/lib/auth';
+import { storeAuth, mustChangePassword } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('admin@taller.com');
-  const [password, setPassword] = useState('admin1234');
+  const params = useSearchParams();
+  const expired = params.get('expired') === '1';
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -19,9 +23,11 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      const { access_token, user } = await login(email, password);
-      storeAuth(access_token, user);
-      router.push('/appointments');
+      // El backend setea cookie httpOnly auth_token automáticamente; storeAuth
+      // solo persiste el perfil para que la UI lo use sin re-fetch.
+      const { user } = await login(email, password);
+      storeAuth(user);
+      router.push(mustChangePassword() ? '/change-password' : '/appointments');
     } catch (err: any) {
       setError(err.message || 'Error al iniciar sesion');
     } finally {
@@ -41,14 +47,39 @@ export default function LoginPage() {
             <p className="text-sm text-slate-500 mt-1">Gestion de turnos y capacidad</p>
           </div>
 
+          {expired && (
+            <div className="mb-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-center">
+              Tu sesion expiro. Ingresa nuevamente.
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-slate-700">Email</label>
               <Input type="email" value={email} onChange={e => setEmail(e.target.value)} required autoFocus />
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-700">Contrasena</label>
-              <Input type="password" value={password} onChange={e => setPassword(e.target.value)} required />
+              <label className="text-sm font-medium text-slate-700">Contraseña</label>
+              <div className="relative">
+                <Input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  required
+                  className="pr-10"
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(s => !s)}
+                  tabIndex={-1}
+                  aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  title={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-700 rounded transition-colors"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
 
             {error && <p className="text-sm text-red-500 bg-red-50 border border-red-200 rounded-md px-3 py-2">{error}</p>}
@@ -56,13 +87,17 @@ export default function LoginPage() {
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Ingresando...' : 'Ingresar'}
             </Button>
+
+            <div className="text-center pt-2">
+              <Link
+                href="/forgot-password"
+                className="text-sm text-slate-500 hover:text-slate-900 transition-colors"
+              >
+                ¿Olvidaste tu contraseña?
+              </Link>
+            </div>
           </form>
 
-          <div className="mt-6 p-3 bg-slate-50 rounded-md border border-slate-200">
-            <p className="text-xs text-slate-500 font-medium mb-1">Cuentas de prueba</p>
-            <p className="text-xs text-slate-600">admin@taller.com / admin1234</p>
-            <p className="text-xs text-slate-600">recepcion@taller.com / recep1234</p>
-          </div>
         </div>
       </div>
     </div>

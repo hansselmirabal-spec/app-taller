@@ -8,6 +8,7 @@ export class CreateServiceTypeDto {
   @IsString() name: string;
   @IsNumber() @Min(0.5) durationHours: number;
   @IsOptional() @IsString() @Matches(/^#[0-9A-Fa-f]{6}$/) color?: string;
+  @IsOptional() @IsString() workshopId?: string | null;
 }
 
 export class UpdateServiceTypeDto {
@@ -15,19 +16,22 @@ export class UpdateServiceTypeDto {
   @IsOptional() @IsNumber() @Min(0.5) durationHours?: number;
   @IsOptional() @IsString() @Matches(/^#[0-9A-Fa-f]{6}$/) color?: string;
   @IsOptional() active?: boolean;
+  @IsOptional() @IsString() workshopId?: string | null;
 }
 
 @Injectable()
 export class ServiceTypesService {
   constructor(@InjectRepository(ServiceType) private repo: Repository<ServiceType>) {}
 
-  findAll() {
-    return this.repo.find({ where: { active: true }, order: { name: 'ASC' } });
+  findAll(workshopId?: string) {
+    const where: any = { active: true };
+    if (workshopId) where.workshopId = workshopId;
+    return this.repo.find({ where, order: { name: 'ASC' } });
   }
 
   async findOne(id: string) {
     const st = await this.repo.findOne({ where: { id } });
-    if (!st) throw new NotFoundException('Service type not found');
+    if (!st) throw new NotFoundException('Tipo de servicio no encontrado');
     return st;
   }
 

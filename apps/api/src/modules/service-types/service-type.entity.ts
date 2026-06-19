@@ -16,4 +16,10 @@ export class ServiceType {
 
   @Column({ default: true })
   active: boolean;
+
+  @Column({ name: 'workshop_id', type: 'varchar', nullable: true })
+  workshopId: string | null;
+
+  @Column({ name: 'specialty_name', type: 'varchar', length: 50, nullable: true })
+  specialtyName: string | null;
 }

@@ -7,29 +7,41 @@ import { Technician } from './technician.entity';
 export class CreateTechnicianDto {
   @IsString() name: string;
   @IsOptional() @IsNumber() @Min(1) @Max(24) dailyHours?: number;
+  @IsOptional() @IsString() specialty?: string | null;
+  @IsOptional() @IsString() box?: string | null;
+  @IsOptional() @IsString() workshopName?: string | null;
+  @IsOptional() @IsString() dmsAdvisorCode?: string | null;
 }
 
 export class UpdateTechnicianDto {
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsNumber() @Min(1) @Max(24) dailyHours?: number;
   @IsOptional() @IsBoolean() active?: boolean;
+  @IsOptional() @IsString() specialty?: string | null;
+  @IsOptional() @IsString() box?: string | null;
+  @IsOptional() @IsString() workshopName?: string | null;
+  @IsOptional() @IsString() dmsAdvisorCode?: string | null;
 }
 
 @Injectable()
 export class TechniciansService {
   constructor(@InjectRepository(Technician) private repo: Repository<Technician>) {}
 
-  findAll() {
-    return this.repo.find({ where: { active: true }, order: { name: 'ASC' } });
+  findAll(workshopName?: string) {
+    const where: any = { active: true };
+    if (workshopName) where.workshopName = workshopName;
+    return this.repo.find({ where, order: { name: 'ASC' } });
   }
 
-  findAllIncludingInactive() {
-    return this.repo.find({ order: { name: 'ASC' } });
+  findAllIncludingInactive(workshopName?: string) {
+    const where: any = {};
+    if (workshopName) where.workshopName = workshopName;
+    return this.repo.find({ where: Object.keys(where).length ? where : undefined, order: { name: 'ASC' } });
   }
 
   async findOne(id: string) {
     const t = await this.repo.findOne({ where: { id } });
-    if (!t) throw new NotFoundException('Technician not found');
+    if (!t) throw new NotFoundException('Técnico no encontrado');
     return t;
   }
 

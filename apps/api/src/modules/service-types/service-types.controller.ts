@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ServiceTypesService, CreateServiceTypeDto, UpdateServiceTypeDto } from './service-types.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -12,7 +12,9 @@ export class ServiceTypesController {
   constructor(private service: ServiceTypesService) {}
 
   @Get()
-  async findAll() { return wrap(await this.service.findAll()); }
+  async findAll(@Query('workshopId') workshopId?: string) {
+    return wrap(await this.service.findAll(workshopId));
+  }
 
   @Post()
   @UseGuards(RolesGuard)
