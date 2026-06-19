@@ -181,7 +181,7 @@ export async function GET(req: NextRequest) {
         FROM MYSQL_DW.dbo.MasterOT_Condor m ${baseJoin}
         WHERE ${dateFilter} ${extraFilter}
         GROUP BY ISNULL(ts.descripcion, 'Sin tipo')
-        HAVING ISNULL(ts.descripcion, '') <> ''
+        HAVING ISNULL(ts.descripcion, 'Sin tipo') <> 'Sin tipo'
         ORDER BY total DESC
       `),
 

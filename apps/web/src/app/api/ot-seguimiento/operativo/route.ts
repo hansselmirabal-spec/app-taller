@@ -297,7 +297,7 @@ export async function GET(req: NextRequest) {
           ORDER BY suc
         `),
         pAse.request().query(`
-          SELECT TOP (300) DISTINCT LTRIM(RTRIM(m.asesor)) AS asesor
+          SELECT DISTINCT TOP 300 LTRIM(RTRIM(m.asesor)) AS asesor
           FROM dbo.MasterOT_Condor m
           ${JOIN_SUCURSAL}
           WHERE m.EstadoOT = 'Abierto'
