@@ -39,7 +39,8 @@ export async function getDmsPool(): Promise<sql.ConnectionPool> {
  * Kept only to avoid build failures on routes not yet migrated.
  * Any call to this function will throw at runtime.
  */
-export async function getDmsConnection(): Promise<never> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function getDmsConnection(): Promise<any> {
   throw new Error(
     'getDmsConnection() is deprecated. Migrate this route to use getDmsPool() with mssql.',
   );
