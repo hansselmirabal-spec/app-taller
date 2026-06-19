@@ -47,6 +47,7 @@ declare module 'mssql' {
   export const Bit: ISqlType;
   export const Float: ISqlType;
   export const Real: ISqlType;
+  export const Date: ISqlType;
   export const DateTime: ISqlType;
   export const DateTime2: ISqlType;
   export const UniqueIdentifier: ISqlType;
