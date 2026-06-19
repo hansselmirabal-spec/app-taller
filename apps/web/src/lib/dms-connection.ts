@@ -9,6 +9,7 @@
  * at build time (they will 500 at runtime, same as before the migration).
  */
 import * as sql from 'mssql';
+import type * as mysql from 'mysql2/promise';
 
 const getDmsConfig = (): sql.config => ({
   server:   process.env.DMS_HOST ?? '',
@@ -39,8 +40,7 @@ export async function getDmsPool(): Promise<sql.ConnectionPool> {
  * Kept only to avoid build failures on routes not yet migrated.
  * Any call to this function will throw at runtime.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function getDmsConnection(): Promise<any> {
+export async function getDmsConnection(): Promise<mysql.Connection> {
   throw new Error(
     'getDmsConnection() is deprecated. Migrate this route to use getDmsPool() with mssql.',
   );
