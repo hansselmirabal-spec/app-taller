@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Wrench, Eye, EyeOff } from 'lucide-react';
@@ -12,6 +12,12 @@ export default function LoginPage() {
   const router = useRouter();
   const params = useSearchParams();
   const expired = params.get('expired') === '1';
+
+  useEffect(() => {
+    localStorage.removeItem('user');
+    localStorage.removeItem('permissions');
+    localStorage.removeItem('activeWorkshopId');
+  }, []);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
