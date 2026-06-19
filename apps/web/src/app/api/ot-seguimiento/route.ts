@@ -306,6 +306,9 @@ export async function GET(req: NextRequest) {
   } catch (err: any) {
     console.error('[ot-seguimiento]', err.message);
     cache.delete(cacheKey);
-    return NextResponse.json({ error: 'Error al conectar con DMS' }, { status: 500 });
+    return NextResponse.json(
+      { data: [], summary: {}, facturadas: 0, total: 0, truncated: false, days, cachedAt: new Date().toISOString(), source: 'dms-unavailable' },
+      { headers: { 'X-Source': 'dms-unavailable' } },
+    );
   }
 }

@@ -727,14 +727,13 @@ function Empty() {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function MechanicDashboard() {
-  const [today, setToday] = useState('');
+  const [today, setToday] = useState(() => formatDate(new Date()));
   const weekRef = today;
 
   const [mode, setMode]         = useState<PeriodMode>('week');
-  const [customFrom, setFrom]   = useState('');
-  const [customTo, setTo]       = useState('');
+  const [customFrom, setFrom]   = useState(() => formatDate(new Date()));
+  const [customTo, setTo]       = useState(() => formatDate(new Date()));
 
-  // Inicializar fechas en el cliente para evitar hydration mismatch
   useEffect(() => {
     const t = formatDate(new Date());
     setToday(t);
