@@ -14,7 +14,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 const COOKIE_NAME = 'auth_token';
 const COOKIE_OPTIONS = (isProd: boolean) => ({
   httpOnly: true,
-  secure: isProd,
+  secure: isProd && process.env.COOKIE_SECURE !== 'false',
   sameSite: 'lax' as const,
   path: '/',
   maxAge: 8 * 60 * 60 * 1000, // 8h
