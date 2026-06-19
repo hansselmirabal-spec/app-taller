@@ -62,6 +62,7 @@ jobs:
 
       - name: Pull and restart QAS
         run: |
+          cp docker-compose.qas.yml /opt/stacks/app-taller/docker-compose.qas.yml
           cd /opt/stacks/app-taller
           docker compose -f docker-compose.qas.yml --project-name app-taller-qas pull
           docker compose -f docker-compose.qas.yml --project-name app-taller-qas up -d

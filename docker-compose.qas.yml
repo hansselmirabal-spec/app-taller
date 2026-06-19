@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: app_taller_qas
+      POSTGRES_USER: taller_qas_user
+      POSTGRES_PASSWORD: T4ll3rQAS_2026!
+    expose:
+      - "5432"
+    volumes:
+      - postgres_qas_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taller_qas_user -d app_taller_qas"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: ghcr.io/hansselmirabal-spec/app-taller-api:qas
+    restart: always
+    expose:
+      - "3001"
+    environment:
+      DATABASE_URL: postgresql://taller_qas_user:T4ll3rQAS_2026!@postgres:5432/app_taller_qas
+      JWT_SECRET: JVrN1Mm6P0dGQuEuQ8BrP9tgsqfklWWWjC0eO/g9Cg6K3NvIzcp6I5s9D7Q92jQv
+      PORT: 3001
+      NODE_ENV: production
+      FRONTEND_URL: http://53.103.13.238:8090
+      SMTP_HOST: ""
+      SMTP_PORT: 25
+      SMTP_FROM: ""
+      APP_NAME: App Taller QAS
+      COOKIE_SECURE: "false"
+      DB_SYNC: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    image: ghcr.io/hansselmirabal-spec/app-taller-web:qas
+    restart: always
+    expose:
+      - "3000"
+    environment:
+      DMS_HOST: "53.103.13.200"
+      DMS_PORT: "1433"
+      DMS_USER: "ituser"
+      DMS_PASSWORD: "123456ituser"
+      DMS_DATABASE: "MYSQL_DW"
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "8090:80"
+    volumes:
+      - /opt/stacks/app-taller/nginx/nginx.qas.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - web
+      - api
+
+volumes:
+  postgres_qas_data:
+    external: true
+    name: app-taller-qas_postgres_qas_data
