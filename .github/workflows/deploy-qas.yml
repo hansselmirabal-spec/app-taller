@@ -65,7 +65,7 @@ jobs:
           cp docker-compose.qas.yml /opt/stacks/app-taller/docker-compose.qas.yml
           cd /opt/stacks/app-taller
           docker compose -f docker-compose.qas.yml --project-name app-taller-qas pull
-          docker compose -f docker-compose.qas.yml --project-name app-taller-qas up -d
+          docker compose -f docker-compose.qas.yml --project-name app-taller-qas up -d --force-recreate --remove-orphans
           docker image prune -f
 
       - name: Update and reload nginx

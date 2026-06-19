@@ -75,7 +75,7 @@ export async function GET(
           ISNULL(ts.descripcion, '')                 AS TipoServicio,
           ISNULL(CAST(m.monto AS FLOAT), 0)          AS MONTOTOTAL,
           DATEDIFF(DAY, m.fechaingreso, GETDATE())   AS DIASINGRESO,
-          ISNULL(m.observaciones, '')                AS OBSERVACIONES,
+          ''                                         AS OBSERVACIONES,
           NULL                                       AS TIEMPODEENTREGA,
           m.fechaingreso,
           m.horaingreso,
