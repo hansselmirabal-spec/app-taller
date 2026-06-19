@@ -57,35 +57,25 @@ jobs:
   deploy:
     name: Deploy to PROD server
     needs: [build-api, build-web]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, app-taller-server]
     environment: production
     steps:
       - name: Pull and restart PROD
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_USER }}
-          key: ${{ secrets.PROD_SSH_KEY }}
-          script: |
-            cd /opt/stacks/app-taller
-            docker compose -f docker-compose.portainer.yml --project-name app-taller pull
-            docker compose -f docker-compose.portainer.yml --project-name app-taller up -d
-            docker image prune -f
+        run: |
+          cd /opt/stacks/app-taller
+          docker compose -f docker-compose.portainer.yml --project-name app-taller pull
+          docker compose -f docker-compose.portainer.yml --project-name app-taller up -d
+          docker image prune -f
 
       - name: Health check PROD
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_USER }}
-          key: ${{ secrets.PROD_SSH_KEY }}
-          script: |
-            for i in $(seq 1 12); do
-              echo "Attempt $i/12..."
-              if curl -sf http://localhost:8002/api/v1/health; then
-                echo "PROD healthy!"
-                exit 0
-              fi
-              sleep 5
-            done
-            echo "Health check failed after 60s"
-            exit 1
+        run: |
+          for i in $(seq 1 12); do
+            echo "Attempt $i/12..."
+            if curl -sf http://localhost:8002/api/v1/health; then
+              echo "PROD healthy!"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Health check failed after 60s"
+          exit 1

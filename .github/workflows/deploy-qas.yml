@@ -56,34 +56,24 @@ jobs:
   deploy:
     name: Deploy to QAS server
     needs: [build-api, build-web]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, app-taller-server]
     steps:
       - name: Pull and restart QAS
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.QAS_HOST }}
-          username: ${{ secrets.QAS_USER }}
-          key: ${{ secrets.QAS_SSH_KEY }}
-          script: |
-            cd /opt/stacks/app-taller
-            docker compose -f docker-compose.qas.yml --project-name app-taller-qas pull
-            docker compose -f docker-compose.qas.yml --project-name app-taller-qas up -d
-            docker image prune -f
+        run: |
+          cd /opt/stacks/app-taller
+          docker compose -f docker-compose.qas.yml --project-name app-taller-qas pull
+          docker compose -f docker-compose.qas.yml --project-name app-taller-qas up -d
+          docker image prune -f
 
       - name: Health check QAS
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.QAS_HOST }}
-          username: ${{ secrets.QAS_USER }}
-          key: ${{ secrets.QAS_SSH_KEY }}
-          script: |
-            for i in $(seq 1 12); do
-              echo "Attempt $i/12..."
-              if curl -sf http://localhost:8090/api/v1/health; then
-                echo "QAS healthy!"
-                exit 0
-              fi
-              sleep 5
-            done
-            echo "Health check failed after 60s"
-            exit 1
+        run: |
+          for i in $(seq 1 12); do
+            echo "Attempt $i/12..."
+            if curl -sf http://localhost:8090/api/v1/health; then
+              echo "QAS healthy!"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Health check failed after 60s"
+          exit 1
