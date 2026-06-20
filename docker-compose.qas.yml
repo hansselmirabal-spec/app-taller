@@ -48,6 +48,7 @@ services:
       DMS_USER: "ituser"
       DMS_PASSWORD: "123456ituser"
       DMS_DATABASE: "MYSQL_DW"
+      INTERNAL_API_URL: "http://api:3001"
     depends_on:
       - api
 

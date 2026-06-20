@@ -5,6 +5,8 @@ import { DataSource, Repository } from 'typeorm';
 import * as sql from 'mssql';
 import { DmsSnapshot } from './dms-snapshot.entity';
 import { DmsAdvisorSlot } from './dms-advisor-slot.entity';
+import { DmsOtRow } from './dms-ot-row.entity';
+import { DmsSyncState } from './dms-sync-state.entity';
 
 const getDmsConfig = (): sql.config => ({
   server:   process.env.DMS_HOST ?? '',
@@ -31,6 +33,12 @@ async function getDmsPool(): Promise<sql.ConnectionPool> {
 }
 
 const HARD_LIMIT = 10_000;
+
+// OT rows sync interval: default 30 minutes (1_800_000 ms). Override via DMS_SYNC_INTERVAL_MS.
+const OT_SYNC_INTERVAL_MS = Number(process.env.DMS_SYNC_INTERVAL_MS ?? 1_800_000);
+
+// Delay before the first OT rows sync tick after startup (60 seconds).
+const OT_STARTUP_DELAY_MS = 60_000;
 
 // Combinaciones de scope que el worker pre-genera. Cubren los rangos más usados
 // del frontend. Combinaciones raras (ej: filtro por tipo) caen al fallback.
@@ -75,11 +83,21 @@ export class DmsSyncService implements OnApplicationBootstrap {
   private lastError: string | null = null;
   private consecutiveFailures = 0;
 
+  // Tracks when we last ran syncOtRows() successfully. Used to gate the next run
+  // based on OT_SYNC_INTERVAL_MS without changing the existing cron cadence.
+  private lastOtSyncAt: Date | null = null;
+  // True after the initial 60s startup delay has elapsed for OT sync.
+  private otSyncReady = false;
+
   constructor(
     @InjectRepository(DmsSnapshot)
     private snapshotRepo: Repository<DmsSnapshot>,
     @InjectRepository(DmsAdvisorSlot)
     private advisorSlotRepo: Repository<DmsAdvisorSlot>,
+    @InjectRepository(DmsOtRow)
+    private otRowRepo: Repository<DmsOtRow>,
+    @InjectRepository(DmsSyncState)
+    private stateRepo: Repository<DmsSyncState>,
     @InjectDataSource()
     private dataSource: DataSource,
   ) {}
@@ -107,6 +125,12 @@ export class DmsSyncService implements OnApplicationBootstrap {
     }
     this.logger.log('Sync inicial del DMS al arrancar...');
     void this.syncAll().catch(err => this.logger.error('Sync inicial falló', err));
+
+    // OT rows sync must wait 60 seconds after startup before the first tick.
+    setTimeout(() => {
+      this.otSyncReady = true;
+      this.logger.log('OT rows sync habilitado (60s startup delay transcurrido)');
+    }, OT_STARTUP_DELAY_MS);
   }
 
   // Cron principal: cada 5 minutos refresca todos los presets.
@@ -162,6 +186,10 @@ export class DmsSyncService implements OnApplicationBootstrap {
       this.syncing = false;
       await this.releaseLock();
     }
+
+    // OT rows sync runs independently with its own cadence and error isolation.
+    // A failure here must NOT affect the advisor-slot path above.
+    await this.maybeRunOtRowsSync();
   }
 
   private async tryAcquireLock(): Promise<boolean> {
@@ -506,6 +534,180 @@ export class DmsSyncService implements OnApplicationBootstrap {
     if (existing) {
       existing.lastError = message.slice(0, 500);
       await this.snapshotRepo.save(existing);
+    }
+  }
+
+  // ── OT rows materialized sync ────────────────────────────────────────────────
+
+  // Gate: respects the 60s startup delay and the OT_SYNC_INTERVAL_MS cadence.
+  // Called from syncAll() after the advisor-slot branch — failure here is fully isolated.
+  async maybeRunOtRowsSync(): Promise<void> {
+    if (!this.otSyncReady) {
+      this.logger.debug('OT rows sync omitido: aún en período de startup delay');
+      return;
+    }
+    if (this.lastOtSyncAt !== null) {
+      const elapsed = Date.now() - this.lastOtSyncAt.getTime();
+      if (elapsed < OT_SYNC_INTERVAL_MS) {
+        this.logger.debug(
+          `OT rows sync omitido: solo transcurrieron ${Math.round(elapsed / 1000)}s de ` +
+          `${Math.round(OT_SYNC_INTERVAL_MS / 1000)}s requeridos`,
+        );
+        return;
+      }
+    }
+    try {
+      await this.syncOtRows();
+    } catch (err: any) {
+      // Log but never throw — advisor-slot path must be unaffected.
+      this.logger.error(`syncOtRows falló: ${err.message}`, err.stack);
+    }
+  }
+
+  // Upserts the full open set + recently-closed OTs from DMS into dms_ot_rows.
+  // Uses raw SQL ON CONFLICT for atomic batch upsert (same pattern as advisor-slots).
+  async syncOtRows(): Promise<void> {
+    if (!process.env.DMS_HOST) {
+      this.logger.warn('DMS_HOST no configurado, salteando syncOtRows');
+      return;
+    }
+
+    const tickStart = new Date();
+
+    // 1. Read last sync state
+    const state = await this.stateRepo.findOne({ where: { kind: 'ot_rows' } });
+    const lastSync = state?.lastSyncAt ?? null;
+
+    // 2. Fetch open OTs (full refresh of open set)
+    const openOts = await this.fetchOtsFromDms({ onlyOpen: true });
+
+    // 3. Fetch recently closed OTs with 2h overlap to catch late-close edge cases
+    const closedOts = lastSync
+      ? await this.fetchOtsFromDms({
+          closedSince: new Date(lastSync.getTime() - 2 * 60 * 60 * 1000),
+        })
+      : [];
+
+    // 4. Upsert all rows
+    const allOts = [...openOts, ...closedOts];
+    if (allOts.length > 0) {
+      const BATCH = 500;
+      for (let i = 0; i < allOts.length; i += BATCH) {
+        await this.dataSource
+          .createQueryBuilder()
+          .insert()
+          .into(DmsOtRow)
+          .values(allOts.slice(i, i + BATCH))
+          .orUpdate(
+            [
+              'nrocliente', 'nombrecliente', 'chasis', 'modelo',
+              'estado_ot', 'estado_taller', 'estado_financiero',
+              'asesor', 'taller', 'sucursal_desc',
+              'fecha_ingreso', 'hora_ingreso',
+              'fecha_compromiso_cliente', 'fecha_cierre_ot', 'fecha_fin_taller',
+              'monto', 'idtiposervicio', 'tipo_desc', 'tipo_abrev', 'codcliente', 'synced_at',
+            ],
+            ['nroot'],
+          )
+          .execute();
+      }
+    }
+
+    // 5. Update sync state
+    await this.stateRepo.upsert(
+      {
+        kind:         'ot_rows',
+        lastSyncAt:   tickStart,
+        openCount:    openOts.length,
+        totalSynced:  allOts.length,
+        errorMessage: null as unknown as string,
+        updatedAt:    new Date(),
+      },
+      ['kind'],
+    );
+
+    this.lastOtSyncAt = tickStart;
+    this.logger.log(
+      `OK syncOtRows → ${openOts.length} open + ${closedOts.length} closed = ${allOts.length} total`,
+    );
+  }
+
+  private async fetchOtsFromDms(
+    opts: { onlyOpen?: boolean; closedSince?: Date },
+  ): Promise<Partial<DmsOtRow>[]> {
+    let pool: sql.ConnectionPool | null = null;
+    try {
+      pool = await getDmsPool();
+      const request = pool.request();
+
+      let whereClause: string;
+      if (opts.onlyOpen) {
+        whereClause = "WHERE m.EstadoOT = 'Abierto'";
+      } else if (opts.closedSince) {
+        request.input('closedSince', sql.DateTime, opts.closedSince);
+        whereClause = 'WHERE m.fecha_cierre_ot >= @closedSince';
+      } else {
+        whereClause = '';
+      }
+
+      const result = await request.query(`
+        SELECT
+          m.nroot,
+          LTRIM(RTRIM(m.nrocliente))             AS nrocliente,
+          LTRIM(RTRIM(m.nombrecliente))           AS nombrecliente,
+          LTRIM(RTRIM(m.chasis))                  AS chasis,
+          LTRIM(RTRIM(m.modelo))                  AS modelo,
+          LTRIM(RTRIM(m.EstadoOT))               AS estado_ot,
+          LTRIM(RTRIM(m.EstadoTaller))            AS estado_taller,
+          LTRIM(RTRIM(m.Estadofinanciero))        AS estado_financiero,
+          LTRIM(RTRIM(m.asesor))                  AS asesor,
+          m.taller,
+          ISNULL(LTRIM(RTRIM(s.Descripcion)), '') AS sucursal_desc,
+          m.fechaingreso                           AS fecha_ingreso,
+          m.horaingreso                            AS hora_ingreso,
+          m.fechacompromisoCliente                 AS fecha_compromiso_cliente,
+          m.fecha_cierre_ot,
+          m.fecha_fin_taller,
+          CAST(m.monto AS FLOAT)                  AS monto,
+          m.idtiposervicio,
+          ISNULL(LTRIM(RTRIM(ts.descripcion)), '') AS tipo_desc,
+          ISNULL(LTRIM(RTRIM(ts.abreviatura)), '') AS tipo_abrev,
+          LTRIM(RTRIM(m.codcliente))              AS codcliente
+        FROM dbo.MasterOT_Condor m
+        LEFT JOIN dbo.controltiempo_DimSucursal s
+               ON s.IdSucursal = m.taller
+        LEFT JOIN dbo.controltiempo_DimTipoServicio ts
+               ON ts.idtipo_servicio = m.idtiposervicio
+        ${whereClause}
+      `);
+
+      const now = new Date();
+      return (result.recordset as any[]).map(r => ({
+        nroot:                  Number(r.nroot),
+        nrocliente:             String(r.nrocliente ?? '').trim() || null,
+        nombrecliente:          String(r.nombrecliente ?? '').trim() || null,
+        chasis:                 String(r.chasis ?? '').trim() || null,
+        modelo:                 String(r.modelo ?? '').trim() || null,
+        estadoOt:               String(r.estado_ot ?? '').trim() || null,
+        estadoTaller:           String(r.estado_taller ?? '').trim() || null,
+        estadoFinanciero:       String(r.estado_financiero ?? '').trim() || null,
+        asesor:                 String(r.asesor ?? '').trim() || null,
+        taller:                 r.taller != null ? Number(r.taller) : null,
+        sucursalDesc:           String(r.sucursal_desc ?? '').trim() || null,
+        fechaIngreso:           r.fecha_ingreso ? new Date(r.fecha_ingreso) : null,
+        horaIngreso:            r.hora_ingreso ? String(r.hora_ingreso).trim() || null : null,
+        fechaCompromisoCliente: r.fecha_compromiso_cliente ? new Date(r.fecha_compromiso_cliente) : null,
+        fechaCierreOt:          r.fecha_cierre_ot ? new Date(r.fecha_cierre_ot) : null,
+        fechaFinTaller:         r.fecha_fin_taller ? new Date(r.fecha_fin_taller) : null,
+        monto:                  r.monto != null ? Number(r.monto) : null,
+        idTipoServicio:         r.idtiposervicio != null ? Number(r.idtiposervicio) : null,
+        tipoDesc:               String(r.tipo_desc ?? '').trim() || null,
+        tipoAbrev:              String(r.tipo_abrev ?? '').trim() || null,
+        codcliente:             String(r.codcliente ?? '').trim() || null,
+        syncedAt:               now,
+      }));
+    } finally {
+      await pool?.close();
     }
   }
 
