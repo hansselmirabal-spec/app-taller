@@ -6,7 +6,6 @@ export interface VehicleData {
   plate:        string;
   chassis:      string;
   model:        string;
-  customerCode: string;
   customerName: string;
 }
 

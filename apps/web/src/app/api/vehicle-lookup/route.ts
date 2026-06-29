@@ -19,7 +19,6 @@ export async function GET(req: NextRequest) {
           ISNULL(UPPER(LTRIM(RTRIM(m.Matricula))), '') AS Matricula,
           ISNULL(m.chasis,        '')                  AS Chasis,
           ISNULL(m.modelo,        '')                  AS Modelo,
-          ISNULL(m.codcliente,    '')                  AS CodCliente,
           ISNULL(m.nombrecliente, '')                  AS NombreCliente
         FROM MYSQL_DW.dbo.MasterOT_Condor m
         WHERE UPPER(LTRIM(RTRIM(m.Matricula))) = @plate
@@ -37,7 +36,6 @@ export async function GET(req: NextRequest) {
       plate:        String(r.Matricula).trim() || raw,
       chassis:      String(r.Chasis).trim(),
       model:        String(r.Modelo).trim(),
-      customerCode: String(r.CodCliente).trim(),
       customerName: String(r.NombreCliente).trim(),
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
