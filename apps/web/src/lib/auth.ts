@@ -56,9 +56,14 @@ export function isAdmin(): boolean {
   return getStoredUser()?.role === 'admin';
 }
 
+export function isAdminOrManager(): boolean {
+  const role = getStoredUser()?.role;
+  return role === 'admin' || role === 'admin_taller';
+}
+
 export function getEffectivePermissions(): Permissions {
   const user = getStoredUser();
   if (!user) return {} as Permissions;
-  if (user.role === 'admin') return FULL_PERMISSIONS;
+  if (user.role === 'admin' || user.role === 'admin_taller') return FULL_PERMISSIONS;
   return getStoredPermissions() ?? RECEPTIONIST_PERMISSIONS;
 }

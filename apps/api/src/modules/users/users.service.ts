@@ -12,7 +12,7 @@ import { MailService } from '../mail/mail.service';
 export class CreateUserDto {
   @IsString() name: string;
   @IsEmail() email: string;
-  @IsEnum(['admin', 'receptionist', 'perito']) role: 'admin' | 'receptionist' | 'perito';
+  @IsEnum(['admin', 'admin_taller', 'receptionist', 'perito']) role: 'admin' | 'admin_taller' | 'receptionist' | 'perito';
   @IsOptional() roleId?: string | null;
   @IsOptional() allowedWorkshopIds?: string[] | null;
 }
@@ -20,7 +20,7 @@ export class CreateUserDto {
 export class UpdateUserDto {
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsString() @MinLength(8) password?: string;
-  @IsOptional() @IsEnum(['admin', 'receptionist', 'perito']) role?: 'admin' | 'receptionist' | 'perito';
+  @IsOptional() @IsEnum(['admin', 'admin_taller', 'receptionist', 'perito']) role?: 'admin' | 'admin_taller' | 'receptionist' | 'perito';
   @IsOptional() @IsBoolean() active?: boolean;
   @IsOptional() roleId?: string | null;
   @IsOptional() allowedWorkshopIds?: string[] | null;
@@ -103,7 +103,7 @@ export class UsersService {
   }
 
   resolvePermissions(user: User): Permissions {
-    if (user.role === 'admin') return buildFullPermissions();
+    if (user.role === 'admin' || user.role === 'admin_taller') return buildFullPermissions();
     if (user.customRole?.permissions) return user.customRole.permissions;
     if (user.role === 'perito') return buildDefaultPeritoPermissions();
     return buildDefaultReceptionistPermissions();

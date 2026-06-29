@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { isAdmin } from '@/lib/auth';
+import { isAdmin, isAdminOrManager } from '@/lib/auth';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { cn } from '@/lib/utils';
@@ -20,18 +20,21 @@ import type { User, Role, Workshop } from '@/types';
 
 const ROLE_LABELS: Record<string, string> = {
   admin:        'Administrador',
+  admin_taller: 'Admin Taller',
   receptionist: 'Recepción',
   perito:       'Perito',
 };
 
 function RoleBadge({ role }: { role: string }) {
+  const isFullAdmin = role === 'admin';
+  const isManager   = role === 'admin_taller';
   return (
     <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${
-      role === 'admin'
-        ? 'bg-purple-100 text-purple-700'
-        : 'bg-blue-100 text-blue-700'
+      isFullAdmin ? 'bg-purple-100 text-purple-700'
+      : isManager ? 'bg-amber-100 text-amber-700'
+      : 'bg-blue-100 text-blue-700'
     }`}>
-      {role === 'admin' ? <ShieldCheck className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
+      {(isFullAdmin || isManager) ? <ShieldCheck className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
       {ROLE_LABELS[role] ?? role}
     </span>
   );
@@ -160,20 +163,21 @@ function RoleSelector({
   onSystemRoleChange,
   onCustomRoleChange,
 }: {
-  systemRole: 'admin' | 'receptionist' | 'perito';
+  systemRole: User['role'];
   customRoleId: string | null;
   roles: Role[];
-  onSystemRoleChange: (r: 'admin' | 'receptionist' | 'perito') => void;
+  onSystemRoleChange: (r: User['role']) => void;
   onCustomRoleChange: (id: string | null) => void;
 }) {
   return (
     <div className="space-y-2">
       <label className="text-xs font-medium text-slate-600">Acceso base</label>
-      <Select value={systemRole} onValueChange={v => { onSystemRoleChange(v as any); if (v === 'admin') onCustomRoleChange(null); }}>
+      <Select value={systemRole} onValueChange={v => { onSystemRoleChange(v as any); if (v === 'admin' || v === 'admin_taller') onCustomRoleChange(null); }}>
         <SelectTrigger><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="receptionist">Recepción</SelectItem>
           <SelectItem value="perito">Perito</SelectItem>
+          <SelectItem value="admin_taller">Admin Taller (acceso total — sin crear usuarios)</SelectItem>
           <SelectItem value="admin">Administrador (acceso total)</SelectItem>
         </SelectContent>
       </Select>
@@ -218,7 +222,7 @@ function CreateUserForm({ onClose }: { onClose: () => void }) {
   const { data: workshops = [] } = useWorkshops();
   const [name, setName]                 = useState('');
   const [email, setEmail]               = useState('');
-  const [role, setRole]                 = useState<'admin' | 'receptionist' | 'perito'>('receptionist');
+  const [role, setRole]                 = useState<User['role']>('receptionist');
   const [customRoleId, setCustomRoleId] = useState<string | null>(null);
   const [allowedWorkshopIds, setAllowedWorkshopIds] = useState<string[] | null>(null);
   const [error, setError]               = useState('');
@@ -258,14 +262,14 @@ function CreateUserForm({ onClose }: { onClose: () => void }) {
         systemRole={role}
         customRoleId={customRoleId}
         roles={roles}
-        onSystemRoleChange={r => { setRole(r); if (r === 'admin') setCustomRoleId(null); }}
+        onSystemRoleChange={r => { setRole(r); if (r === 'admin' || r === 'admin_taller') setCustomRoleId(null); }}
         onCustomRoleChange={setCustomRoleId}
       />
 
       <WorkshopSelector
         workshops={workshops}
         selected={allowedWorkshopIds}
-        isAdmin={role === 'admin'}
+        isAdmin={role === 'admin' || role === 'admin_taller'}
         onChange={setAllowedWorkshopIds}
       />
 
@@ -288,7 +292,7 @@ function EditUserModal({ user, onClose }: { user: User; onClose: () => void }) {
   const { data: roles = [] }     = useRoles();
   const { data: workshops = [] } = useWorkshops();
   const [name, setName]                 = useState(user.name);
-  const [role, setRole]                 = useState<'admin' | 'receptionist' | 'perito'>(user.role as 'admin' | 'receptionist' | 'perito');
+  const [role, setRole]                 = useState<User['role']>(user.role);
   const [customRoleId, setCustomRoleId] = useState<string | null>(user.roleId ?? null);
   const [allowedWorkshopIds, setAllowedWorkshopIds] = useState<string[] | null>(user.allowedWorkshopIds ?? null);
   const [active, setActive]             = useState(user.active);
@@ -338,7 +342,7 @@ function EditUserModal({ user, onClose }: { user: User; onClose: () => void }) {
               systemRole={role}
               customRoleId={customRoleId}
               roles={roles}
-              onSystemRoleChange={r => { setRole(r); if (r === 'admin') setCustomRoleId(null); }}
+              onSystemRoleChange={r => { setRole(r); if (r === 'admin' || r === 'admin_taller') setCustomRoleId(null); }}
               onCustomRoleChange={setCustomRoleId}
             />
             <div className="space-y-1">
@@ -356,7 +360,7 @@ function EditUserModal({ user, onClose }: { user: User; onClose: () => void }) {
           <WorkshopSelector
             workshops={workshops}
             selected={allowedWorkshopIds}
-            isAdmin={role === 'admin'}
+            isAdmin={role === 'admin' || role === 'admin_taller'}
             onChange={setAllowedWorkshopIds}
           />
 
@@ -413,11 +417,11 @@ export default function UsersSettingsPage() {
     setMounted(true);
     const a = isAdmin();
     setAdmin(a);
-    if (!a) router.replace('/dashboard');
+    if (!isAdminOrManager()) router.replace('/dashboard');
   }, [router]);
 
   if (!mounted) return null;
-  if (!admin) return null;
+  if (!isAdminOrManager()) return null;
 
   function handleToggleActive(user: User) {
     if (!confirm(`¿${user.active ? 'Desactivar' : 'Activar'} al usuario "${user.name}"?`)) return;
@@ -436,9 +440,11 @@ export default function UsersSettingsPage() {
             <h1 className="text-xl font-semibold text-slate-900">Gestión de Usuarios</h1>
             <p className="text-xs text-slate-500 mt-0.5">{users.length} usuario{users.length !== 1 ? 's' : ''} registrado{users.length !== 1 ? 's' : ''}</p>
           </div>
-          <Button size="sm" onClick={() => setShowForm(s => !s)}>
-            <Plus className="h-4 w-4 mr-1" /> Nuevo usuario
-          </Button>
+          {admin && (
+            <Button size="sm" onClick={() => setShowForm(s => !s)}>
+              <Plus className="h-4 w-4 mr-1" /> Nuevo usuario
+            </Button>
+          )}
         </div>
 
         {showForm && (
@@ -525,7 +531,9 @@ function UserRow({
     <div className="flex items-center gap-4 bg-white border border-slate-200 rounded-xl px-4 py-3 hover:border-slate-300 transition-colors">
       {/* Avatar */}
       <div className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold ${
-        user.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+        user.role === 'admin' ? 'bg-purple-100 text-purple-700'
+        : user.role === 'admin_taller' ? 'bg-amber-100 text-amber-700'
+        : 'bg-blue-100 text-blue-700'
       }`}>
         {user.name.charAt(0).toUpperCase()}
       </div>
@@ -545,7 +553,7 @@ function UserRow({
         </div>
         <p className="text-xs text-slate-400 truncate">{user.email}</p>
         {/* Workshop badges */}
-        {user.role !== 'admin' && user.allowedWorkshopIds && user.allowedWorkshopIds.length > 0 && (
+        {user.role !== 'admin' && user.role !== 'admin_taller' && user.allowedWorkshopIds && user.allowedWorkshopIds.length > 0 && (
           <div className="flex items-center gap-1 mt-1 flex-wrap">
             {user.allowedWorkshopIds.map(wid => {
               const w = workshops.find(x => x.id === wid);
