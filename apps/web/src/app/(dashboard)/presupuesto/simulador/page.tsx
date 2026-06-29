@@ -17,6 +17,7 @@ import { useWorkshopId } from '@/context/workshop-context';
 import { formatDate } from '@/lib/utils';
 import { useBudgetSimulatorPiezas, useBudgetSimulatorEstimate } from '@/hooks/use-budget-simulator';
 import { useCreateBudgetAppointment, useUpdateBudgetProcesses } from '@/hooks/use-budget-appointments';
+import { useVehicleLookup } from '@/hooks/use-vehicle-lookup';
 import { createBodyshopEntry } from '@/lib/api';
 import type { DamageLevel, SimulatorEstimateResult } from '@/lib/api';
 
@@ -68,10 +69,19 @@ export default function SimuladorPresupuestoPage() {
   const [isEntering, setIsEntering]         = useState(false);
   const [enterError, setEnterError]         = useState('');
 
+  const { lookup, isLooking, vehicleData } = useVehicleLookup();
+
   const { data: piezasData } = useBudgetSimulatorPiezas();
   const estimateMutation     = useBudgetSimulatorEstimate();
   const createMutation       = useCreateBudgetAppointment();
   const updateProcesses      = useUpdateBudgetProcesses();
+
+  async function handlePlateLookup() {
+    const data = await lookup(plate);
+    if (data && !customerName.trim()) {
+      setCustomerName(data.customerName);
+    }
+  }
 
   const piezas = (piezasData ?? [])
     .map((p: { pieza: string; grupo: number }) => p.pieza)
@@ -252,14 +262,25 @@ export default function SimuladorPresupuestoPage() {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Chapa / Patente *</label>
-              <input
-                type="text"
-                value={plate}
-                onChange={e => setPlate(e.target.value.toUpperCase())}
-                placeholder="ABC 123"
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium uppercase outline-none focus:ring-2 focus:ring-blue-400"
-              />
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                Chapa / Patente *
+                {vehicleData && (
+                  <span className="ml-2 text-emerald-500 font-normal normal-case">{vehicleData.model}</span>
+                )}
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={plate}
+                  onChange={e => { setPlate(e.target.value.toUpperCase()); }}
+                  onBlur={handlePlateLookup}
+                  placeholder="ABC 123"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium uppercase outline-none focus:ring-2 focus:ring-blue-400 pr-8"
+                />
+                {isLooking && (
+                  <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-slate-400" />
+                )}
+              </div>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">N° Presupuesto</label>
