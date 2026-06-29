@@ -16,13 +16,13 @@ export async function GET(req: NextRequest) {
       .input('plate', sql.VarChar(20), raw)
       .query<any>(`
         SELECT TOP 1
-          ISNULL(UPPER(LTRIM(RTRIM(m.Matricula))), '') AS Matricula,
-          ISNULL(m.chasis,        '')                  AS Chasis,
-          ISNULL(m.modelo,        '')                  AS Modelo,
-          ISNULL(m.nombrecliente, '')                  AS NombreCliente
+          ISNULL(UPPER(LTRIM(RTRIM(m.chapa))),  '') AS Chapa,
+          ISNULL(m.chasis,        '')               AS Chasis,
+          ISNULL(m.modelo,        '')               AS Modelo,
+          ISNULL(m.nombrecliente, '')               AS NombreCliente
         FROM MYSQL_DW.dbo.MasterOT_Condor m
-        WHERE UPPER(LTRIM(RTRIM(m.Matricula))) = @plate
-           OR UPPER(LTRIM(RTRIM(m.chasis)))    = @plate
+        WHERE UPPER(LTRIM(RTRIM(m.chapa)))  = @plate
+           OR UPPER(LTRIM(RTRIM(m.chasis))) = @plate
         ORDER BY m.fechaingreso DESC
       `);
 
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     const r = result.recordset[0];
     return NextResponse.json({
       found:        true,
-      plate:        String(r.Matricula).trim() || raw,
+      plate:        String(r.Chapa).trim() || raw,
       chassis:      String(r.Chasis).trim(),
       model:        String(r.Modelo).trim(),
       customerName: String(r.NombreCliente).trim(),
