@@ -16,14 +16,14 @@ export async function GET(req: NextRequest) {
       .input('plate', sql.VarChar(20), raw)
       .query<any>(`
         SELECT TOP 1
-          ISNULL(UPPER(TRIM(m.Matricula)), '') AS Matricula,
-          ISNULL(m.chasis,        '')          AS Chasis,
-          ISNULL(m.modelo,        '')          AS Modelo,
-          ISNULL(m.codcliente,    '')          AS CodCliente,
-          ISNULL(m.nombrecliente, '')          AS NombreCliente
+          ISNULL(UPPER(LTRIM(RTRIM(m.Matricula))), '') AS Matricula,
+          ISNULL(m.chasis,        '')                  AS Chasis,
+          ISNULL(m.modelo,        '')                  AS Modelo,
+          ISNULL(m.codcliente,    '')                  AS CodCliente,
+          ISNULL(m.nombrecliente, '')                  AS NombreCliente
         FROM MYSQL_DW.dbo.MasterOT_Condor m
-        WHERE UPPER(TRIM(m.Matricula)) = @plate
-           OR UPPER(TRIM(m.chasis))    = @plate
+        WHERE UPPER(LTRIM(RTRIM(m.Matricula))) = @plate
+           OR UPPER(LTRIM(RTRIM(m.chasis)))    = @plate
         ORDER BY m.fechaingreso DESC
       `);
 
