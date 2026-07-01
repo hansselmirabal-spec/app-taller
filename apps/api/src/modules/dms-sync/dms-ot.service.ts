@@ -116,10 +116,11 @@ export class DmsOtService {
       tipoServicio:           String(r.tipoAbrev ?? r.tipoDesc ?? '').trim(),
     }));
 
-    // Summary: count by estadoOt for the filtered result set
+    // Summary: count by estadoIdis (taller workflow state, not the binary open/closed)
     const summary: Record<string, number> = {};
     for (const row of data) {
-      summary[row.estadoOt] = (summary[row.estadoOt] ?? 0) + 1;
+      const k = row.estadoIdis || row.estadoOt;
+      summary[k] = (summary[k] ?? 0) + 1;
     }
 
     const syncStatus = await this.getSyncStatus();
