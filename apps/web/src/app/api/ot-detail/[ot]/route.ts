@@ -63,7 +63,7 @@ export async function GET(
       .query<any>(`
         SELECT TOP 1
           m.nroot                                    AS OT,
-          ISNULL(m.codcliente, '')                   AS CODCLIENTE,
+          ISNULL(m.nrocliente, '')                   AS CODCLIENTE,
           ISNULL(m.nombrecliente, '')                AS NOMBRECLIENTE,
           ISNULL(m.chasis, '')                       AS CHASIS,
           ISNULL(m.modelo, '')                       AS MODELO,
@@ -88,8 +88,8 @@ export async function GET(
           NULL                                       AS FechaRenegociacion,
           NULL                                       AS fechafactura
         FROM MYSQL_DW.dbo.MasterOT_Condor m
-        INNER JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
-        LEFT  JOIN MYSQL_DW.dbo.controltiempo_DimTipoServicio ts ON ts.idtipo_servicio = m.idtiposervicio
+        LEFT JOIN MYSQL_DW.dbo.controltiempo_DimSucursal d ON d.IdSucursal = m.taller
+        LEFT JOIN MYSQL_DW.dbo.controltiempo_DimTipoServicio ts ON ts.idtipo_servicio = m.idtiposervicio
         WHERE m.nroot = @otNum
       `);
 
