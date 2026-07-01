@@ -588,8 +588,8 @@ export class DmsSyncService implements OnApplicationBootstrap {
         })
       : [];
 
-    // 4. Upsert all rows
-    const allOts = [...openOts, ...closedOts];
+    // 4. Upsert all rows — deduplicate by nroot (DMS can have duplicate nroot rows)
+    const allOts = [...new Map([...openOts, ...closedOts].map(r => [r.nroot, r])).values()];
     if (allOts.length > 0) {
       const BATCH = 500;
       for (let i = 0; i < allOts.length; i += BATCH) {
