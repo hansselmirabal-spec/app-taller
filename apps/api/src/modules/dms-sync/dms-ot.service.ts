@@ -108,15 +108,15 @@ export class DmsOtService {
       SELECT
         COUNT(*) FILTER (WHERE estado_ot = 'Abierto')                                           AS "totalOpen",
         COUNT(*) FILTER (WHERE estado_ot = 'Abierto'
-                           AND EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400 > 30)          AS "otsCriticas",
+                           AND (CURRENT_DATE - fecha_ingreso) > 30)          AS "otsCriticas",
         COUNT(*) FILTER (WHERE estado_ot = 'Abierto'
                            AND fecha_compromiso_cliente < NOW()
                            AND fecha_cierre_ot IS NULL)                                          AS "vencidos",
         COUNT(*) FILTER (WHERE estado_ot = 'Abierto'
-                           AND EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400 > 14)          AS "otsEnAtraso",
+                           AND (CURRENT_DATE - fecha_ingreso) > 14)          AS "otsEnAtraso",
         ROUND(AVG(
           CASE WHEN estado_ot = 'Abierto' THEN
-            EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400
+            (CURRENT_DATE - fecha_ingreso)
           END
         )::NUMERIC, 1)                                                                           AS "diasPromedio",
         COUNT(*) FILTER (WHERE fecha_ingreso::DATE = CURRENT_DATE)                              AS "ingresadosHoy",
@@ -131,7 +131,7 @@ export class DmsOtService {
       SELECT
         nroot, nombrecliente, chasis, modelo, asesor, sucursal_desc,
         fecha_ingreso, fecha_compromiso_cliente,
-        FLOOR(EXTRACT(EPOCH FROM NOW() - fecha_compromiso_cliente) / 86400) AS "diasRetraso"
+        (CURRENT_DATE - fecha_compromiso_cliente) AS "diasRetraso"
       FROM dms_ot_rows
       WHERE fecha_compromiso_cliente < NOW()
         AND fecha_cierre_ot IS NULL
@@ -169,7 +169,7 @@ export class DmsOtService {
         asesor,
         COUNT(*) AS total,
         COUNT(*) FILTER (WHERE estado_ot = 'Abierto') AS abiertas,
-        ROUND(AVG(EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400)::NUMERIC, 1) AS "diasPromedio"
+        ROUND(AVG(CURRENT_DATE - fecha_ingreso)::NUMERIC, 1) AS "diasPromedio"
       FROM dms_ot_rows
       WHERE asesor IS NOT NULL
       GROUP BY asesor
@@ -206,7 +206,7 @@ export class DmsOtService {
         COUNT(*) FILTER (WHERE estado_ot = 'Abierto')                      AS abiertas,
         COUNT(*) FILTER (WHERE fecha_cierre_ot IS NOT NULL)                AS finalizadas,
         COALESCE(SUM(monto), 0)                                             AS "montoTotal",
-        ROUND(AVG(EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400)::NUMERIC, 1) AS "diasPromedio"
+        ROUND(AVG(CURRENT_DATE - fecha_ingreso)::NUMERIC, 1) AS "diasPromedio"
       FROM dms_ot_rows
       WHERE sucursal_desc IS NOT NULL
       GROUP BY sucursal_desc
@@ -219,7 +219,7 @@ export class DmsOtService {
         COUNT(*) FILTER (WHERE estado_ot = 'Abierto')       AS abiertas,
         COUNT(*) FILTER (WHERE fecha_cierre_ot IS NOT NULL) AS cerradas,
         COUNT(*)                                              AS total,
-        ROUND(AVG(EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400)::NUMERIC, 1) AS "diasPromedio"
+        ROUND(AVG(CURRENT_DATE - fecha_ingreso)::NUMERIC, 1) AS "diasPromedio"
       FROM dms_ot_rows
       WHERE asesor IS NOT NULL
       GROUP BY asesor
@@ -280,12 +280,12 @@ export class DmsOtService {
                            AND fecha_compromiso_cliente < NOW()
                            AND fecha_cierre_ot IS NULL)                    AS vencidas,
         COUNT(*) FILTER (WHERE estado_ot = 'Abierto'
-                           AND EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400 > 30) AS criticas,
+                           AND (CURRENT_DATE - fecha_ingreso) > 30) AS criticas,
         COALESCE(SUM(monto) FILTER (WHERE fecha_cierre_ot IS NOT NULL), 0) AS "montoFacturado",
         COALESCE(SUM(monto), 0)                                             AS "montoTotal",
         ROUND(AVG(
-          CASE WHEN fecha_cierre_ot IS NOT NULL THEN
-            EXTRACT(EPOCH FROM fecha_cierre_ot - fecha_ingreso) / 86400
+          CASE WHEN fecha_cierre_ot IS NOT NULL AND fecha_ingreso IS NOT NULL THEN
+            (fecha_cierre_ot - fecha_ingreso)
           END
         )::NUMERIC, 1)                                                      AS "diasPromedioCierre"
       FROM dms_ot_rows
@@ -323,10 +323,10 @@ export class DmsOtService {
     const antiguedad: any[] = await this.otRepo.query(`
       SELECT
         CASE
-          WHEN EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400 <= 7   THEN '0-7d'
-          WHEN EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400 <= 15  THEN '8-15d'
-          WHEN EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400 <= 30  THEN '16-30d'
-          WHEN EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400 <= 60  THEN '31-60d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 7   THEN '0-7d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 15  THEN '8-15d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 30  THEN '16-30d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 60  THEN '31-60d'
           ELSE '+60d'
         END AS bucket,
         COUNT(*) AS count
@@ -335,10 +335,10 @@ export class DmsOtService {
         AND fecha_ingreso IS NOT NULL
       GROUP BY
         CASE
-          WHEN EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400 <= 7   THEN '0-7d'
-          WHEN EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400 <= 15  THEN '8-15d'
-          WHEN EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400 <= 30  THEN '16-30d'
-          WHEN EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400 <= 60  THEN '31-60d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 7   THEN '0-7d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 15  THEN '8-15d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 30  THEN '16-30d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 60  THEN '31-60d'
           ELSE '+60d'
         END
       ORDER BY bucket
@@ -361,7 +361,7 @@ export class DmsOtService {
       SELECT
         nroot, nombrecliente, chasis, asesor, sucursal_desc,
         fecha_compromiso_cliente,
-        FLOOR(EXTRACT(EPOCH FROM NOW() - fecha_compromiso_cliente) / 86400) AS "diasRetraso"
+        (CURRENT_DATE - fecha_compromiso_cliente) AS "diasRetraso"
       FROM dms_ot_rows
       WHERE fecha_compromiso_cliente < NOW()
         AND fecha_cierre_ot IS NULL
@@ -374,7 +374,7 @@ export class DmsOtService {
     const criticasTop: any[] = await this.otRepo.query(`
       SELECT
         nroot, nombrecliente, chasis, asesor, sucursal_desc, fecha_ingreso,
-        FLOOR(EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400) AS "diasIngreso"
+        (CURRENT_DATE - fecha_ingreso) AS "diasIngreso"
       FROM dms_ot_rows
       WHERE estado_ot = 'Abierto'
         AND fecha_ingreso IS NOT NULL
@@ -441,7 +441,7 @@ export class DmsOtService {
       vencidas:
         `fecha_compromiso_cliente < NOW() AND fecha_cierre_ot IS NULL AND estado_ot = 'Abierto'`,
       criticas:
-        `estado_ot = 'Abierto' AND EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400 > 30`,
+        `estado_ot = 'Abierto' AND (CURRENT_DATE - fecha_ingreso) > 30`,
       abiertas:
         `estado_ot = 'Abierto'`,
       cerradas:
@@ -456,7 +456,7 @@ export class DmsOtService {
         estado_ot, estado_taller, asesor, sucursal_desc,
         fecha_ingreso, hora_ingreso, fecha_compromiso_cliente,
         fecha_cierre_ot, monto, tipo_desc, codcliente, synced_at,
-        FLOOR(EXTRACT(EPOCH FROM NOW() - fecha_ingreso) / 86400) AS "diasIngreso"
+        (CURRENT_DATE - fecha_ingreso) AS "diasIngreso"
       FROM dms_ot_rows
       WHERE ${condition}
       ORDER BY fecha_ingreso ASC
