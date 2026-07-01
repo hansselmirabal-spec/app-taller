@@ -33,6 +33,11 @@ services:
       APP_NAME: App Taller QAS
       COOKIE_SECURE: "false"
       DB_SYNC: "false"
+      DMS_HOST: "53.103.13.200"
+      DMS_PORT: "1433"
+      DMS_USER: "ituser"
+      DMS_PASSWORD: "123456ituser"
+      DMS_DATABASE: "MYSQL_DW"
     depends_on:
       postgres:
         condition: service_healthy
