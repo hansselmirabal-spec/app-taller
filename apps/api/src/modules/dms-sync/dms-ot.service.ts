@@ -36,6 +36,10 @@ export class DmsOtService {
     page: number;
     limit: number;
     syncStatus: any;
+    summary: Record<string, number>;
+    truncated: boolean;
+    source: string;
+    ageSeconds: null;
   }> {
     const page  = Math.max(1, Number(filters.page  ?? 1));
     const limit = Math.min(500, Math.max(1, Number(filters.limit ?? 50)));
