@@ -941,7 +941,7 @@ export async function getUsers(): Promise<User[]> {
 export async function createUser(data: {
   name: string;
   email: string;
-  role: 'admin' | 'receptionist' | 'perito';
+  role: 'admin' | 'admin_taller' | 'receptionist' | 'perito';
   roleId?: string | null;
   allowedWorkshopIds?: string[] | null;
 }): Promise<User> {
@@ -988,7 +988,7 @@ export async function changePassword(currentPassword: string, newPassword: strin
 
 export async function updateUser(
   id: string,
-  data: { name?: string; role?: 'admin' | 'receptionist' | 'perito'; active?: boolean; password?: string; roleId?: string | null; allowedWorkshopIds?: string[] | null },
+  data: { name?: string; role?: 'admin' | 'admin_taller' | 'receptionist' | 'perito'; active?: boolean; password?: string; roleId?: string | null; allowedWorkshopIds?: string[] | null },
 ): Promise<User> {
   if (MOCK) {
     const idx = _mockUsers.findIndex(u => u.id === id);
