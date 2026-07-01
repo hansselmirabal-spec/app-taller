@@ -22,7 +22,7 @@ export class DmsSnapshot {
   scope: string;
 
   // Resultado completo de la query, listo para devolver tal cual al cliente.
-  @Column({ type: 'jsonb' })
+  @Column({ name: 'payload', type: 'jsonb' })
   data: any;
 
   // Cuándo se ejecutó la consulta al DMS. El frontend lo usa para mostrar

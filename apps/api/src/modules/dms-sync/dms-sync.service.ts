@@ -672,7 +672,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
           m.idtiposervicio,
           ISNULL(LTRIM(RTRIM(ts.descripcion)), '') AS tipo_desc,
           ISNULL(LTRIM(RTRIM(ts.abreviatura)), '') AS tipo_abrev,
-          LTRIM(RTRIM(m.codcliente))              AS codcliente
+          NULL                                    AS codcliente
         FROM dbo.MasterOT_Condor m
         LEFT JOIN dbo.controltiempo_DimSucursal s
                ON s.IdSucursal = m.taller
