@@ -32,11 +32,26 @@ export async function GET(req: NextRequest) {
 
     const r = result.recordset[0];
     return NextResponse.json({
-      found:        true,
-      plate:        String(r.Chapa).trim() || raw,
-      chassis:      String(r.Chasis).trim(),
-      model:        String(r.Modelo).trim(),
-      customerName: String(r.NombreCliente).trim(),
+      found:   true,
+      vehicle: {
+        plate:            String(r.Chapa).trim() || raw,
+        chassis:          String(r.Chasis).trim(),
+        vehicleType:      String(r.Modelo).trim(),
+        engine:           '',
+        mileage:          '',
+        registrationDate: '',
+        lastService:      '',
+      },
+      customer: {
+        customerName:   String(r.NombreCliente).trim(),
+        customerNumber: '',
+        cedula:         '',
+        ruc:            '',
+        telPrincipal:   '',
+        telOficina:     '',
+        celular:        '',
+        address:        '',
+      },
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     console.error('[vehicle-lookup]', err.message);
