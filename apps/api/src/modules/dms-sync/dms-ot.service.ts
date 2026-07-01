@@ -42,7 +42,7 @@ export class DmsOtService {
     ageSeconds: null;
   }> {
     const page  = Math.max(1, Number(filters.page  ?? 1));
-    const limit = Math.min(500, Math.max(1, Number(filters.limit ?? 50)));
+    const limit = Math.min(5000, Math.max(1, Number(filters.limit ?? 50)));
     const skip  = (page - 1) * limit;
     const sortBy  = filters.sortBy  ?? 'fechaIngreso';
     const sortDir = (filters.sortDir ?? 'DESC') as 'ASC' | 'DESC';

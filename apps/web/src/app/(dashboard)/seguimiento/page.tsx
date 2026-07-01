@@ -159,7 +159,7 @@ export default function SeguimientoPage() {
     setError('');
     const t0 = performance.now();
     try {
-      const qs = new URLSearchParams({ soloAbiertas: 'true', days: String(days) });
+      const qs = new URLSearchParams({ soloAbiertas: 'true', days: String(days), limit: '5000' });
       if (opts.force) qs.set('force', '1');
       const res = await fetch(`/api/ot-seguimiento?${qs}`);
       if (!res.ok) throw new Error('Error al cargar datos');
