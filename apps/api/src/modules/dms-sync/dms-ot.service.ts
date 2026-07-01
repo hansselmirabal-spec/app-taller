@@ -90,13 +90,37 @@ export class DmsOtService {
 
     const raw = await qb.getRawMany();
     const data = raw.map(r => ({
-      ...r,
-      diasIngreso: r.diasIngreso != null ? Math.max(0, Math.floor(Number(r.diasIngreso))) : 0,
+      ot:                     Number(r.nroot),
+      codCliente:             String(r.codcliente ?? r.nrocliente ?? '').trim(),
+      nombreCliente:          String(r.nombrecliente ?? '').trim(),
+      chasis:                 String(r.chasis ?? '').trim(),
+      modelo:                 String(r.modelo ?? '').trim(),
+      estadoOt:               String(r.estadoOt ?? '').trim(),
+      estadoIdis:             String(r.estadoTaller ?? r.estadoOt ?? '').trim(),
+      estadoFinanciero:       String(r.estadoFinanciero ?? '').trim(),
+      asesor:                 String(r.asesor ?? '').trim(),
+      sucursal:               String(r.sucursalDesc ?? '').trim(),
+      diasIngreso:            r.diasIngreso != null ? Math.max(0, Math.floor(Number(r.diasIngreso))) : 0,
+      diasEnEstado:           0,
+      fechaIngreso:           r.fechaIngreso ? new Date(r.fechaIngreso).toISOString().split('T')[0] : null,
+      horaIngreso:            r.horaIngreso ? String(r.horaIngreso).trim() || null : null,
+      fechaCompromisoCliente: r.fechaCompromisoCliente ? new Date(r.fechaCompromisoCliente).toISOString().split('T')[0] : null,
+      fechaCompromisoTaller:  null,
+      fechaFinalizado:        r.fechaCierreOt ? new Date(r.fechaCierreOt).toISOString().split('T')[0] : null,
+      montoTotal:             r.monto != null ? Number(r.monto) : 0,
+      observaciones:          '',
+      tipoServicio:           String(r.tipoAbrev ?? r.tipoDesc ?? '').trim(),
     }));
+
+    // Summary: count by estadoOt for the filtered result set
+    const summary: Record<string, number> = {};
+    for (const row of data) {
+      summary[row.estadoOt] = (summary[row.estadoOt] ?? 0) + 1;
+    }
 
     const syncStatus = await this.getSyncStatus();
 
-    return { data, total, page, limit, syncStatus };
+    return { data, total, page, limit, syncStatus, summary, truncated: false, source: 'materialized', ageSeconds: null };
   }
 
   // ── GET /dms/ot-seguimiento/operativo ────────────────────────────────────────
