@@ -43,7 +43,7 @@ class ResetPasswordDto {
 export class AuthController {
   constructor(private authService: AuthService) {}
 
-  @Throttle({ default: { ttl: 300000, limit: process.env.NODE_ENV === 'production' ? 5 : 60 } })
+  @Throttle({ default: { ttl: 300000, limit: process.env.NODE_ENV === 'production' ? 30 : 60 } })
   @Post('login')
   async login(
     @Body() dto: LoginDto,
