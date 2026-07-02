@@ -48,6 +48,13 @@ export interface ScheduleSimulation {
   warnings:              string[];
 }
 
+const DEFAULT_PROCESSES = [
+  { code: 'BODYWORK', name: 'Chapería',    sequence: 1 },
+  { code: 'PREP',     name: 'Preparación', sequence: 2 },
+  { code: 'PAINT',    name: 'Pintura',     sequence: 3 },
+  { code: 'POLISH',   name: 'Pulida',      sequence: 4 },
+];
+
 @Injectable()
 export class BodyshopScheduleService {
   constructor(
@@ -58,6 +65,15 @@ export class BodyshopScheduleService {
     private techniciansService: TechniciansService,
     private workshopsService: WorkshopsService,
   ) {}
+
+  async onApplicationBootstrap() {
+    const count = await this.processRepo.count();
+    if (count === 0) {
+      await this.processRepo.save(
+        DEFAULT_PROCESSES.map(p => this.processRepo.create({ ...p, active: true })),
+      );
+    }
+  }
 
   async simulate(input: SimulateInput): Promise<ScheduleSimulation> {
     const { bodyworkHours, prepHours, paintHours, workshopId, startDate, entryIdExclude } = input;
