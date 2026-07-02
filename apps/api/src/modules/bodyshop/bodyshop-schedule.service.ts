@@ -241,6 +241,12 @@ export class BodyshopScheduleService {
       dailyCap.set(code, (dailyCap.get(code) ?? 0) + dailyHours);
       techCapMap.set(tech.id, { process: code, dailyHours });
     }
+
+    // If PREP has no dedicated technician, BODYWORK techs cover it (common in bodyshops)
+    if (!dailyCap.has('PREP') && dailyCap.has('BODYWORK')) {
+      dailyCap.set('PREP', dailyCap.get('BODYWORK')!);
+    }
+
     return { dailyCap, techCapMap };
   }
 
