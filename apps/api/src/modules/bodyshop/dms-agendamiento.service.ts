@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as mysql from 'mysql2/promise';
+import * as sql from 'mssql';
 
 export interface DmsAppointmentPayload {
   title: string;
@@ -40,74 +40,99 @@ export class DmsAgendamientoService {
     this.url = process.env.DMS_AGENDAMIENTO_URL ?? '';
   }
 
-  private async getDmsConn(): Promise<mysql.Connection> {
-    const conn = await mysql.createConnection({
-      host:           process.env.DMS_HOST,
-      port:    Number(process.env.DMS_PORT ?? 3306),
-      user:           process.env.DMS_USER,
-      password:       process.env.DMS_PASSWORD,
-      database:       process.env.DMS_DATABASE ?? 'controltiempo',
-      connectTimeout: 10_000,
-    });
-    await conn.query('SET SESSION TRANSACTION READ ONLY');
-    return conn;
+  private getDmsConfig(): sql.config {
+    return {
+      server:   process.env.DMS_HOST ?? '',
+      port:     Number(process.env.DMS_PORT ?? 1433),
+      user:     process.env.DMS_USER,
+      password: process.env.DMS_PASSWORD,
+      database: process.env.DMS_DATABASE ?? 'MYSQL_DW',
+      options: {
+        encrypt:                false,
+        trustServerCertificate: true,
+      },
+      connectionTimeout: 10_000,
+      requestTimeout:    30_000,
+    };
+  }
+
+  private async getDmsPool(): Promise<sql.ConnectionPool> {
+    const pool = new sql.ConnectionPool(this.getDmsConfig());
+    await pool.connect();
+    return pool;
   }
 
   async getSucursales(): Promise<DmsSucursal[]> {
-    let conn: mysql.Connection | null = null;
+    let pool: sql.ConnectionPool | null = null;
     try {
-      conn = await this.getDmsConn();
-      // Join agendamiento_asesor.IdSucursalIDIS ↔ sucursal.db2idfilial to get names.
-      // sucursal.Descripcion is the display name; db2idfilial is the foreign key.
-      const [rows] = await conn.query<mysql.RowDataPacket[]>(
-        `SELECT DISTINCT a.IdSucursalIDIS AS id,
-                COALESCE(s.Descripcion, CONCAT('Sucursal ', a.IdSucursalIDIS)) AS nombre
-         FROM agendamiento_asesor a
-         LEFT JOIN controltiempo.sucursal s ON s.db2idfilial = a.IdSucursalIDIS
-         WHERE a.Estado = 1 AND a.IdSucursalIDIS IS NOT NULL AND a.IdSucursalIDIS <> ''
-         GROUP BY a.IdSucursalIDIS, s.Descripcion
-         ORDER BY s.Descripcion`,
-      );
-      return rows.map(r => ({ id: String(r.id), nombre: String(r.nombre) }));
+      pool = await this.getDmsPool();
+      // Join agendamiento_asesor.IdSucursalIDIS ↔ DimSucursal to get display names.
+      const result = await pool.request().query(`
+        SELECT DISTINCT
+          a.IdSucursalIDIS AS id,
+          ISNULL(s.Descripcion, CONCAT('Sucursal ', a.IdSucursalIDIS)) AS nombre
+        FROM dbo.agendamiento_asesor a
+        LEFT JOIN dbo.controltiempo_DimSucursal s ON s.IdSucursal = TRY_CAST(a.IdSucursalIDIS AS INT)
+        WHERE a.Estado = 1
+          AND a.IdSucursalIDIS IS NOT NULL
+          AND LTRIM(RTRIM(a.IdSucursalIDIS)) <> ''
+        ORDER BY nombre
+      `);
+      return (result.recordset as any[]).map(r => ({
+        id:     String(r.id),
+        nombre: String(r.nombre),
+      }));
     } catch (err: any) {
       this.logger.warn(`getSucursales error: ${err.message}`);
       return [];
     } finally {
-      await conn?.end();
+      await pool?.close();
     }
   }
 
   async getAsesores(sucursalId?: string | null): Promise<DmsAsesor[]> {
-    let conn: mysql.Connection | null = null;
+    let pool: sql.ConnectionPool | null = null;
     try {
-      conn = await this.getDmsConn();
-      let rows: mysql.RowDataPacket[];
+      pool = await this.getDmsPool();
+      const request = pool.request();
+      let querySql: string;
+
       if (sucursalId) {
-        [rows] = await conn.query<mysql.RowDataPacket[]>(
-          `SELECT CodigoIDIS AS codigo, Nombre AS nombre, IdSucursalIDIS AS sucursalId
-           FROM agendamiento_asesor
-           WHERE Estado = 1 AND IdSucursalIDIS = ?
-           ORDER BY Nombre`,
-          [sucursalId],
-        );
+        request.input('sucursalId', sql.NVarChar(100), sucursalId);
+        querySql = `
+          SELECT CodigoIDIS AS codigo, Nombre AS nombre, IdSucursalIDIS AS sucursalId
+          FROM dbo.agendamiento_asesor
+          WHERE Estado = 1 AND IdSucursalIDIS = @sucursalId
+          ORDER BY Nombre
+        `;
       } else {
-        [rows] = await conn.query<mysql.RowDataPacket[]>(
-          `SELECT CodigoIDIS AS codigo, Nombre AS nombre, IdSucursalIDIS AS sucursalId
-           FROM agendamiento_asesor
-           WHERE Estado = 1
-           ORDER BY Nombre`,
-        );
+        querySql = `
+          SELECT CodigoIDIS AS codigo, Nombre AS nombre, IdSucursalIDIS AS sucursalId
+          FROM dbo.agendamiento_asesor
+          WHERE Estado = 1
+          ORDER BY Nombre
+        `;
       }
+
+      const result = await request.query(querySql);
       const seen = new Set<string>();
-      return rows
+      return (result.recordset as any[])
         .filter(r => r.codigo)
-        .map(r => ({ codigo: String(r.codigo).trim(), nombre: String(r.nombre).trim(), sucursalId: r.sucursalId != null ? String(r.sucursalId) : null }))
-        .filter(r => { if (seen.has(r.codigo)) return false; seen.add(r.codigo); return true; });
+        .map(r => ({
+          codigo:     String(r.codigo).trim(),
+          nombre:     String(r.nombre).trim(),
+          sucursalId: r.sucursalId != null ? String(r.sucursalId) : null,
+        }))
+        .filter(r => {
+          if (seen.has(r.codigo)) return false;
+          seen.add(r.codigo);
+          return true;
+        });
     } catch (err: any) {
       this.logger.warn(`getAsesores error: ${err.message}`);
       return [];
     } finally {
-      await conn?.end();
+      await pool?.close();
     }
   }
 

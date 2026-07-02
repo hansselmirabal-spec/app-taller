@@ -159,7 +159,7 @@ export default function SeguimientoPage() {
     setError('');
     const t0 = performance.now();
     try {
-      const qs = new URLSearchParams({ soloAbiertas: 'true', days: String(days) });
+      const qs = new URLSearchParams({ soloAbiertas: 'true', days: String(days), limit: '5000' });
       if (opts.force) qs.set('force', '1');
       const res = await fetch(`/api/ot-seguimiento?${qs}`);
       if (!res.ok) throw new Error('Error al cargar datos');
@@ -264,7 +264,7 @@ export default function SeguimientoPage() {
       rows = rows.filter(r => r.sucursal === workshopBranch);
     }
     if (fechaEspecifica)    rows = rows.filter(r => r.fechaIngreso === fechaEspecifica);
-    if (estadoFiltro)       rows = rows.filter(r => r.estadoOt === estadoFiltro);
+    if (estadoFiltro)       rows = rows.filter(r => (r.estadoIdis || r.estadoOt) === estadoFiltro);
     if (sucursalFiltro)     rows = rows.filter(r => r.sucursal === sucursalFiltro);
     if (asesorFiltro)       rows = rows.filter(r => r.asesor === asesorFiltro);
     if (tipoServicioFiltro) rows = rows.filter(r => r.tipoServicio === tipoServicioFiltro);
@@ -683,7 +683,7 @@ export default function SeguimientoPage() {
                     <td className="px-4 py-2.5 text-slate-700 max-w-[220px] truncate" title={row.nombreCliente}>{row.nombreCliente || '—'}</td>
                     <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{row.modelo || '—'}</td>
                     <td className="px-4 py-2.5 font-mono text-slate-500 text-[10px] whitespace-nowrap">{row.chasis || '—'}</td>
-                    <td className="px-4 py-2.5"><EstadoBadge estado={row.estadoOt} /></td>
+                    <td className="px-4 py-2.5"><EstadoBadge estado={row.estadoIdis || row.estadoOt} /></td>
                     <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{row.asesor || '—'}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap">
                       {row.tipoServicio
@@ -749,7 +749,7 @@ function KanbanView({ rows, onCardClick }: { rows: OtRow[]; onCardClick: (ot: nu
     const grouped = new Map<string, OtRow[]>();
     for (const r of rows) {
       // Resolver alias DMS → clave canónica antes de agrupar
-      const key = resolveEstado(r.estadoOt);
+      const key = resolveEstado(r.estadoIdis || r.estadoOt);
       if (!grouped.has(key)) grouped.set(key, []);
       grouped.get(key)!.push(r);
     }

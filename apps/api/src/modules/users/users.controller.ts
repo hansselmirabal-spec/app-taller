@@ -6,21 +6,23 @@ import { Roles } from '../../common/decorators/roles.decorator';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('admin')
 export class UsersController {
   constructor(private service: UsersService) {}
 
   @Get()
+  @Roles('admin', 'admin_taller')
   async findAll() {
     return { data: await this.service.findAll(), meta: { timestamp: new Date().toISOString() } };
   }
 
   @Post()
+  @Roles('admin')
   async create(@Body() dto: CreateUserDto) {
     return { data: await this.service.create(dto), meta: { timestamp: new Date().toISOString() } };
   }
 
   @Patch(':id')
+  @Roles('admin', 'admin_taller')
   async update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
     return { data: await this.service.update(id, dto), meta: { timestamp: new Date().toISOString() } };
   }

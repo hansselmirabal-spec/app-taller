@@ -2,77 +2,43 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
-import * as mysql from 'mysql2/promise';
+import * as sql from 'mssql';
 import { DmsSnapshot } from './dms-snapshot.entity';
 import { DmsAdvisorSlot } from './dms-advisor-slot.entity';
+import { DmsOtRow } from './dms-ot-row.entity';
+import { DmsSyncState } from './dms-sync-state.entity';
 
-// Todos los estados del DMS Condor que pueden aparecer en OTs "abiertas".
-// Incluye variantes ortográficas reales del DMS (sin tilde, capitalización distinta).
-// Actualizado contra la vista v_maestro_ot_condor — todos los ESTADOOT distintos
-// de los últimos 365 días más los históricos conocidos.
-const OT_OPEN_STATES = [
-  // ── Activos / en proceso ────────────────────────────────────────────────────
-  'Abierto',
-  'En Presupuesto',
-  'En Mecánica',
-  'En proceso',
-  'En Diagnóstico',
-  'En diagnostico',        // variante DMS sin tilde
-  'En Diagnostico',        // variante DMS capitalización distinta
-  // ── Carrocería y pintura ────────────────────────────────────────────────────
-  'Chapería',
-  'En Chapería y Pintura',
-  'Preparación',
-  'Preparacion',           // variante DMS sin tilde
-  'Pintura',
-  'Pulida',
-  // ── Ensamble y cierre ───────────────────────────────────────────────────────
-  'Montaje',
-  'Completa repuestos',
-  'Control Final',
-  'Procesamiento',
-  'Reparación de llantas',
-  // ── Pendientes ──────────────────────────────────────────────────────────────
-  'Pendiente de ingreso al taller',
-  'Pendiente de aprobación de cliente',
-  'Pendiente de aprobación garantía',
-  'Pendiente por cambio de prioridad',
-  'Pendiente trabajo externo',
-  'Pendiente por repuesto externo',
-  'Pendiente por repuesto interno',
-  'Pendiente por repuesto',          // alias DMS → mismo que repuesto interno
-  'Pendiente por cotización de repuestos',
-  // ── Finalizados con trabajo pendiente (operativamente abiertos) ─────────────
-  'Finalizado con repuesto a colocar',
-  'Finalizado con espera de OC',
-  // ── Comodín ──────────────────────────────────────────────────────────────────
-  'Otro',
-];
-
-const DMS_CONFIG = (): mysql.ConnectionOptions => ({
-  host:           process.env.DMS_HOST,
-  port:    Number(process.env.DMS_PORT ?? 3306),
-  user:           process.env.DMS_USER,
-  password:       process.env.DMS_PASSWORD,
-  database:       process.env.DMS_DATABASE ?? 'controltiempo',
-  connectTimeout: 30_000,
+const getDmsConfig = (): sql.config => ({
+  server:   process.env.DMS_HOST ?? '',
+  port:     Number(process.env.DMS_PORT ?? 1433),
+  user:     process.env.DMS_USER,
+  password: process.env.DMS_PASSWORD,
+  database: process.env.DMS_DATABASE ?? 'MYSQL_DW',
+  options: {
+    encrypt:                false,
+    trustServerCertificate: true,
+  },
+  connectionTimeout: 10_000,
+  requestTimeout:    60_000,
 });
 
 /**
- * Wrapper read-only para conexiones al DMS. Setea SESSION TRANSACTION READ ONLY
- * apenas conecta — cualquier INSERT/UPDATE/DELETE/CREATE/DROP recibe error 1792
- * de MySQL ("Cannot execute statement in a READ ONLY transaction").
- *
- * Defensa en profundidad: el comentario "DMS es solo lectura" deja de ser
- * disciplina y pasa a ser garantía del MySQL server.
+ * Opens a new SQL Server connection pool. Caller must close it in a finally block.
+ * DMS is READ-ONLY — never issue INSERT/UPDATE/DELETE.
  */
-async function getDmsConnection(): Promise<mysql.Connection> {
-  const conn = await mysql.createConnection(DMS_CONFIG());
-  await conn.query('SET SESSION TRANSACTION READ ONLY');
-  return conn;
+async function getDmsPool(): Promise<sql.ConnectionPool> {
+  const pool = new sql.ConnectionPool(getDmsConfig());
+  await pool.connect();
+  return pool;
 }
 
 const HARD_LIMIT = 10_000;
+
+// OT rows sync interval: default 30 minutes (1_800_000 ms). Override via DMS_SYNC_INTERVAL_MS.
+const OT_SYNC_INTERVAL_MS = Number(process.env.DMS_SYNC_INTERVAL_MS ?? 1_800_000);
+
+// Delay before the first OT rows sync tick after startup (60 seconds).
+const OT_STARTUP_DELAY_MS = 60_000;
 
 // Combinaciones de scope que el worker pre-genera. Cubren los rangos más usados
 // del frontend. Combinaciones raras (ej: filtro por tipo) caen al fallback.
@@ -117,11 +83,21 @@ export class DmsSyncService implements OnApplicationBootstrap {
   private lastError: string | null = null;
   private consecutiveFailures = 0;
 
+  // Tracks when we last ran syncOtRows() successfully. Used to gate the next run
+  // based on OT_SYNC_INTERVAL_MS without changing the existing cron cadence.
+  private lastOtSyncAt: Date | null = null;
+  // True after the initial 60s startup delay has elapsed for OT sync.
+  private otSyncReady = false;
+
   constructor(
     @InjectRepository(DmsSnapshot)
     private snapshotRepo: Repository<DmsSnapshot>,
     @InjectRepository(DmsAdvisorSlot)
     private advisorSlotRepo: Repository<DmsAdvisorSlot>,
+    @InjectRepository(DmsOtRow)
+    private otRowRepo: Repository<DmsOtRow>,
+    @InjectRepository(DmsSyncState)
+    private stateRepo: Repository<DmsSyncState>,
     @InjectDataSource()
     private dataSource: DataSource,
   ) {}
@@ -149,6 +125,12 @@ export class DmsSyncService implements OnApplicationBootstrap {
     }
     this.logger.log('Sync inicial del DMS al arrancar...');
     void this.syncAll().catch(err => this.logger.error('Sync inicial falló', err));
+
+    // OT rows sync must wait 60 seconds after startup before the first tick.
+    setTimeout(() => {
+      this.otSyncReady = true;
+      this.logger.log('OT rows sync habilitado (60s startup delay transcurrido)');
+    }, OT_STARTUP_DELAY_MS);
   }
 
   // Cron principal: cada 5 minutos refresca todos los presets.
@@ -204,6 +186,10 @@ export class DmsSyncService implements OnApplicationBootstrap {
       this.syncing = false;
       await this.releaseLock();
     }
+
+    // OT rows sync runs independently with its own cadence and error isolation.
+    // A failure here must NOT affect the advisor-slot path above.
+    await this.maybeRunOtRowsSync();
   }
 
   private async tryAcquireLock(): Promise<boolean> {
@@ -231,47 +217,55 @@ export class DmsSyncService implements OnApplicationBootstrap {
   }
 
   // Sincroniza un scope específico de ot-seguimiento.
-  // Reusa exactamente la misma query que el endpoint Next.js histórico.
+  // Conecta a MYSQL_DW (SQL Server) y consulta MasterOT_Condor.
   async syncOtSeguimiento(days: number, soloAbiertas: boolean): Promise<void> {
     const scope = `days=${days}|abiertas=${soloAbiertas ? 1 : 0}`;
-    let connection: mysql.Connection | null = null;
+    let pool: sql.ConnectionPool | null = null;
     try {
-      connection = await getDmsConnection();
+      pool = await getDmsPool();
 
-      const estados = soloAbiertas
-        ? OT_OPEN_STATES.filter(s => s !== 'Finalizado')
-        : OT_OPEN_STATES;
-      const placeholders = estados.map(() => '?').join(', ');
-      const dateFilter = days > 0
-        ? 'AND fechaingreso >= DATE_SUB(CURDATE(), INTERVAL ? DAY)'
-        : '';
-      const params: any[] = days > 0 ? [...estados, days] : estados;
+      const request = pool.request();
 
-      const [rows] = await connection.execute<mysql.RowDataPacket[]>(
-        `SELECT
-          c.OT, c.CODCLIENTE, TRIM(c.NOMBRECLIENTE) AS NOMBRECLIENTE,
-          TRIM(c.CHASIS) AS CHASIS, TRIM(c.MODELO) AS MODELO,
-          c.ESTADOOT, c.ESTADOIDIS, c.ESTADOFINANCIERO,
-          TRIM(c.ASESOR) AS ASESOR, TRIM(c.SUCURSAL) AS SUCURSAL,
-          c.DIASINGRESO, c.fechaingreso,
-          c.FechaCompromisoClienteMaster, c.FechaCompromisoTaller,
-          c.FechaFinalizado, c.MONTOTOTAL,
-          TRIM(c.OBSERVACIONES) AS OBSERVACIONES,
-          TRIM(c.TipoServicio) AS TipoServicio,
-          f.horaingreso
-        FROM v_maestro_ot_condor c
-        LEFT JOIN (
-          SELECT nroot, MIN(horaingreso) AS horaingreso
-          FROM v_maestro_ot_filtros
-          WHERE horaingreso IS NOT NULL AND TRIM(horaingreso) <> ''
-          GROUP BY nroot
-        ) f ON f.nroot = c.OT
-        WHERE CONVERT(c.ESTADOOT USING utf8mb4) IN (${placeholders})
-        ${dateFilter}
-        ORDER BY c.fechaingreso DESC
-        LIMIT ${HARD_LIMIT}`,
-        params,
-      );
+      // In SQL Server: EstadoOT = 'Abierto' replaces the long IN(...) list.
+      const conditions: string[] = [];
+      if (soloAbiertas) {
+        conditions.push("m.EstadoOT = 'Abierto'");
+      }
+      if (days > 0) {
+        conditions.push('m.fechaingreso >= DATEADD(DAY, -@days, CAST(GETDATE() AS DATE))');
+        request.input('days', sql.Int, days);
+      }
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      const result = await request.query(`
+        SELECT TOP (${HARD_LIMIT})
+          m.nroot                                                              AS OT,
+          LTRIM(RTRIM(m.nrocliente))                                           AS CODCLIENTE,
+          LTRIM(RTRIM(m.nombrecliente))                                        AS NOMBRECLIENTE,
+          LTRIM(RTRIM(m.chasis))                                               AS CHASIS,
+          LTRIM(RTRIM(m.modelo))                                               AS MODELO,
+          LTRIM(RTRIM(m.EstadoTaller))                                         AS ESTADOOT,
+          ''                                                                   AS ESTADOIDIS,
+          LTRIM(RTRIM(m.Estadofinanciero))                                     AS ESTADOFINANCIERO,
+          LTRIM(RTRIM(m.asesor))                                               AS ASESOR,
+          LTRIM(RTRIM(s.Descripcion))                                          AS SUCURSAL,
+          DATEDIFF(DAY, m.fechaingreso, GETDATE())                             AS DIASINGRESO,
+          m.fechaingreso,
+          m.fechacompromisoCliente                                             AS FechaCompromisoClienteMaster,
+          m.fecha_compromiso_taller                                            AS FechaCompromisoTaller,
+          COALESCE(m.fecha_cierre_ot, m.fecha_fin_taller)                      AS FechaFinalizado,
+          CAST(m.monto AS FLOAT)                                               AS MONTOTOTAL,
+          LTRIM(RTRIM(m.observaciones))                                        AS OBSERVACIONES,
+          ISNULL(LTRIM(RTRIM(ts.abreviatura)), '')                             AS TipoServicio,
+          m.horaingreso
+        FROM dbo.MasterOT_Condor m
+        LEFT JOIN dbo.controltiempo_DimSucursal s ON s.IdSucursal = m.taller
+        LEFT JOIN dbo.controltiempo_DimTipoServicio ts ON ts.idtipo_servicio = m.idtiposervicio
+        ${whereClause}
+        ORDER BY m.fechaingreso DESC
+      `);
+
+      const rows = result.recordset as any[];
 
       const data = rows.map(r => {
         const fechaIngresoIso = r.fechaingreso
@@ -283,26 +277,26 @@ export class DmsSyncService implements OnApplicationBootstrap {
           ? Math.floor((Date.now() - new Date(fechaIngresoIso + 'T00:00:00Z').getTime()) / 86_400_000)
           : 0;
         return {
-        ot:                     Number(r.OT),
-        codCliente:             String(r.CODCLIENTE ?? '').trim(),
-        nombreCliente:          String(r.NOMBRECLIENTE ?? '').trim(),
-        chasis:                 String(r.CHASIS ?? '').trim(),
-        modelo:                 String(r.MODELO ?? '').trim(),
-        estadoOt:               String(r.ESTADOOT ?? '').trim(),
-        estadoIdis:             String(r.ESTADOIDIS ?? '').trim(),
-        estadoFinanciero:       String(r.ESTADOFINANCIERO ?? '').trim(),
-        asesor:                 String(r.ASESOR ?? '').trim(),
-        sucursal:               String(r.SUCURSAL ?? '').trim(),
-        diasIngreso:            Math.max(0, diasCalc),
-        diasEnEstado:           Number(r.DIASINGRESO ?? 0),
-        fechaIngreso:           fechaIngresoIso,
-        horaIngreso:            r.horaingreso  ? String(r.horaingreso).trim() || null : null,
-        fechaCompromisoCliente: r.FechaCompromisoClienteMaster ? new Date(r.FechaCompromisoClienteMaster).toISOString().split('T')[0] : null,
-        fechaCompromisoTaller:  r.FechaCompromisoTaller ? new Date(r.FechaCompromisoTaller).toISOString().split('T')[0] : null,
-        fechaFinalizado:        r.FechaFinalizado ? new Date(r.FechaFinalizado).toISOString().split('T')[0] : null,
-        montoTotal:             Number(r.MONTOTOTAL ?? 0),
-        observaciones:          String(r.OBSERVACIONES ?? '').trim(),
-        tipoServicio:           String(r.TipoServicio ?? '').trim(),
+          ot:                     Number(r.OT),
+          codCliente:             String(r.CODCLIENTE ?? '').trim(),
+          nombreCliente:          String(r.NOMBRECLIENTE ?? '').trim(),
+          chasis:                 String(r.CHASIS ?? '').trim(),
+          modelo:                 String(r.MODELO ?? '').trim(),
+          estadoOt:               String(r.ESTADOOT ?? '').trim(),
+          estadoIdis:             String(r.ESTADOIDIS ?? '').trim(),
+          estadoFinanciero:       String(r.ESTADOFINANCIERO ?? '').trim(),
+          asesor:                 String(r.ASESOR ?? '').trim(),
+          sucursal:               String(r.SUCURSAL ?? '').trim(),
+          diasIngreso:            Math.max(0, diasCalc),
+          diasEnEstado:           Number(r.DIASINGRESO ?? 0),
+          fechaIngreso:           fechaIngresoIso,
+          horaIngreso:            r.horaingreso ? String(r.horaingreso).trim() || null : null,
+          fechaCompromisoCliente: r.FechaCompromisoClienteMaster ? new Date(r.FechaCompromisoClienteMaster).toISOString().split('T')[0] : null,
+          fechaCompromisoTaller:  r.FechaCompromisoTaller        ? new Date(r.FechaCompromisoTaller).toISOString().split('T')[0]        : null,
+          fechaFinalizado:        r.FechaFinalizado               ? new Date(r.FechaFinalizado).toISOString().split('T')[0]               : null,
+          montoTotal:             Number(r.MONTOTOTAL ?? 0),
+          observaciones:          String(r.OBSERVACIONES ?? '').trim(),
+          tipoServicio:           String(r.TipoServicio ?? '').trim(),
         };
       });
 
@@ -330,7 +324,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
       await this.markSnapshotError('ot-seguimiento', scope, err.message);
       throw err;
     } finally {
-      await connection?.end();
+      await pool?.close();
     }
   }
 
@@ -338,17 +332,20 @@ export class DmsSyncService implements OnApplicationBootstrap {
   // Extrae disponibilidad POR ASESOR de la tabla `agendamiento` del DMS.
   // Ventana: hoy → hoy + 20 días. Nunca escribe ni modifica nada en el DMS.
   // Cada fila = un asesor × un slot de 30 min con su estado de ocupación.
+  //
+  // NOTE: agendamiento/agendamiento_asesor tables queried via SQL Server syntax.
+  // These tables must exist in MYSQL_DW for this sync to succeed.
   async syncAdvisorSlots(): Promise<void> {
     const today = new Date().toISOString().split('T')[0];
-    let connection: mysql.Connection | null = null;
+    let pool: sql.ConnectionPool | null = null;
     try {
-      connection = await getDmsConnection();
+      pool = await getDmsPool();
 
       // GROUP BY (fecha, sucursal, categoría, tramo, asesor) — una fila por asesor por slot.
       // is_occupied = 1 si el asesor tiene un cliente con estado Agendado (1) o Reagendado (4).
-      const [rows] = await connection.execute<mysql.RowDataPacket[]>(
-        `SELECT
-          DATE(a.start_date)                                         AS slot_date,
+      const result = await pool.request().query(`
+        SELECT
+          CAST(a.start_date AS DATE)                                 AS slot_date,
           aa.IdSucursalIDIS                                          AS sucursal_idis,
           a.category                                                 AS category_id,
           a.start_time                                               AS time_start,
@@ -360,21 +357,24 @@ export class DmsSyncService implements OnApplicationBootstrap {
              AND a.IdEstadoAgendamiento IN (1, 4)
             THEN 1 ELSE 0
           END)                                                       AS is_occupied
-        FROM agendamiento a
-        INNER JOIN agendamiento_asesor aa
+        FROM dbo.agendamiento a
+        INNER JOIN dbo.agendamiento_asesor aa
                ON aa.CodigoIDIS = a.IdAsesor
               AND aa.Estado = 1
-        WHERE DATE(a.start_date) BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 20 DAY)
+        WHERE CAST(a.start_date AS DATE)
+              BETWEEN CAST(GETDATE() AS DATE) AND DATEADD(DAY, 20, CAST(GETDATE() AS DATE))
           AND a.category IN (1, 2)
           AND (
             a.NombreCliente IS NULL
             OR a.IdEstadoAgendamiento IN (1, 4)
           )
           AND aa.IdSucursalIDIS IS NOT NULL
-          AND TRIM(aa.IdSucursalIDIS) <> ''
-        GROUP BY DATE(a.start_date), aa.IdSucursalIDIS, a.category, a.start_time, a.IdAsesor, aa.Nombre
-        ORDER BY slot_date, sucursal_idis, time_start, advisor_code`,
-      );
+          AND LTRIM(RTRIM(aa.IdSucursalIDIS)) <> ''
+        GROUP BY CAST(a.start_date AS DATE), aa.IdSucursalIDIS, a.category, a.start_time, a.IdAsesor, aa.Nombre
+        ORDER BY slot_date, sucursal_idis, time_start, advisor_code
+      `);
+
+      const rows = result.recordset as any[];
 
       if (rows.length === 0) {
         this.logger.warn('syncAdvisorSlots: DMS no devolvió filas. ¿Tabla agendamiento vacía?');
@@ -421,7 +421,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
       this.logger.error(`Falló sync advisor-slots: ${err.message}`);
       throw err;
     } finally {
-      await connection?.end();
+      await pool?.close();
     }
   }
 
@@ -534,6 +534,180 @@ export class DmsSyncService implements OnApplicationBootstrap {
     if (existing) {
       existing.lastError = message.slice(0, 500);
       await this.snapshotRepo.save(existing);
+    }
+  }
+
+  // ── OT rows materialized sync ────────────────────────────────────────────────
+
+  // Gate: respects the 60s startup delay and the OT_SYNC_INTERVAL_MS cadence.
+  // Called from syncAll() after the advisor-slot branch — failure here is fully isolated.
+  async maybeRunOtRowsSync(): Promise<void> {
+    if (!this.otSyncReady) {
+      this.logger.debug('OT rows sync omitido: aún en período de startup delay');
+      return;
+    }
+    if (this.lastOtSyncAt !== null) {
+      const elapsed = Date.now() - this.lastOtSyncAt.getTime();
+      if (elapsed < OT_SYNC_INTERVAL_MS) {
+        this.logger.debug(
+          `OT rows sync omitido: solo transcurrieron ${Math.round(elapsed / 1000)}s de ` +
+          `${Math.round(OT_SYNC_INTERVAL_MS / 1000)}s requeridos`,
+        );
+        return;
+      }
+    }
+    try {
+      await this.syncOtRows();
+    } catch (err: any) {
+      // Log but never throw — advisor-slot path must be unaffected.
+      this.logger.error(`syncOtRows falló: ${err.message}`, err.stack);
+    }
+  }
+
+  // Upserts the full open set + recently-closed OTs from DMS into dms_ot_rows.
+  // Uses raw SQL ON CONFLICT for atomic batch upsert (same pattern as advisor-slots).
+  async syncOtRows(): Promise<void> {
+    if (!process.env.DMS_HOST) {
+      this.logger.warn('DMS_HOST no configurado, salteando syncOtRows');
+      return;
+    }
+
+    const tickStart = new Date();
+
+    // 1. Read last sync state
+    const state = await this.stateRepo.findOne({ where: { kind: 'ot_rows' } });
+    const lastSync = state?.lastSyncAt ?? null;
+
+    // 2. Fetch open OTs (full refresh of open set)
+    const openOts = await this.fetchOtsFromDms({ onlyOpen: true });
+
+    // 3. Fetch recently closed OTs with 2h overlap to catch late-close edge cases
+    const closedOts = lastSync
+      ? await this.fetchOtsFromDms({
+          closedSince: new Date(lastSync.getTime() - 2 * 60 * 60 * 1000),
+        })
+      : [];
+
+    // 4. Upsert all rows — deduplicate by nroot (DMS can have duplicate nroot rows)
+    const allOts = [...new Map([...openOts, ...closedOts].map(r => [r.nroot, r])).values()];
+    if (allOts.length > 0) {
+      const BATCH = 500;
+      for (let i = 0; i < allOts.length; i += BATCH) {
+        await this.dataSource
+          .createQueryBuilder()
+          .insert()
+          .into(DmsOtRow)
+          .values(allOts.slice(i, i + BATCH))
+          .orUpdate(
+            [
+              'nrocliente', 'nombrecliente', 'chasis', 'modelo',
+              'estado_ot', 'estado_taller', 'estado_financiero',
+              'asesor', 'taller', 'sucursal_desc',
+              'fecha_ingreso', 'hora_ingreso',
+              'fecha_compromiso_cliente', 'fecha_cierre_ot', 'fecha_fin_taller',
+              'monto', 'idtiposervicio', 'tipo_desc', 'tipo_abrev', 'codcliente', 'synced_at',
+            ],
+            ['nroot'],
+          )
+          .execute();
+      }
+    }
+
+    // 5. Update sync state
+    await this.stateRepo.upsert(
+      {
+        kind:         'ot_rows',
+        lastSyncAt:   tickStart,
+        openCount:    openOts.length,
+        totalSynced:  allOts.length,
+        errorMessage: null as unknown as string,
+        updatedAt:    new Date(),
+      },
+      ['kind'],
+    );
+
+    this.lastOtSyncAt = tickStart;
+    this.logger.log(
+      `OK syncOtRows → ${openOts.length} open + ${closedOts.length} closed = ${allOts.length} total`,
+    );
+  }
+
+  private async fetchOtsFromDms(
+    opts: { onlyOpen?: boolean; closedSince?: Date },
+  ): Promise<Partial<DmsOtRow>[]> {
+    let pool: sql.ConnectionPool | null = null;
+    try {
+      pool = await getDmsPool();
+      const request = pool.request();
+
+      let whereClause: string;
+      if (opts.onlyOpen) {
+        whereClause = "WHERE m.EstadoOT = 'Abierto'";
+      } else if (opts.closedSince) {
+        request.input('closedSince', sql.DateTime, opts.closedSince);
+        whereClause = 'WHERE m.fecha_cierre_ot >= @closedSince';
+      } else {
+        whereClause = '';
+      }
+
+      const result = await request.query(`
+        SELECT
+          m.nroot,
+          LTRIM(RTRIM(m.nrocliente))             AS nrocliente,
+          LTRIM(RTRIM(m.nombrecliente))           AS nombrecliente,
+          LTRIM(RTRIM(m.chasis))                  AS chasis,
+          LTRIM(RTRIM(m.modelo))                  AS modelo,
+          LTRIM(RTRIM(m.EstadoOT))               AS estado_ot,
+          LTRIM(RTRIM(m.EstadoTaller))            AS estado_taller,
+          LTRIM(RTRIM(m.Estadofinanciero))        AS estado_financiero,
+          LTRIM(RTRIM(m.asesor))                  AS asesor,
+          m.taller,
+          ISNULL(LTRIM(RTRIM(s.Descripcion)), '') AS sucursal_desc,
+          m.fechaingreso                           AS fecha_ingreso,
+          m.horaingreso                            AS hora_ingreso,
+          m.fechacompromisoCliente                 AS fecha_compromiso_cliente,
+          m.fecha_cierre_ot,
+          m.fecha_fin_taller,
+          CAST(m.monto AS FLOAT)                  AS monto,
+          m.idtiposervicio,
+          ISNULL(LTRIM(RTRIM(ts.descripcion)), '') AS tipo_desc,
+          ISNULL(LTRIM(RTRIM(ts.abreviatura)), '') AS tipo_abrev,
+          NULL                                    AS codcliente
+        FROM dbo.MasterOT_Condor m
+        LEFT JOIN dbo.controltiempo_DimSucursal s
+               ON s.IdSucursal = m.taller
+        LEFT JOIN dbo.controltiempo_DimTipoServicio ts
+               ON ts.idtipo_servicio = m.idtiposervicio
+        ${whereClause}
+      `);
+
+      const now = new Date();
+      return (result.recordset as any[]).map(r => ({
+        nroot:                  Number(r.nroot),
+        nrocliente:             String(r.nrocliente ?? '').trim() || null,
+        nombrecliente:          String(r.nombrecliente ?? '').trim() || null,
+        chasis:                 String(r.chasis ?? '').trim() || null,
+        modelo:                 String(r.modelo ?? '').trim() || null,
+        estadoOt:               String(r.estado_ot ?? '').trim() || null,
+        estadoTaller:           String(r.estado_taller ?? '').trim() || null,
+        estadoFinanciero:       String(r.estado_financiero ?? '').trim() || null,
+        asesor:                 String(r.asesor ?? '').trim() || null,
+        taller:                 r.taller != null ? Number(r.taller) : null,
+        sucursalDesc:           String(r.sucursal_desc ?? '').trim() || null,
+        fechaIngreso:           r.fecha_ingreso ? new Date(r.fecha_ingreso) : null,
+        horaIngreso:            r.hora_ingreso ? String(r.hora_ingreso).trim() || null : null,
+        fechaCompromisoCliente: r.fecha_compromiso_cliente ? new Date(r.fecha_compromiso_cliente) : null,
+        fechaCierreOt:          r.fecha_cierre_ot ? new Date(r.fecha_cierre_ot) : null,
+        fechaFinTaller:         r.fecha_fin_taller ? new Date(r.fecha_fin_taller) : null,
+        monto:                  r.monto != null ? Number(r.monto) : null,
+        idTipoServicio:         r.idtiposervicio != null ? Number(r.idtiposervicio) : null,
+        tipoDesc:               String(r.tipo_desc ?? '').trim() || null,
+        tipoAbrev:              String(r.tipo_abrev ?? '').trim() || null,
+        codcliente:             String(r.codcliente ?? '').trim() || null,
+        syncedAt:               now,
+      }));
+    } finally {
+      await pool?.close();
     }
   }
 

@@ -16,7 +16,7 @@ export class User {
   passwordHash: string;
 
   @Column({ type: 'varchar', default: 'receptionist' })
-  role: 'admin' | 'receptionist' | 'perito';
+  role: 'admin' | 'admin_taller' | 'receptionist' | 'perito';
 
   @Column({ name: 'role_id', nullable: true, type: 'uuid' })
   roleId: string | null;

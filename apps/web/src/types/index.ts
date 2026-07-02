@@ -115,7 +115,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  role: 'admin' | 'receptionist' | 'perito';
+  role: 'admin' | 'admin_taller' | 'receptionist' | 'perito';
   active: boolean;
   mustChangePassword?: boolean;
   roleId?: string | null;

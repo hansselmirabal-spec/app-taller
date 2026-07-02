@@ -10,7 +10,7 @@ const securityHeaders = [
 const nextConfig = {
   output: 'standalone',
   transpilePackages: ['react-grid-layout', 'react-resizable'],
-  serverExternalPackages: ['@react-pdf/renderer', 'mysql2'],
+  serverExternalPackages: ['@react-pdf/renderer', 'mysql2', 'mssql'],
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1',
     NEXT_PUBLIC_MOCK_MODE: process.env.NEXT_PUBLIC_MOCK_MODE || 'false',

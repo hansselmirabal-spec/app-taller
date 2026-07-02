@@ -58,12 +58,21 @@ jobs:
     needs: [build-api, build-web]
     runs-on: [self-hosted, app-taller-server]
     steps:
+      - uses: actions/checkout@v4
+
       - name: Pull and restart QAS
         run: |
+          cp docker-compose.qas.yml /opt/stacks/app-taller/docker-compose.qas.yml
           cd /opt/stacks/app-taller
           docker compose -f docker-compose.qas.yml --project-name app-taller-qas pull
-          docker compose -f docker-compose.qas.yml --project-name app-taller-qas up -d
+          docker rm -f app-taller-qas-web-1 app-taller-qas-api-1 app-taller-qas-nginx-1 2>/dev/null || true
+          docker compose -f docker-compose.qas.yml --project-name app-taller-qas up -d --remove-orphans
           docker image prune -f
+
+      - name: Update and reload nginx
+        run: |
+          cp nginx/nginx.qas.conf /opt/stacks/app-taller/nginx/nginx.qas.conf
+          docker exec app-taller-qas-nginx-1 nginx -s reload
 
       - name: Health check QAS
         run: |

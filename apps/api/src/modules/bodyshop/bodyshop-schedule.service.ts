@@ -14,9 +14,10 @@ const SHOP_CLOSE = '18:00';
 
 const SPECIALTY_TO_CODE: Record<string, string> = {
   CHAPERIA: 'BODYWORK', CARROCERIA: 'BODYWORK', BODYWORK: 'BODYWORK',
-  PREPARACION: 'PREP', PREP: 'PREP',
-  PINTURA: 'PAINT', PAINT: 'PAINT',
-  PULIDO: 'POLISH', POLISH: 'POLISH',
+  CHAPA: 'BODYWORK', CHAPERO: 'BODYWORK', 'CHAPA Y PINTURA': 'BODYWORK',
+  PREPARACION: 'PREP', PREPARADOR: 'PREP', PREP: 'PREP',
+  PINTURA: 'PAINT', PINTOR: 'PAINT', PAINT: 'PAINT',
+  PULIDO: 'POLISH', PULIDOR: 'POLISH', POLISH: 'POLISH',
 };
 
 export interface SimulateInput {
@@ -240,6 +241,12 @@ export class BodyshopScheduleService {
       dailyCap.set(code, (dailyCap.get(code) ?? 0) + dailyHours);
       techCapMap.set(tech.id, { process: code, dailyHours });
     }
+
+    // If PREP has no dedicated technician, BODYWORK techs cover it (common in bodyshops)
+    if (!dailyCap.has('PREP') && dailyCap.has('BODYWORK')) {
+      dailyCap.set('PREP', dailyCap.get('BODYWORK')!);
+    }
+
     return { dailyCap, techCapMap };
   }
 

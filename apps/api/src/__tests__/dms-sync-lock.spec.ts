@@ -10,21 +10,40 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { DmsSyncService } from '../modules/dms-sync/dms-sync.service';
 import { DmsSnapshot } from '../modules/dms-sync/dms-snapshot.entity';
+import { DmsAdvisorSlot } from '../modules/dms-sync/dms-advisor-slot.entity';
+import { DmsOtRow } from '../modules/dms-sync/dms-ot-row.entity';
+import { DmsSyncState } from '../modules/dms-sync/dms-sync-state.entity';
+
+function makeRepoMock() {
+  return { upsert: jest.fn(), findOne: jest.fn(), save: jest.fn(), find: jest.fn(), createQueryBuilder: jest.fn() };
+}
 
 describe('DmsSyncService.syncAll() - advisory lock', () => {
   let service: DmsSyncService;
-  let dataSourceMock: { query: jest.Mock };
+  let dataSourceMock: { query: jest.Mock; createQueryBuilder: jest.Mock };
   let syncOtSeguimientoSpy: jest.SpyInstance;
 
   beforeEach(async () => {
-    dataSourceMock = { query: jest.fn() };
+    dataSourceMock = { query: jest.fn(), createQueryBuilder: jest.fn() };
 
     const mod: TestingModule = await Test.createTestingModule({
       providers: [
         DmsSyncService,
         {
           provide: getRepositoryToken(DmsSnapshot),
-          useValue: { upsert: jest.fn(), findOne: jest.fn(), save: jest.fn(), find: jest.fn() },
+          useValue: makeRepoMock(),
+        },
+        {
+          provide: getRepositoryToken(DmsAdvisorSlot),
+          useValue: makeRepoMock(),
+        },
+        {
+          provide: getRepositoryToken(DmsOtRow),
+          useValue: makeRepoMock(),
+        },
+        {
+          provide: getRepositoryToken(DmsSyncState),
+          useValue: makeRepoMock(),
         },
         { provide: getDataSourceToken(), useValue: dataSourceMock },
       ],
@@ -33,6 +52,8 @@ describe('DmsSyncService.syncAll() - advisory lock', () => {
     service = mod.get(DmsSyncService);
     // Stub del trabajo real: nos interesa ver SI se ejecuta, no lo que hace adentro.
     syncOtSeguimientoSpy = jest.spyOn(service, 'syncOtSeguimiento').mockResolvedValue(undefined);
+    // Stub OT rows sync so advisory lock tests stay focused
+    jest.spyOn(service, 'maybeRunOtRowsSync').mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -128,11 +149,16 @@ describe('DmsSyncService.getHealth() + escalamiento', () => {
     const mod: TestingModule = await Test.createTestingModule({
       providers: [
         DmsSyncService,
-        { provide: getRepositoryToken(DmsSnapshot), useValue: { upsert: jest.fn(), findOne: jest.fn(), save: jest.fn(), find: jest.fn() } },
+        { provide: getRepositoryToken(DmsSnapshot),    useValue: makeRepoMock() },
+        { provide: getRepositoryToken(DmsAdvisorSlot), useValue: makeRepoMock() },
+        { provide: getRepositoryToken(DmsOtRow),       useValue: makeRepoMock() },
+        { provide: getRepositoryToken(DmsSyncState),   useValue: makeRepoMock() },
         { provide: getDataSourceToken(), useValue: dataSourceMock },
       ],
     }).compile();
     service = mod.get(DmsSyncService);
+    jest.spyOn(service, 'maybeRunOtRowsSync').mockResolvedValue(undefined);
+    jest.spyOn(service, 'syncAdvisorSlots').mockResolvedValue(undefined);
     loggerErrorSpy = jest.spyOn((service as any).logger, 'error').mockImplementation(() => undefined);
   });
 

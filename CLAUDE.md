@@ -93,6 +93,16 @@ Fase 5 — Entrega        : HM cierra
 
 ---
 
+## CONVENCIONES CRÍTICAS
+
+### Auth — cookie JWT
+- La cookie JWT se llama **`auth_token`** (httpOnly, SameSite=Lax). NUNCA usar `access_token`.
+- El body del login devuelve `access_token` como campo, pero la **cookie** es `auth_token`. Son cosas distintas.
+- Todo route Next.js (`apps/web/src/app/api/**`) que proxee al backend interno debe leer: `cookieStore.get('auth_token')?.value`
+- Definida en: `apps/api/src/modules/auth/auth.controller.ts` → `const COOKIE_NAME = 'auth_token'`
+
+---
+
 ## REGLAS
 
 - Ningún agente repite contexto ya dado → 0 tokens desperdiciados
