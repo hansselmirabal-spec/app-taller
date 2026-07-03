@@ -226,8 +226,35 @@ export class DmsOtService {
       cerradosEnPeriodo: Number(kpi.cerradosEnPeriodo  ?? 0),
       tasaCierre:        Number(kpi.tasaCierre         ?? 0),
       totalVencidos:     Number(kpi.totalVencidos      ?? 0),
-      vencidos,
-      proximosVencer,
+      vencidos: vencidos.map(v => ({
+        ot:              Number(v.nroot),
+        cliente:         String(v.nombrecliente ?? '').trim(),
+        modelo:          String(v.modelo ?? '').trim(),
+        asesor:          String(v.asesor ?? '').trim(),
+        sucursal:        String(v.sucursal_desc ?? '').trim(),
+        fechaCompromiso: v.fecha_compromiso_cliente
+          ? new Date(v.fecha_compromiso_cliente).toISOString().split('T')[0]
+          : '',
+        diasVencido:     v.diasRetraso != null ? Math.max(0, Number(v.diasRetraso)) : 0,
+        diasEnTaller:    v.fecha_ingreso
+          ? Math.max(0, Math.floor((Date.now() - new Date(v.fecha_ingreso).getTime()) / 86400000))
+          : 0,
+      })),
+      proximosVencer: proximosVencer.map(p => {
+        const msLeft = p.fecha_compromiso_cliente
+          ? new Date(p.fecha_compromiso_cliente).getTime() - Date.now()
+          : 0;
+        return {
+          ot:              Number(p.nroot),
+          cliente:         String(p.nombrecliente ?? '').trim(),
+          modelo:          String(p.modelo ?? '').trim(),
+          asesor:          String(p.asesor ?? '').trim(),
+          fechaCompromiso: p.fecha_compromiso_cliente
+            ? new Date(p.fecha_compromiso_cliente).toISOString().split('T')[0]
+            : '',
+          diasRestantes:   Math.max(0, Math.ceil(msLeft / 86400000)),
+        };
+      }),
       distribucion: distribucion.map(d => ({ estado: d.estado, count: Number(d.count) })),
       porAsesor: porAsesor.map(a => ({
         asesor:       a.asesor,
@@ -239,6 +266,70 @@ export class DmsOtService {
         sucursales: sucursalOpts.map(r => r.sucursal_desc),
         asesores:   asesorOpts.map(r => r.asesor),
       },
+    };
+  }
+
+  // ── GET /dms/ot-seguimiento/operativo?drill=<metric> ─────────────────────────
+  async getOperativoDrill(metric: string, periodo: string): Promise<any> {
+    const isHoy = periodo === 'hoy';
+    const dateFilter = isHoy
+      ? `AND fecha_ingreso::DATE = CURRENT_DATE`
+      : `AND fecha_ingreso >= CURRENT_DATE - INTERVAL '7 days'`;
+
+    const labels: Record<string, string> = {
+      ingresos: isHoy ? 'Ingresos hoy' : 'Ingresos esta semana',
+      vencidos: 'Compromisos vencidos',
+      cerrados: isHoy ? 'Cerradas hoy' : 'Cerradas esta semana',
+      criticas: 'OTs críticas (+30 días)',
+      abiertas: 'Total abiertas',
+      atraso:   'En atraso (14-30 días)',
+    };
+
+    const whereMap: Record<string, string> = {
+      ingresos: `fecha_ingreso IS NOT NULL ${dateFilter}`,
+      vencidos: `fecha_compromiso_cliente < NOW() AND fecha_cierre_ot IS NULL AND estado_ot = 'Abierto'`,
+      cerrados: `fecha_cierre_ot IS NOT NULL ${isHoy
+        ? `AND fecha_cierre_ot::DATE = CURRENT_DATE`
+        : `AND fecha_cierre_ot >= CURRENT_DATE - INTERVAL '7 days'`}`,
+      criticas: `estado_ot = 'Abierto' AND (CURRENT_DATE - fecha_ingreso) > 30`,
+      abiertas: `estado_ot = 'Abierto'`,
+      atraso:   `estado_ot = 'Abierto' AND (CURRENT_DATE - fecha_ingreso) BETWEEN 14 AND 30`,
+    };
+
+    const where = whereMap[metric] ?? `estado_ot = 'Abierto'`;
+
+    const rows: any[] = await this.otRepo.query(`
+      SELECT
+        nroot, nombrecliente, modelo, asesor, sucursal_desc,
+        estado_ot, estado_taller,
+        fecha_ingreso, fecha_compromiso_cliente, fecha_cierre_ot,
+        (CURRENT_DATE - fecha_ingreso)           AS dias_en_taller
+      FROM dms_ot_rows
+      WHERE ${where}
+      ORDER BY dias_en_taller DESC NULLS LAST
+      LIMIT 200
+    `);
+
+    return {
+      metric,
+      label:  labels[metric] ?? metric,
+      total:  rows.length,
+      rows: rows.map(r => ({
+        ot:              Number(r.nroot),
+        cliente:         String(r.nombrecliente ?? '').trim(),
+        modelo:          String(r.modelo ?? '').trim(),
+        asesor:          String(r.asesor ?? '').trim(),
+        estado:          String(r.estado_taller ?? r.estado_ot ?? '').trim(),
+        sucursal:        String(r.sucursal_desc ?? '').trim(),
+        fechaIngreso:    r.fecha_ingreso ? new Date(r.fecha_ingreso).toISOString().split('T')[0] : '',
+        diasEnTaller:    r.dias_en_taller != null ? Math.max(0, Number(r.dias_en_taller)) : 0,
+        fechaCompromiso: r.fecha_compromiso_cliente
+          ? new Date(r.fecha_compromiso_cliente).toISOString().split('T')[0]
+          : undefined,
+        fechaCierre:     r.fecha_cierre_ot
+          ? new Date(r.fecha_cierre_ot).toISOString().split('T')[0]
+          : undefined,
+      })),
     };
   }
 

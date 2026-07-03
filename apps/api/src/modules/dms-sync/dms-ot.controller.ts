@@ -32,6 +32,9 @@ export class DmsOtController {
 
   @Get('ot-seguimiento/operativo')
   async getOperativo(@Query() q: Record<string, any>) {
+    if (q.drill) {
+      return this.service.getOperativoDrill(String(q.drill), String(q.periodo ?? q.period ?? 'hoy'));
+    }
     return this.service.getOperativo(q.period ?? 'all', parseFilters(q));
   }
 
