@@ -460,29 +460,31 @@ export class DmsOtService {
       ORDER BY count DESC
     `);
 
-    // Antigüedad buckets
+    // Antigüedad buckets — labels must match AntiguedadBucket type exactly
     const antiguedad: any[] = await this.otRepo.query(`
       SELECT
         CASE
-          WHEN (CURRENT_DATE - fecha_ingreso) <= 7   THEN '0-7d'
-          WHEN (CURRENT_DATE - fecha_ingreso) <= 15  THEN '8-15d'
-          WHEN (CURRENT_DATE - fecha_ingreso) <= 30  THEN '16-30d'
-          WHEN (CURRENT_DATE - fecha_ingreso) <= 60  THEN '31-60d'
-          ELSE '+60d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 7   THEN 'Reciente · 0-7 d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 14  THEN 'Normal · 8-14 d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 30  THEN 'Demora · 15-30 d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 60  THEN 'Atraso alto · 31-60 d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 90  THEN 'Atraso crítico · 61-90 d'
+          ELSE 'Congelada · +90 d'
         END AS bucket,
-        COUNT(*) AS count
+        COUNT(*) AS count,
+        COALESCE(SUM(monto), 0) AS monto
       FROM dms_ot_rows
       WHERE estado_ot = 'Abierto'
         AND fecha_ingreso IS NOT NULL
       GROUP BY
         CASE
-          WHEN (CURRENT_DATE - fecha_ingreso) <= 7   THEN '0-7d'
-          WHEN (CURRENT_DATE - fecha_ingreso) <= 15  THEN '8-15d'
-          WHEN (CURRENT_DATE - fecha_ingreso) <= 30  THEN '16-30d'
-          WHEN (CURRENT_DATE - fecha_ingreso) <= 60  THEN '31-60d'
-          ELSE '+60d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 7   THEN 'Reciente · 0-7 d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 14  THEN 'Normal · 8-14 d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 30  THEN 'Demora · 15-30 d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 60  THEN 'Atraso alto · 31-60 d'
+          WHEN (CURRENT_DATE - fecha_ingreso) <= 90  THEN 'Atraso crítico · 61-90 d'
+          ELSE 'Congelada · +90 d'
         END
-      ORDER BY bucket
     `);
 
     // Tendencia — last 12 months ingress
@@ -500,9 +502,10 @@ export class DmsOtService {
     // Tops — vencidas top 10
     const vencidasTop: any[] = await this.otRepo.query(`
       SELECT
-        nroot, nombrecliente, chasis, asesor, sucursal_desc,
+        nroot, nombrecliente, modelo, asesor, sucursal_desc, estado_taller, tipo_abrev,
         fecha_compromiso_cliente,
-        (CURRENT_DATE - fecha_compromiso_cliente) AS "diasRetraso"
+        (CURRENT_DATE - fecha_compromiso_cliente) AS "diasRetraso",
+        COALESCE(monto, 0) AS monto
       FROM dms_ot_rows
       WHERE fecha_compromiso_cliente < NOW()
         AND fecha_cierre_ot IS NULL
@@ -514,8 +517,10 @@ export class DmsOtService {
     // criticasTop — oldest open OTs
     const criticasTop: any[] = await this.otRepo.query(`
       SELECT
-        nroot, nombrecliente, chasis, asesor, sucursal_desc, fecha_ingreso,
-        (CURRENT_DATE - fecha_ingreso) AS "diasIngreso"
+        nroot, nombrecliente, modelo, asesor, sucursal_desc, estado_taller, tipo_abrev,
+        fecha_ingreso, fecha_compromiso_cliente,
+        (CURRENT_DATE - fecha_ingreso) AS "diasIngreso",
+        COALESCE(monto, 0) AS monto
       FROM dms_ot_rows
       WHERE estado_ot = 'Abierto'
         AND fecha_ingreso IS NOT NULL
@@ -526,7 +531,9 @@ export class DmsOtService {
     // facturadasTop — highest-value closed OTs
     const facturadasTop: any[] = await this.otRepo.query(`
       SELECT
-        nroot, nombrecliente, chasis, asesor, sucursal_desc, monto, fecha_cierre_ot
+        nroot, nombrecliente, modelo, asesor, sucursal_desc, estado_taller, tipo_abrev,
+        monto, fecha_ingreso, hora_ingreso, fecha_cierre_ot,
+        (CURRENT_DATE - fecha_ingreso) AS "diasIngreso"
       FROM dms_ot_rows
       WHERE fecha_cierre_ot IS NOT NULL
         AND monto IS NOT NULL
@@ -565,23 +572,49 @@ export class DmsOtService {
       porEstado:   porEstado.map(r   => ({ estado: r.estado,     total: Number(r.count), vencidas: 0 })),
       porSucursal: porSucursal.map(r => ({ sucursal: r.sucursal, total: Number(r.count), abiertas: Number(r.count), vencidas: 0, criticas: 0, facturadas: 0 })),
       porTipo:     porTipo.map(r     => ({ tipo: r.tipo,         total: Number(r.count), monto: 0, avgDaysOpen: 0, tasaCierre: 0 })),
-      antiguedad:  antiguedad.map(r  => ({ bucket: r.bucket,     total: Number(r.count), monto: 0 })),
-      tendencia:   tendencia.map(r   => ({ mes: r.mes,           ingresos: Number(r.count), finalizadas: 0 })),
+      antiguedad:  antiguedad.map(r  => ({ bucket: r.bucket, total: Number(r.count), monto: Number(r.monto ?? 0) })),
+      tendencia:   tendencia.map(r   => ({ mes: r.mes, ingresos: Number(r.count), finalizadas: 0 })),
       vencidasTop: vencidasTop.map(r => ({
-        ot: Number(r.nroot), cliente: r.nombrecliente ?? '', modelo: r.modelo ?? '',
-        sucursal: r.sucursal_desc ?? '', estadoOt: '', tipoServicio: '',
-        fechaCompromiso: r.fecha_compromiso_cliente ?? '', diasRetraso: Number(r.diasRetraso ?? 0), monto: 0,
+        ot:              Number(r.nroot),
+        cliente:         String(r.nombrecliente ?? '').trim(),
+        modelo:          String(r.modelo ?? '').trim(),
+        sucursal:        String(r.sucursal_desc ?? '').trim(),
+        estadoOt:        String(r.estado_taller ?? '').trim(),
+        tipoServicio:    String(r.tipo_abrev ?? '').trim(),
+        fechaCompromiso: r.fecha_compromiso_cliente
+          ? new Date(r.fecha_compromiso_cliente).toISOString().split('T')[0]
+          : '',
+        diasRetraso:     Number(r.diasRetraso ?? 0),
+        monto:           Number(r.monto ?? 0),
       })),
       criticasTop: criticasTop.map(r => ({
-        ot: Number(r.nroot), cliente: r.nombrecliente ?? '', modelo: r.modelo ?? '',
-        sucursal: r.sucursal_desc ?? '', estadoOt: '', tipoServicio: '',
-        fechaIngreso: r.fecha_ingreso ?? '', fechaCompromiso: null,
-        diasIngreso: Number(r.diasIngreso ?? 0), diasRetraso: 0, criticidad: Number(r.diasIngreso ?? 0), razon: 'Antigüedad', monto: 0,
+        ot:              Number(r.nroot),
+        cliente:         String(r.nombrecliente ?? '').trim(),
+        modelo:          String(r.modelo ?? '').trim(),
+        sucursal:        String(r.sucursal_desc ?? '').trim(),
+        estadoOt:        String(r.estado_taller ?? '').trim(),
+        tipoServicio:    String(r.tipo_abrev ?? '').trim(),
+        fechaIngreso:    r.fecha_ingreso ? new Date(r.fecha_ingreso).toISOString().split('T')[0] : '',
+        fechaCompromiso: r.fecha_compromiso_cliente
+          ? new Date(r.fecha_compromiso_cliente).toISOString().split('T')[0]
+          : null,
+        diasIngreso:     Number(r.diasIngreso ?? 0),
+        diasRetraso:     0,
+        criticidad:      Number(r.diasIngreso ?? 0),
+        razon:           'Antigüedad',
+        monto:           Number(r.monto ?? 0),
       })),
       facturadasTop: facturadasTop.map(r => ({
-        ot: Number(r.nroot), cliente: r.nombrecliente ?? '', modelo: r.modelo ?? '',
-        sucursal: r.sucursal_desc ?? '', estadoOt: '', tipoServicio: '',
-        fechaIngreso: r.fecha_cierre_ot ?? '', horaIngreso: null, diasIngreso: 0, monto: Number(r.monto ?? 0),
+        ot:          Number(r.nroot),
+        cliente:     String(r.nombrecliente ?? '').trim(),
+        modelo:      String(r.modelo ?? '').trim(),
+        sucursal:    String(r.sucursal_desc ?? '').trim(),
+        estadoOt:    String(r.estado_taller ?? '').trim(),
+        tipoServicio: String(r.tipo_abrev ?? '').trim(),
+        fechaIngreso: r.fecha_ingreso ? new Date(r.fecha_ingreso).toISOString().split('T')[0] : '',
+        horaIngreso:  r.hora_ingreso ? String(r.hora_ingreso).trim() || null : null,
+        diasIngreso:  Number(r.diasIngreso ?? 0),
+        monto:        Number(r.monto ?? 0),
       })),
       topAsesores: topAsesores.map(a => ({
         asesor: a.asesor, total: Number(a.total),
