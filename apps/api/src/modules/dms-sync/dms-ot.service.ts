@@ -457,30 +457,44 @@ export class DmsOtService {
       LIMIT 15
     `);
 
+    const generatedAt = new Date().toISOString();
     return {
+      filters: { days: 365, dateFrom: null, dateTo: null, sucursal: '', tipo: '' },
+      generatedAt,
       kpi: {
-        total:             Number(kpi.total             ?? 0),
-        abiertas:          Number(kpi.abiertas          ?? 0),
-        cerradas:          Number(kpi.cerradas          ?? 0),
-        vencidas:          Number(kpi.vencidas          ?? 0),
-        criticas:          Number(kpi.criticas          ?? 0),
-        montoFacturado:    Number(kpi.montoFacturado    ?? 0),
-        montoTotal:        Number(kpi.montoTotal        ?? 0),
-        diasPromedioCierre: Number(kpi.diasPromedioCierre ?? 0),
+        totalAbiertas:       Number(kpi.abiertas          ?? 0),
+        vencidas:            Number(kpi.vencidas          ?? 0),
+        atrasoCritico:       Number(kpi.criticas          ?? 0),
+        montoTotal:          Number(kpi.montoTotal        ?? 0),
+        tasaCierre30d:       0,
+        diasPromedio:        Number(kpi.diasPromedioCierre ?? 0),
+        facturadasPendientes: Number(kpi.cerradas         ?? 0),
+        facturadasMonto:     Number(kpi.montoFacturado    ?? 0),
       },
-      porEstado:    porEstado.map(r    => ({ estado: r.estado,       count: Number(r.count) })),
-      porSucursal:  porSucursal.map(r  => ({ sucursal: r.sucursal,   count: Number(r.count) })),
-      porTipo:      porTipo.map(r      => ({ tipo: r.tipo,           count: Number(r.count) })),
-      antiguedad:   antiguedad.map(r   => ({ bucket: r.bucket,       count: Number(r.count) })),
-      tendencia:    tendencia.map(r    => ({ mes: r.mes,             count: Number(r.count) })),
-      vencidasTop,
-      criticasTop,
-      facturadasTop,
+      porEstado:   porEstado.map(r   => ({ estado: r.estado,     total: Number(r.count), vencidas: 0 })),
+      porSucursal: porSucursal.map(r => ({ sucursal: r.sucursal, total: Number(r.count), abiertas: Number(r.count), vencidas: 0, criticas: 0, facturadas: 0 })),
+      porTipo:     porTipo.map(r     => ({ tipo: r.tipo,         total: Number(r.count), monto: 0, avgDaysOpen: 0, tasaCierre: 0 })),
+      antiguedad:  antiguedad.map(r  => ({ bucket: r.bucket,     total: Number(r.count), monto: 0 })),
+      tendencia:   tendencia.map(r   => ({ mes: r.mes,           ingresos: Number(r.count), finalizadas: 0 })),
+      vencidasTop: vencidasTop.map(r => ({
+        ot: Number(r.nroot), cliente: r.nombrecliente ?? '', modelo: r.modelo ?? '',
+        sucursal: r.sucursal_desc ?? '', estadoOt: '', tipoServicio: '',
+        fechaCompromiso: r.fecha_compromiso_cliente ?? '', diasRetraso: Number(r.diasRetraso ?? 0), monto: 0,
+      })),
+      criticasTop: criticasTop.map(r => ({
+        ot: Number(r.nroot), cliente: r.nombrecliente ?? '', modelo: r.modelo ?? '',
+        sucursal: r.sucursal_desc ?? '', estadoOt: '', tipoServicio: '',
+        fechaIngreso: r.fecha_ingreso ?? '', fechaCompromiso: null,
+        diasIngreso: Number(r.diasIngreso ?? 0), diasRetraso: 0, criticidad: Number(r.diasIngreso ?? 0), razon: 'Antigüedad', monto: 0,
+      })),
+      facturadasTop: facturadasTop.map(r => ({
+        ot: Number(r.nroot), cliente: r.nombrecliente ?? '', modelo: r.modelo ?? '',
+        sucursal: r.sucursal_desc ?? '', estadoOt: '', tipoServicio: '',
+        fechaIngreso: r.fecha_cierre_ot ?? '', horaIngreso: null, diasIngreso: 0, monto: Number(r.monto ?? 0),
+      })),
       topAsesores: topAsesores.map(a => ({
-        asesor:     a.asesor,
-        total:      Number(a.total),
-        abiertas:   Number(a.abiertas),
-        montoTotal: Number(a.montoTotal),
+        asesor: a.asesor, total: Number(a.total),
+        finalizadas: Number(a.abiertas), tasaCierre: 0, monto: Number(a.montoTotal ?? 0),
       })),
     };
   }
