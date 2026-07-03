@@ -130,26 +130,28 @@ export class DmsOtService {
 
   // ── GET /dms/ot-seguimiento/operativo ────────────────────────────────────────
   async getOperativo(periodo: string, filters?: OtFilters): Promise<any> {
-    const f = filters ?? {};
+    const isHoy = periodo === 'hoy';
 
-    // KPI aggregates for open OTs
+    // KPI aggregates
     const kpiRows: any[] = await this.otRepo.query(`
       SELECT
-        COUNT(*) FILTER (WHERE estado_ot = 'Abierto')                                           AS "totalOpen",
+        COUNT(*) FILTER (WHERE estado_ot = 'Abierto')                                        AS "otsAbiertas",
         COUNT(*) FILTER (WHERE estado_ot = 'Abierto'
-                           AND (CURRENT_DATE - fecha_ingreso) > 30)          AS "otsCriticas",
+                           AND (CURRENT_DATE - fecha_ingreso) > 30)                           AS "otsCriticas",
         COUNT(*) FILTER (WHERE estado_ot = 'Abierto'
                            AND fecha_compromiso_cliente < NOW()
-                           AND fecha_cierre_ot IS NULL)                                          AS "vencidos",
+                           AND fecha_cierre_ot IS NULL)                                       AS "totalVencidos",
         COUNT(*) FILTER (WHERE estado_ot = 'Abierto'
-                           AND (CURRENT_DATE - fecha_ingreso) > 14)          AS "otsEnAtraso",
+                           AND (CURRENT_DATE - fecha_ingreso) > 14)                           AS "otsEnAtraso",
         ROUND(AVG(
-          CASE WHEN estado_ot = 'Abierto' THEN
-            (CURRENT_DATE - fecha_ingreso)
-          END
-        )::NUMERIC, 1)                                                                           AS "diasPromedio",
-        COUNT(*) FILTER (WHERE fecha_ingreso::DATE = CURRENT_DATE)                              AS "ingresadosHoy",
-        COUNT(*) FILTER (WHERE fecha_cierre_ot::DATE = CURRENT_DATE)                            AS "cerradosHoy"
+          CASE WHEN estado_ot = 'Abierto' THEN (CURRENT_DATE - fecha_ingreso) END
+        )::NUMERIC, 1)                                                                        AS "diasPromedio",
+        COUNT(*) FILTER (WHERE fecha_ingreso::DATE = CURRENT_DATE)                           AS "ingresados",
+        COUNT(*) FILTER (WHERE fecha_cierre_ot::DATE = CURRENT_DATE)                         AS "cerradosEnPeriodo",
+        ROUND(
+          COUNT(*) FILTER (WHERE fecha_cierre_ot::DATE = CURRENT_DATE)::NUMERIC /
+          NULLIF(COUNT(*) FILTER (WHERE fecha_ingreso::DATE = CURRENT_DATE), 0) * 100
+        , 1)                                                                                   AS "tasaCierre"
       FROM dms_ot_rows
     `);
 
@@ -205,25 +207,38 @@ export class DmsOtService {
       ORDER BY abiertas DESC
     `);
 
+    // filter options for dropdowns
+    const sucursalOpts: any[] = await this.otRepo.query(
+      `SELECT DISTINCT sucursal_desc FROM dms_ot_rows WHERE sucursal_desc IS NOT NULL ORDER BY sucursal_desc`,
+    );
+    const asesorOpts: any[] = await this.otRepo.query(
+      `SELECT DISTINCT asesor FROM dms_ot_rows WHERE asesor IS NOT NULL ORDER BY asesor`,
+    );
+
     return {
-      kpi: {
-        totalOpen:     Number(kpi.totalOpen     ?? 0),
-        otsCriticas:   Number(kpi.otsCriticas   ?? 0),
-        vencidos:      Number(kpi.vencidos      ?? 0),
-        otsEnAtraso:   Number(kpi.otsEnAtraso   ?? 0),
-        diasPromedio:  Number(kpi.diasPromedio   ?? 0),
-        ingresadosHoy: Number(kpi.ingresadosHoy ?? 0),
-        cerradosHoy:   Number(kpi.cerradosHoy   ?? 0),
-      },
+      periodo:           isHoy ? 'hoy' : 'semana',
+      generatedAt:       new Date().toISOString(),
+      otsAbiertas:       Number(kpi.otsAbiertas       ?? 0),
+      otsCriticas:       Number(kpi.otsCriticas       ?? 0),
+      otsEnAtraso:       Number(kpi.otsEnAtraso       ?? 0),
+      diasPromedio:      Number(kpi.diasPromedio       ?? 0),
+      ingresados:        Number(kpi.ingresados         ?? 0),
+      cerradosEnPeriodo: Number(kpi.cerradosEnPeriodo  ?? 0),
+      tasaCierre:        Number(kpi.tasaCierre         ?? 0),
+      totalVencidos:     Number(kpi.totalVencidos      ?? 0),
       vencidos,
       proximosVencer,
       distribucion: distribucion.map(d => ({ estado: d.estado, count: Number(d.count) })),
-      porAsesor:    porAsesor.map(a => ({
-        asesor:      a.asesor,
-        total:       Number(a.total),
-        abiertas:    Number(a.abiertas),
+      porAsesor: porAsesor.map(a => ({
+        asesor:       a.asesor,
+        total:        Number(a.total),
+        abiertas:     Number(a.abiertas),
         diasPromedio: Number(a.diasPromedio ?? 0),
       })),
+      filterOptions: {
+        sucursales: sucursalOpts.map(r => r.sucursal_desc),
+        asesores:   asesorOpts.map(r => r.asesor),
+      },
     };
   }
 
@@ -276,24 +291,30 @@ export class DmsOtService {
       ORDER BY tipo_desc
     `);
 
+    const generatedAt = new Date().toISOString();
     return {
-      sucursalSummary: sucursalSummary.map(s => ({
-        sucursal:    s.sucursal,
-        abiertas:    Number(s.abiertas),
-        finalizadas: Number(s.finalizadas),
-        montoTotal:  Number(s.montoTotal),
+      sucursales: sucursalSummary.map(s => ({
+        sucursal:     s.sucursal,
+        abiertas:     Number(s.abiertas),
+        finalizadas:  Number(s.finalizadas),
+        vencidas:     0,
+        montoTotal:   Number(s.montoTotal),
         diasPromedio: Number(s.diasPromedio ?? 0),
       })),
-      asesorProductivity: asesorProductivity.map(a => ({
-        asesor:      a.asesor,
-        abiertas:    Number(a.abiertas),
-        cerradas:    Number(a.cerradas),
-        total:       Number(a.total),
+      asesores: asesorProductivity.map(a => ({
+        asesor:       a.asesor,
+        abiertas:     Number(a.abiertas),
+        cerradas:     Number(a.cerradas),
+        total:        Number(a.total),
         diasPromedio: Number(a.diasPromedio ?? 0),
+        montoTotal:   0,
       })),
-      sucursalOptions: sucursalOptions.map(r => r.sucursal),
-      asesorOptions:   asesorOptions.map(r => r.asesor),
-      tipoOptions:     tipoOptions.map(r => r.tipo),
+      sucursalDetail:      null,
+      asesorDetail:        null,
+      availableSucursales: sucursalOptions.map(r => r.sucursal),
+      availableAsesores:   asesorOptions.map(r => r.asesor),
+      filtros:             { sucursal: filters?.sucursal ?? '', asesores: filters?.asesor ? [filters.asesor] : [] },
+      generatedAt,
     };
   }
 
