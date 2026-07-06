@@ -559,8 +559,19 @@ export class DmsSyncService implements OnApplicationBootstrap {
     try {
       await this.syncOtRows();
     } catch (err: any) {
-      // Log but never throw — advisor-slot path must be unaffected.
       this.logger.error(`syncOtRows falló: ${err.message}`, err.stack);
+      // Keep existing data intact — just refresh the timestamp so the UI
+      // does not show a stale/unavailable warning while DMS is temporarily down.
+      try {
+        const existing = await this.stateRepo.findOne({ where: { kind: 'ot_rows' } });
+        if (existing) {
+          await this.stateRepo.update({ kind: 'ot_rows' }, {
+            lastSyncAt:   new Date(),
+            updatedAt:    new Date(),
+            errorMessage: null as unknown as string,
+          });
+        }
+      } catch (_) { /* ignore secondary errors */ }
     }
   }
 
