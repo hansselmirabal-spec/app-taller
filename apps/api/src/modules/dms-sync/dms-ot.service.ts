@@ -337,50 +337,113 @@ export class DmsOtService {
   async getReportes(filters?: OtFilters): Promise<any> {
     const sucursalSummary: any[] = await this.otRepo.query(`
       SELECT
-        sucursal_desc AS sucursal,
-        COUNT(*) FILTER (WHERE estado_ot = 'Abierto')                      AS abiertas,
-        COUNT(*) FILTER (WHERE fecha_cierre_ot IS NOT NULL)                AS finalizadas,
-        COALESCE(SUM(monto), 0)                                             AS "montoTotal",
-        ROUND(AVG(CURRENT_DATE - fecha_ingreso)::NUMERIC, 1) AS "diasPromedio"
+        sucursal_desc                                                         AS sucursal,
+        COUNT(*) FILTER (WHERE estado_ot = 'Abierto')                        AS abiertas,
+        COUNT(*) FILTER (WHERE fecha_cierre_ot IS NOT NULL)                  AS finalizadas,
+        COUNT(*) FILTER (WHERE fecha_compromiso_cliente < NOW()
+                           AND fecha_cierre_ot IS NULL)                      AS vencidas,
+        COALESCE(SUM(monto), 0)                                              AS "montoTotal",
+        ROUND(AVG(CASE WHEN estado_ot = 'Abierto'
+                       THEN (CURRENT_DATE - fecha_ingreso) END)::NUMERIC, 1) AS "diasPromedio"
       FROM dms_ot_rows
       WHERE sucursal_desc IS NOT NULL
       GROUP BY sucursal_desc
       ORDER BY abiertas DESC
     `);
 
-    const asesorProductivity: any[] = await this.otRepo.query(`
+    const asesorList: any[] = await this.otRepo.query(`
       SELECT
         asesor,
-        COUNT(*) FILTER (WHERE estado_ot = 'Abierto')       AS abiertas,
-        COUNT(*) FILTER (WHERE fecha_cierre_ot IS NOT NULL) AS cerradas,
-        COUNT(*)                                              AS total,
-        ROUND(AVG(CURRENT_DATE - fecha_ingreso)::NUMERIC, 1) AS "diasPromedio"
+        MAX(sucursal_desc)                                                    AS sucursal,
+        COUNT(*)                                                              AS "totalOts",
+        COUNT(*) FILTER (WHERE fecha_cierre_ot IS NOT NULL)                  AS finalizadas,
+        COUNT(*) FILTER (WHERE estado_ot = 'Abierto')                        AS abiertas,
+        COALESCE(SUM(monto), 0)                                              AS "montoTotal",
+        COALESCE(ROUND(AVG(
+          CASE WHEN fecha_cierre_ot IS NOT NULL
+               THEN (fecha_cierre_ot::date - fecha_ingreso::date) END
+        )::NUMERIC, 1), 0)                                                   AS "diasPromedioCierre"
       FROM dms_ot_rows
       WHERE asesor IS NOT NULL
       GROUP BY asesor
-      ORDER BY total DESC
+      ORDER BY "totalOts" DESC
     `);
 
-    const sucursalOptions: any[] = await this.otRepo.query(`
-      SELECT DISTINCT sucursal_desc AS sucursal
-      FROM dms_ot_rows
-      WHERE sucursal_desc IS NOT NULL
-      ORDER BY sucursal_desc
-    `);
+    const sucursalOptions: any[] = await this.otRepo.query(
+      `SELECT DISTINCT sucursal_desc AS sucursal FROM dms_ot_rows
+       WHERE sucursal_desc IS NOT NULL ORDER BY sucursal_desc`,
+    );
+    const asesorOptions: any[] = await this.otRepo.query(
+      `SELECT DISTINCT asesor FROM dms_ot_rows WHERE asesor IS NOT NULL ORDER BY asesor`,
+    );
 
-    const asesorOptions: any[] = await this.otRepo.query(`
-      SELECT DISTINCT asesor
-      FROM dms_ot_rows
-      WHERE asesor IS NOT NULL
-      ORDER BY asesor
-    `);
+    // ── Asesor detail when filter applied ────────────────────────────────────
+    let asesorDetail: Record<string, unknown> | null = null;
+    const asesoresFiltro: string[] = filters?.asesor
+      ? filters.asesor.split(',').map(s => s.trim()).filter(Boolean)
+      : [];
 
-    const tipoOptions: any[] = await this.otRepo.query(`
-      SELECT DISTINCT tipo_desc AS tipo
-      FROM dms_ot_rows
-      WHERE tipo_desc IS NOT NULL
-      ORDER BY tipo_desc
-    `);
+    if (asesoresFiltro.length > 0) {
+      const placeholders = asesoresFiltro.map((_, i) => `$${i + 1}`).join(',');
+      const aRows: any[] = await this.otRepo.query(
+        `SELECT nroot, asesor, sucursal_desc, estado_ot, estado_taller,
+                modelo, monto, nombrecliente,
+                fecha_ingreso, fecha_cierre_ot, fecha_compromiso_cliente,
+                (CURRENT_DATE - fecha_ingreso) AS dias
+         FROM dms_ot_rows WHERE asesor IN (${placeholders})`,
+        asesoresFiltro,
+      );
+
+      const totalOts = aRows.length;
+      const finalizadas = aRows.filter(r => r.fecha_cierre_ot).length;
+      const abiertas = aRows.filter(r => r.estado_ot === 'Abierto').length;
+      const tasaCierre = totalOts > 0 ? Math.round((finalizadas / totalOts) * 100) : 0;
+      const montoTotal = aRows.reduce((s, r) => s + Number(r.monto ?? 0), 0);
+      const closed = aRows.filter(r => r.fecha_cierre_ot && r.fecha_ingreso);
+      const diasPromedioCierre = closed.length
+        ? Math.round(closed.reduce((s, r) => s + Number(r.dias ?? 0), 0) / closed.length)
+        : 0;
+
+      // bySucursal
+      const sucMap: Record<string, number> = {};
+      aRows.forEach(r => { sucMap[r.sucursal_desc ?? ''] = (sucMap[r.sucursal_desc ?? ''] ?? 0) + 1; });
+      const bySucursal = Object.entries(sucMap).map(([sucursal, count]) => ({ sucursal, count })).sort((a, b) => b.count - a.count);
+
+      // byState
+      const stateMap: Record<string, number> = {};
+      aRows.forEach(r => { const s = r.estado_taller ?? r.estado_ot ?? ''; stateMap[s] = (stateMap[s] ?? 0) + 1; });
+      const byState = Object.entries(stateMap).map(([estado, count]) => ({ estado, count })).sort((a, b) => b.count - a.count);
+
+      // byAge buckets
+      const buckets: Record<string, number> = { 'Reciente · 0-7 d': 0, 'Normal · 8-14 d': 0, 'Demora · 15-30 d': 0, 'Atraso alto · 31-60 d': 0, 'Atraso crítico · 61-90 d': 0, 'Congelada · +90 d': 0 };
+      aRows.filter(r => r.estado_ot === 'Abierto').forEach(r => {
+        const d = Number(r.dias ?? 0);
+        if (d <= 7) buckets['Reciente · 0-7 d']++;
+        else if (d <= 14) buckets['Normal · 8-14 d']++;
+        else if (d <= 30) buckets['Demora · 15-30 d']++;
+        else if (d <= 60) buckets['Atraso alto · 31-60 d']++;
+        else if (d <= 90) buckets['Atraso crítico · 61-90 d']++;
+        else buckets['Congelada · +90 d']++;
+      });
+      const byAge = Object.entries(buckets).map(([bucket, count]) => ({ bucket, count }));
+
+      // topOldest abiertas
+      const topOldest = aRows
+        .filter(r => r.estado_ot === 'Abierto')
+        .sort((a, b) => Number(b.dias) - Number(a.dias))
+        .slice(0, 10)
+        .map(r => ({
+          ot: Number(r.nroot), dias: Number(r.dias ?? 0),
+          cliente: String(r.nombrecliente ?? '').trim(),
+          estado: String(r.estado_taller ?? r.estado_ot ?? '').trim(),
+          asesor: String(r.asesor ?? '').trim(),
+          sucursal: String(r.sucursal_desc ?? '').trim(),
+          modelo: String(r.modelo ?? '').trim(),
+          montoTotal: Number(r.monto ?? 0),
+        }));
+
+      asesorDetail = { asesores: asesoresFiltro, totalOts, finalizadas, abiertas, tasaCierre, diasPromedioCierre, montoTotal, bySucursal, byState, byAge, topOldest, monthlyIn: [] };
+    }
 
     const generatedAt = new Date().toISOString();
     return {
@@ -388,23 +451,24 @@ export class DmsOtService {
         sucursal:     s.sucursal,
         abiertas:     Number(s.abiertas),
         finalizadas:  Number(s.finalizadas),
-        vencidas:     0,
+        vencidas:     Number(s.vencidas),
         montoTotal:   Number(s.montoTotal),
         diasPromedio: Number(s.diasPromedio ?? 0),
       })),
-      asesores: asesorProductivity.map(a => ({
-        asesor:       a.asesor,
-        abiertas:     Number(a.abiertas),
-        cerradas:     Number(a.cerradas),
-        total:        Number(a.total),
-        diasPromedio: Number(a.diasPromedio ?? 0),
-        montoTotal:   0,
+      asesores: asesorList.map(a => ({
+        asesor:             a.asesor,
+        sucursal:           a.sucursal ?? '',
+        totalOts:           Number(a.totalOts),
+        finalizadas:        Number(a.finalizadas),
+        abiertas:           Number(a.abiertas),
+        montoTotal:         Number(a.montoTotal),
+        diasPromedioCierre: Number(a.diasPromedioCierre ?? 0),
       })),
       sucursalDetail:      null,
-      asesorDetail:        null,
+      asesorDetail,
       availableSucursales: sucursalOptions.map(r => r.sucursal),
       availableAsesores:   asesorOptions.map(r => r.asesor),
-      filtros:             { sucursal: filters?.sucursal ?? '', asesores: filters?.asesor ? [filters.asesor] : [] },
+      filtros:             { sucursal: filters?.sucursal ?? '', asesores: asesoresFiltro },
       generatedAt,
     };
   }
