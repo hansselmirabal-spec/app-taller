@@ -674,9 +674,10 @@ export class DmsOtService {
         fecha_compromiso_cliente::text                              AS "fechaCompromiso",
         fecha_cierre_ot::text                                       AS "fechaFinalizado",
         GREATEST(0, (CURRENT_DATE - fecha_ingreso))                AS "diasIngreso",
-        GREATEST(0, EXTRACT(EPOCH FROM (NOW() - fecha_compromiso_cliente)) / 86400)::int
-          FILTER (WHERE fecha_compromiso_cliente < NOW() AND fecha_cierre_ot IS NULL)
-                                                                    AS "diasRetraso",
+        CASE WHEN fecha_compromiso_cliente < NOW() AND fecha_cierre_ot IS NULL
+             THEN GREATEST(0, EXTRACT(EPOCH FROM (NOW() - fecha_compromiso_cliente)) / 86400)::int
+             ELSE 0
+        END                                                         AS "diasRetraso",
         COALESCE(monto, 0)                                          AS monto
       FROM dms_ot_rows
       WHERE ${condition}
