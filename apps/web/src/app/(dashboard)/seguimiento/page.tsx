@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, RefreshCw, ClipboardList, ChevronUp, ChevronDown, ChevronsUpDown, X, LayoutGrid, Table as TableIcon, User, Building2, CalendarClock, Clock, Calendar, Info, Database, BarChart3, CheckCircle2, Timer } from 'lucide-react';
+import { Search, RefreshCw, ClipboardList, ChevronUp, ChevronDown, ChevronsUpDown, X, LayoutGrid, Table as TableIcon, User, Building2, CalendarClock, Clock, Calendar, Info, Database, BarChart3, CheckCircle2, Timer, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { OT_ESTADOS, getEstado, resolveEstado, isFacturada, type OtEstado } from '@/lib/ot-estados';
 
