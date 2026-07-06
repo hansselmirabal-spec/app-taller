@@ -234,15 +234,15 @@ export default function SeguimientoPage() {
   //  · Si no → todas las sucursales del DMS (no se restringe por lo que tengan otros talleres).
   const sucursales = useMemo(() => {
     if (workshopBranch) return [workshopBranch];
-    return Array.from(new Set(data.map(r => r.sucursal).filter(Boolean))).sort((a, b) => a.localeCompare(b));
-  }, [data, workshopBranch]);
+    return Array.from(new Set(filteredBase.map(r => r.sucursal).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  }, [filteredBase, workshopBranch]);
   const asesores = useMemo(
-    () => Array.from(new Set(data.map(r => r.asesor).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [data],
+    () => Array.from(new Set(filteredBase.map(r => r.asesor).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [filteredBase],
   );
   const tiposServicio = useMemo(
-    () => Array.from(new Set(data.map(r => r.tipoServicio).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [data],
+    () => Array.from(new Set(filteredBase.map(r => r.tipoServicio).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [filteredBase],
   );
 
   // Umbrales de alerta vienen del taller activo (configurables en /settings/workshops).
