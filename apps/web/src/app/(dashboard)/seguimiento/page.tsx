@@ -125,16 +125,24 @@ export default function SeguimientoPage() {
   const [otDetail, setOtDetail]           = useState<OtDetail | null>(null);
   const [otDetailLoading, setOtDetailLoading] = useState(false);
   const [otDetailError, setOtDetailError]     = useState('');
+  const otDetailCache = useRef<Map<number, OtDetail>>(new Map());
 
   async function openOt(num: number) {
     setSelectedOtNum(num);
-    setOtDetail(null);
     setOtDetailError('');
+    const cached = otDetailCache.current.get(num);
+    if (cached) {
+      setOtDetail(cached);
+      return;
+    }
+    setOtDetail(null);
     setOtDetailLoading(true);
     try {
       const res = await fetch(`/api/ot-detail/${num}`);
       if (!res.ok) throw new Error('No se pudo cargar el detalle de la OT');
-      setOtDetail(await res.json());
+      const data: OtDetail = await res.json();
+      otDetailCache.current.set(num, data);
+      setOtDetail(data);
     } catch (e: any) {
       setOtDetailError(e.message);
     } finally {
