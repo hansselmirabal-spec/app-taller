@@ -351,6 +351,11 @@ export class DmsOtService {
       ORDER BY abiertas DESC
     `);
 
+    const asesorDays = filters?.days && filters.days > 0 ? filters.days : null;
+    const asesorDateFilter = asesorDays
+      ? `AND fecha_ingreso >= NOW() - INTERVAL '1 day' * ${asesorDays}`
+      : '';
+
     const asesorList: any[] = await this.otRepo.query(`
       SELECT
         asesor,
@@ -364,7 +369,7 @@ export class DmsOtService {
                THEN (fecha_cierre_ot::date - fecha_ingreso::date) END
         )::NUMERIC, 1), 0)                                                   AS "diasPromedioCierre"
       FROM dms_ot_rows
-      WHERE asesor IS NOT NULL
+      WHERE asesor IS NOT NULL ${asesorDateFilter}
       GROUP BY asesor
       ORDER BY "totalOts" DESC
     `);
@@ -390,7 +395,8 @@ export class DmsOtService {
                 modelo, monto, nombrecliente,
                 fecha_ingreso, fecha_cierre_ot, fecha_compromiso_cliente,
                 (CURRENT_DATE - fecha_ingreso) AS dias
-         FROM dms_ot_rows WHERE asesor IN (${placeholders})`,
+         FROM dms_ot_rows
+         WHERE asesor IN (${placeholders}) ${asesorDateFilter}`,
         asesoresFiltro,
       );
 
