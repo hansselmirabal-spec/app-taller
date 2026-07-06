@@ -54,7 +54,7 @@ export async function GET(
   const cookieStore = await cookies();
   const token = cookieStore.get('auth_token')?.value;
 
-  const res = await fetch(`${INTERNAL_API}/dms/ot-detail/${otNum}`, {
+  const res = await fetch(`${INTERNAL_API}/api/v1/dms/ot-detail/${otNum}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     cache: 'no-store',
   });
