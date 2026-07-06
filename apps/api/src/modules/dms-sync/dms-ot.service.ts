@@ -481,6 +481,21 @@ export class DmsOtService {
 
   // ── GET /dms/ot-seguimiento/reportes/dashboard ───────────────────────────────
   async getReportesDashboard(filters?: OtFilters): Promise<any> {
+    // ── Build shared filter params ─────────────────────────────────────────────
+    const fp: any[] = [];
+    const parts: string[] = [];
+
+    if (filters?.dateFrom && filters?.dateTo) {
+      parts.push(`fecha_ingreso >= $${fp.push(filters.dateFrom)} AND fecha_ingreso <= $${fp.push(filters.dateTo)}`);
+    } else if (filters?.days && filters.days > 0) {
+      parts.push(`fecha_ingreso >= NOW() - INTERVAL '1 day' * $${fp.push(filters.days)}`);
+    }
+    if (filters?.sucursal) parts.push(`sucursal_desc = $${fp.push(filters.sucursal)}`);
+    if (filters?.tipo)     parts.push(`tipo_desc = $${fp.push(filters.tipo)}`);
+
+    const baseWhere = parts.length ? `WHERE ${parts.join(' AND ')}` : '';
+    const baseAnd   = parts.length ? `AND ${parts.join(' AND ')}` : '';
+
     // KPIs
     const kpiRows: any[] = await this.otRepo.query(`
       SELECT
@@ -491,7 +506,7 @@ export class DmsOtService {
                            AND fecha_compromiso_cliente < NOW()
                            AND fecha_cierre_ot IS NULL)                    AS vencidas,
         COUNT(*) FILTER (WHERE estado_ot = 'Abierto'
-                           AND (CURRENT_DATE - fecha_ingreso) > 30) AS criticas,
+                           AND (CURRENT_DATE - fecha_ingreso) > 30)       AS criticas,
         COALESCE(SUM(monto) FILTER (WHERE fecha_cierre_ot IS NOT NULL), 0) AS "montoFacturado",
         COALESCE(SUM(monto), 0)                                             AS "montoTotal",
         ROUND(AVG(
@@ -500,37 +515,38 @@ export class DmsOtService {
           END
         )::NUMERIC, 1)                                                      AS "diasPromedioCierre"
       FROM dms_ot_rows
-    `);
+      ${baseWhere}
+    `, fp);
     const kpi = kpiRows[0] ?? {};
 
     // porEstado
     const porEstado: any[] = await this.otRepo.query(`
       SELECT estado_taller AS estado, COUNT(*) AS count
       FROM dms_ot_rows
-      WHERE estado_taller IS NOT NULL
+      WHERE estado_taller IS NOT NULL ${baseAnd}
       GROUP BY estado_taller
       ORDER BY count DESC
-    `);
+    `, fp);
 
     // porSucursal
     const porSucursal: any[] = await this.otRepo.query(`
       SELECT sucursal_desc AS sucursal, COUNT(*) AS count
       FROM dms_ot_rows
-      WHERE sucursal_desc IS NOT NULL
+      WHERE sucursal_desc IS NOT NULL ${baseAnd}
       GROUP BY sucursal_desc
       ORDER BY count DESC
-    `);
+    `, fp);
 
     // porTipo
     const porTipo: any[] = await this.otRepo.query(`
       SELECT tipo_desc AS tipo, COUNT(*) AS count
       FROM dms_ot_rows
-      WHERE tipo_desc IS NOT NULL
+      WHERE tipo_desc IS NOT NULL ${baseAnd}
       GROUP BY tipo_desc
       ORDER BY count DESC
-    `);
+    `, fp);
 
-    // Antigüedad buckets — labels must match AntiguedadBucket type exactly
+    // Antigüedad buckets
     const antiguedad: any[] = await this.otRepo.query(`
       SELECT
         CASE
@@ -545,7 +561,7 @@ export class DmsOtService {
         COALESCE(SUM(monto), 0) AS monto
       FROM dms_ot_rows
       WHERE estado_ot = 'Abierto'
-        AND fecha_ingreso IS NOT NULL
+        AND fecha_ingreso IS NOT NULL ${baseAnd}
       GROUP BY
         CASE
           WHEN (CURRENT_DATE - fecha_ingreso) <= 7   THEN 'Reciente · 0-7 d'
@@ -555,21 +571,23 @@ export class DmsOtService {
           WHEN (CURRENT_DATE - fecha_ingreso) <= 90  THEN 'Atraso crítico · 61-90 d'
           ELSE 'Congelada · +90 d'
         END
-    `);
+    `, fp);
 
-    // Tendencia — last 12 months ingress
+    // Tendencia — last 12 months
+    const tendenciaFp = filters?.sucursal || filters?.tipo ? fp : [];
+    const tendenciaAnd = filters?.sucursal || filters?.tipo ? baseAnd : '';
     const tendencia: any[] = await this.otRepo.query(`
       SELECT
         TO_CHAR(fecha_ingreso, 'YYYY-MM') AS mes,
         COUNT(*)                           AS count
       FROM dms_ot_rows
       WHERE fecha_ingreso >= NOW() - INTERVAL '12 months'
-        AND fecha_ingreso IS NOT NULL
+        AND fecha_ingreso IS NOT NULL ${tendenciaAnd}
       GROUP BY TO_CHAR(fecha_ingreso, 'YYYY-MM')
       ORDER BY mes ASC
-    `);
+    `, tendenciaFp);
 
-    // Tops — vencidas top 10
+    // vencidasTop
     const vencidasTop: any[] = await this.otRepo.query(`
       SELECT
         nroot, nombrecliente, modelo, asesor, sucursal_desc, estado_taller, tipo_abrev,
@@ -579,12 +597,12 @@ export class DmsOtService {
       FROM dms_ot_rows
       WHERE fecha_compromiso_cliente < NOW()
         AND fecha_cierre_ot IS NULL
-        AND estado_ot = 'Abierto'
+        AND estado_ot = 'Abierto' ${baseAnd}
       ORDER BY "diasRetraso" DESC
       LIMIT 10
-    `);
+    `, fp);
 
-    // criticasTop — oldest open OTs
+    // criticasTop
     const criticasTop: any[] = await this.otRepo.query(`
       SELECT
         nroot, nombrecliente, modelo, asesor, sucursal_desc, estado_taller, tipo_abrev,
@@ -593,12 +611,12 @@ export class DmsOtService {
         COALESCE(monto, 0) AS monto
       FROM dms_ot_rows
       WHERE estado_ot = 'Abierto'
-        AND fecha_ingreso IS NOT NULL
+        AND fecha_ingreso IS NOT NULL ${baseAnd}
       ORDER BY fecha_ingreso ASC
       LIMIT 10
-    `);
+    `, fp);
 
-    // facturadasTop — highest-value closed OTs
+    // facturadasTop
     const facturadasTop: any[] = await this.otRepo.query(`
       SELECT
         nroot, nombrecliente, modelo, asesor, sucursal_desc, estado_taller, tipo_abrev,
@@ -606,10 +624,10 @@ export class DmsOtService {
         (CURRENT_DATE - fecha_ingreso) AS "diasIngreso"
       FROM dms_ot_rows
       WHERE fecha_cierre_ot IS NOT NULL
-        AND monto IS NOT NULL
+        AND monto IS NOT NULL ${baseAnd}
       ORDER BY monto DESC
       LIMIT 10
-    `);
+    `, fp);
 
     // topAsesores
     const topAsesores: any[] = await this.otRepo.query(`
@@ -619,15 +637,21 @@ export class DmsOtService {
         COUNT(*) FILTER (WHERE estado_ot = 'Abierto') AS abiertas,
         COALESCE(SUM(monto) FILTER (WHERE fecha_cierre_ot IS NOT NULL), 0) AS "montoTotal"
       FROM dms_ot_rows
-      WHERE asesor IS NOT NULL
+      WHERE asesor IS NOT NULL ${baseAnd}
       GROUP BY asesor
       ORDER BY total DESC
       LIMIT 15
-    `);
+    `, fp);
 
     const generatedAt = new Date().toISOString();
     return {
-      filters: { days: 365, dateFrom: null, dateTo: null, sucursal: '', tipo: '' },
+      filters: {
+        days:      filters?.days ?? 365,
+        dateFrom:  filters?.dateFrom ?? null,
+        dateTo:    filters?.dateTo   ?? null,
+        sucursal:  filters?.sucursal ?? '',
+        tipo:      filters?.tipo     ?? '',
+      },
       generatedAt,
       kpi: {
         totalAbiertas:       Number(kpi.abiertas          ?? 0),
