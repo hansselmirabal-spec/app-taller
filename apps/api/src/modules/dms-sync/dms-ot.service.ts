@@ -681,7 +681,7 @@ export class DmsOtService {
         COALESCE(monto, 0)                                          AS monto
       FROM dms_ot_rows
       WHERE ${condition}
-      ORDER BY fecha_ingreso ASC
+      ORDER BY (CURRENT_DATE - fecha_ingreso) DESC
       LIMIT 500
     `);
 

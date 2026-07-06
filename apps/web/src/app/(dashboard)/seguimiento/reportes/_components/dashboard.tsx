@@ -908,16 +908,16 @@ function KpiDetailModal({
               <thead className="bg-slate-50 sticky top-0 z-10">
                 <tr>
                   <th className="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">OT</th>
+                  <th className="text-right px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Días ↓</th>
+                  <th className="text-right px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Retraso</th>
                   <th className="text-left px-4 py-2.5 font-semibold text-slate-600">Cliente</th>
                   <th className="text-left px-4 py-2.5 font-semibold text-slate-600">Modelo</th>
-                  <th className="text-left px-4 py-2.5 font-semibold text-slate-600">Sucursal</th>
-                  <th className="text-left px-4 py-2.5 font-semibold text-slate-600">Estado</th>
-                  <th className="text-left px-4 py-2.5 font-semibold text-slate-600">Tipo</th>
+                  <th className="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Estado</th>
                   <th className="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Asesor</th>
+                  <th className="text-left px-4 py-2.5 font-semibold text-slate-600">Sucursal</th>
+                  <th className="text-left px-4 py-2.5 font-semibold text-slate-600">Tipo</th>
                   <th className="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Ingreso</th>
                   <th className="text-left px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Compromiso</th>
-                  <th className="text-right px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Días</th>
-                  <th className="text-right px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Retraso</th>
                   <th className="text-right px-4 py-2.5 font-semibold text-slate-600 whitespace-nowrap">Monto</th>
                 </tr>
               </thead>
@@ -925,23 +925,6 @@ function KpiDetailModal({
                 {filtered.map((r, i) => (
                   <tr key={r.ot} className={`border-b border-slate-100 hover:bg-blue-50/40 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
                     <td className="px-4 py-2 font-bold text-slate-900 whitespace-nowrap">{r.ot}</td>
-                    <td className="px-4 py-2 text-slate-700 max-w-[200px] truncate" title={r.cliente}>{r.cliente || '—'}</td>
-                    <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{r.modelo || '—'}</td>
-                    <td className="px-4 py-2 text-slate-500 text-[11px] whitespace-nowrap">{r.sucursal || '—'}</td>
-                    <td className="px-4 py-2 text-slate-600 whitespace-nowrap text-[11px]">{r.estadoOt}</td>
-                    <td className="px-4 py-2 text-slate-500 text-[11px] whitespace-nowrap">{r.tipoServicio || '—'}</td>
-                    <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{r.asesor || '—'}</td>
-                    <td className="px-4 py-2 text-slate-500 whitespace-nowrap">
-                      {r.fechaIngreso ?? '—'}
-                      {r.fechaIngreso && (
-                        r.horaIngreso
-                          ? <span className="ml-1.5 text-[10px] font-mono text-slate-400">{r.horaIngreso}</span>
-                          : <span className="ml-1.5 text-[10px] text-slate-300 italic">sin hora</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 whitespace-nowrap">
-                      {r.fechaCompromiso ?? <span className="text-slate-300">—</span>}
-                    </td>
                     <td className="px-4 py-2 text-right tabular-nums">
                       <span className={`font-semibold ${r.diasIngreso > 30 ? 'text-red-600' : r.diasIngreso > 14 ? 'text-amber-600' : 'text-slate-600'}`}>
                         {r.diasIngreso}d
@@ -951,6 +934,16 @@ function KpiDetailModal({
                       {r.diasRetraso > 0
                         ? <span className={`font-bold px-1.5 py-0.5 rounded ${r.diasRetraso > 60 ? 'bg-red-100 text-red-800' : r.diasRetraso > 30 ? 'bg-orange-100 text-orange-800' : 'bg-amber-100 text-amber-800'}`}>{r.diasRetraso}d</span>
                         : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-4 py-2 text-slate-700 max-w-[200px] truncate" title={r.cliente}>{r.cliente || '—'}</td>
+                    <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{r.modelo || '—'}</td>
+                    <td className="px-4 py-2 text-slate-600 whitespace-nowrap text-[11px]">{r.estadoOt}</td>
+                    <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{r.asesor || '—'}</td>
+                    <td className="px-4 py-2 text-slate-500 text-[11px] whitespace-nowrap">{r.sucursal || '—'}</td>
+                    <td className="px-4 py-2 text-slate-500 text-[11px] whitespace-nowrap">{r.tipoServicio || '—'}</td>
+                    <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{r.fechaIngreso ?? '—'}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {r.fechaCompromiso ?? <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-slate-700 whitespace-nowrap">{fmtMoney(r.monto)}</td>
                   </tr>
