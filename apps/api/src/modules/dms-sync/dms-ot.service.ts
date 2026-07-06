@@ -654,6 +654,61 @@ export class DmsOtService {
     return rows;
   }
 
+  // ── GET /dms/ot-detail/:nroot ────────────────────────────────────────────────
+  async getOtDetail(nroot: number): Promise<Record<string, unknown> | null> {
+    const rows: any[] = await this.otRepo.query(
+      `SELECT nroot, nrocliente, nombrecliente, chasis, modelo,
+              estado_ot, estado_taller, estado_financiero, asesor,
+              taller, sucursal_desc, fecha_ingreso, hora_ingreso,
+              fecha_compromiso_cliente, fecha_cierre_ot, fecha_fin_taller,
+              monto, idtiposervicio, tipo_desc, synced_at
+       FROM dms_ot_rows WHERE nroot = $1 LIMIT 1`,
+      [nroot],
+    );
+
+    if (!rows.length) return null;
+    const r = rows[0];
+
+    const toDate = (v: unknown): string | null =>
+      v ? String(v).split('T')[0] : null;
+
+    const fi = toDate(r.fecha_ingreso);
+    const diasIngreso = fi
+      ? Math.floor((Date.now() - new Date(fi + 'T00:00:00Z').getTime()) / 86_400_000)
+      : 0;
+
+    return {
+      ot:                     Number(r.nroot),
+      codCliente:             String(r.nrocliente ?? '').trim(),
+      nombreCliente:          String(r.nombrecliente ?? '').trim(),
+      chasis:                 String(r.chasis ?? '').trim(),
+      modelo:                 String(r.modelo ?? '').trim(),
+      estadoOt:               String(r.estado_taller ?? r.estado_ot ?? '').trim(),
+      estadoIdis:             String(r.estado_ot ?? '').trim(),
+      estadoFinanciero:       String(r.estado_financiero ?? '').trim(),
+      asesor:                 String(r.asesor ?? '').trim(),
+      sucursal:               String(r.sucursal_desc ?? '').trim(),
+      tipoServicio:           String(r.tipo_desc ?? '').trim(),
+      montoTotal:             Number(r.monto ?? 0),
+      observaciones:          '',
+      diasIngreso:            Math.max(0, diasIngreso),
+      diasEnEstado:           0,
+      tiempoEntrega:          null,
+      fechaIngreso:           fi,
+      horaIngreso:            r.hora_ingreso ? String(r.hora_ingreso).trim() || null : null,
+      fechaCompromisoCliente: toDate(r.fecha_compromiso_cliente),
+      fechaCompromisoTaller:  null,
+      fechaCompromisoIdis:    null,
+      fechaFinTaller:         toDate(r.fecha_fin_taller),
+      fechaFinalizado:        toDate(r.fecha_cierre_ot),
+      fechaSalida:            null,
+      fechaRenegociacion:     null,
+      fechaFactura:           null,
+      statusHistory:          [],
+      _source:                'materialized',
+    };
+  }
+
   // ── GET /dms/sync-status ─────────────────────────────────────────────────────
   async getSyncStatus(): Promise<{
     lastSyncAt: string | null;
