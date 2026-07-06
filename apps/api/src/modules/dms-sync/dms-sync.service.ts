@@ -578,15 +578,8 @@ export class DmsSyncService implements OnApplicationBootstrap {
     const state = await this.stateRepo.findOne({ where: { kind: 'ot_rows' } });
     const lastSync = state?.lastSyncAt ?? null;
 
-    // 2. Fetch open OTs (full refresh of open set)
-    const openOts = await this.fetchOtsFromDms({ onlyOpen: true });
-
-    // 3. Fetch recently closed OTs with 2h overlap to catch late-close edge cases
-    const closedOts = lastSync
-      ? await this.fetchOtsFromDms({
-          closedSince: new Date(lastSync.getTime() - 2 * 60 * 60 * 1000),
-        })
-      : [];
+    // 2 + 3. Fetch open + recently closed OTs in one connection
+    const { openOts, closedOts } = await this.fetchOtsBatch(lastSync);
 
     // 4. Upsert all rows — deduplicate by nroot (DMS can have duplicate nroot rows)
     const allOts = [...new Map([...openOts, ...closedOts].map(r => [r.nroot, r])).values()];
@@ -630,6 +623,93 @@ export class DmsSyncService implements OnApplicationBootstrap {
     this.logger.log(
       `OK syncOtRows → ${openOts.length} open + ${closedOts.length} closed = ${allOts.length} total`,
     );
+  }
+
+  // Opens one pool, runs open + closed queries, closes pool once
+  private async fetchOtsBatch(lastSync: Date | null): Promise<{
+    openOts: Partial<DmsOtRow>[];
+    closedOts: Partial<DmsOtRow>[];
+  }> {
+    let pool: sql.ConnectionPool | null = null;
+    try {
+      pool = await getDmsPool();
+
+      const openReq = pool.request();
+      const openResult = await openReq.query(this.buildOtQuery("WHERE m.EstadoOT = 'Abierto'"));
+
+      let closedResult: { recordset: any[] } = { recordset: [] };
+      if (lastSync) {
+        const closedReq = pool.request();
+        closedReq.input('closedSince', sql.DateTime, new Date(lastSync.getTime() - 2 * 60 * 60 * 1000));
+        closedResult = await closedReq.query(this.buildOtQuery('WHERE m.fecha_cierre_ot >= @closedSince'));
+      }
+
+      const now = new Date();
+      const mapRow = (r: any): Partial<DmsOtRow> => ({
+        nroot:                  Number(r.nroot),
+        nrocliente:             String(r.nrocliente ?? '').trim() || null,
+        nombrecliente:          String(r.nombrecliente ?? '').trim() || null,
+        chasis:                 String(r.chasis ?? '').trim() || null,
+        modelo:                 String(r.modelo ?? '').trim() || null,
+        estadoOt:               String(r.estado_ot ?? '').trim() || null,
+        estadoTaller:           String(r.estado_taller ?? '').trim() || null,
+        estadoFinanciero:       String(r.estado_financiero ?? '').trim() || null,
+        asesor:                 String(r.asesor ?? '').trim() || null,
+        taller:                 r.taller != null ? Number(r.taller) : null,
+        sucursalDesc:           String(r.sucursal_desc ?? '').trim() || null,
+        fechaIngreso:           r.fecha_ingreso ? new Date(r.fecha_ingreso) : null,
+        horaIngreso:            r.hora_ingreso ? String(r.hora_ingreso).trim() || null : null,
+        fechaCompromisoCliente: r.fecha_compromiso_cliente ? new Date(r.fecha_compromiso_cliente) : null,
+        fechaCierreOt:          r.fecha_cierre_ot ? new Date(r.fecha_cierre_ot) : null,
+        fechaFinTaller:         r.fecha_fin_taller ? new Date(r.fecha_fin_taller) : null,
+        monto:                  r.monto != null ? Number(r.monto) : null,
+        idTipoServicio:         r.idtiposervicio != null ? Number(r.idtiposervicio) : null,
+        tipoDesc:               String(r.tipo_desc ?? '').trim() || null,
+        tipoAbrev:              String(r.tipo_abrev ?? '').trim() || null,
+        codcliente:             String(r.codcliente ?? '').trim() || null,
+        syncedAt:               now,
+      });
+
+      return {
+        openOts:   (openResult.recordset as any[]).map(mapRow),
+        closedOts: (closedResult.recordset as any[]).map(mapRow),
+      };
+    } finally {
+      await pool?.close();
+    }
+  }
+
+  private buildOtQuery(whereClause: string): string {
+    return `
+      SELECT
+        m.nroot,
+        LTRIM(RTRIM(m.nrocliente))             AS nrocliente,
+        LTRIM(RTRIM(m.nombrecliente))           AS nombrecliente,
+        LTRIM(RTRIM(m.chasis))                  AS chasis,
+        LTRIM(RTRIM(m.modelo))                  AS modelo,
+        LTRIM(RTRIM(m.EstadoOT))               AS estado_ot,
+        LTRIM(RTRIM(m.EstadoTaller))            AS estado_taller,
+        LTRIM(RTRIM(m.Estadofinanciero))        AS estado_financiero,
+        LTRIM(RTRIM(m.asesor))                  AS asesor,
+        m.taller,
+        ISNULL(LTRIM(RTRIM(s.Descripcion)), '') AS sucursal_desc,
+        m.fechaingreso                           AS fecha_ingreso,
+        m.horaingreso                            AS hora_ingreso,
+        m.fechacompromisoCliente                 AS fecha_compromiso_cliente,
+        m.fecha_cierre_ot,
+        m.fecha_fin_taller,
+        CAST(m.monto AS FLOAT)                  AS monto,
+        m.idtiposervicio,
+        ISNULL(LTRIM(RTRIM(ts.descripcion)), '') AS tipo_desc,
+        ISNULL(LTRIM(RTRIM(ts.abreviatura)), '') AS tipo_abrev,
+        NULL                                    AS codcliente
+      FROM dbo.MasterOT_Condor m
+      LEFT JOIN dbo.controltiempo_DimSucursal s
+             ON s.IdSucursal = m.taller
+      LEFT JOIN dbo.controltiempo_DimTipoServicio ts
+             ON ts.idtipo_servicio = m.idtiposervicio
+      ${whereClause}
+    `;
   }
 
   private async fetchOtsFromDms(
