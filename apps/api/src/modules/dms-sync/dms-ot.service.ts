@@ -100,7 +100,9 @@ export class DmsOtService {
       chasis:                 String(r.chasis ?? '').trim(),
       modelo:                 String(r.modelo ?? '').trim(),
       estadoOt:               String(r.estadoOt ?? '').trim(),
-      estadoIdis:             String(r.estadoTaller ?? r.estadoOt ?? '').trim(),
+      estadoIdis:             String(r.nroot).startsWith('9')
+                                ? 'En Presupuesto'
+                                : String(r.estadoTaller ?? r.estadoOt ?? '').trim(),
       estadoFinanciero:       String(r.estadoFinanciero ?? '').trim(),
       asesor:                 String(r.asesor ?? '').trim(),
       sucursal:               String(r.sucursalDesc ?? '').trim(),

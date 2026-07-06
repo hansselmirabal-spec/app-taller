@@ -295,6 +295,39 @@ export default function SeguimientoPage() {
     });
   }, [data, workshopBranch, fechaEspecifica, estadoFiltro, sucursalFiltro, asesorFiltro, tipoServicioFiltro, antiguedadFiltro, search, sortKey, sortDir]);
 
+  // Base filtrada sin estadoFiltro ni sort — usada para el kanban bar y pills
+  // para que reflejen los filtros activos (sucursal, asesor, etc.) pero sigan mostrando
+  // la distribución de todos los estados (no solo el estado seleccionado).
+  const filteredBase = useMemo(() => {
+    let rows = data;
+    if (workshopBranch)      rows = rows.filter(r => r.sucursal === workshopBranch);
+    if (fechaEspecifica)     rows = rows.filter(r => r.fechaIngreso === fechaEspecifica);
+    if (sucursalFiltro)      rows = rows.filter(r => r.sucursal === sucursalFiltro);
+    if (asesorFiltro)        rows = rows.filter(r => r.asesor === asesorFiltro);
+    if (tipoServicioFiltro)  rows = rows.filter(r => r.tipoServicio === tipoServicioFiltro);
+    if (antiguedadFiltro > 0) rows = rows.filter(r => r.diasIngreso > antiguedadFiltro);
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      rows = rows.filter(r =>
+        String(r.ot).includes(q) ||
+        r.nombreCliente.toLowerCase().includes(q) ||
+        r.chasis.toLowerCase().includes(q) ||
+        r.modelo.toLowerCase().includes(q) ||
+        r.asesor.toLowerCase().includes(q)
+      );
+    }
+    return rows;
+  }, [data, workshopBranch, fechaEspecifica, sucursalFiltro, asesorFiltro, tipoServicioFiltro, antiguedadFiltro, search]);
+
+  const filteredSummary = useMemo(() => {
+    const s: Record<string, number> = {};
+    for (const row of filteredBase) {
+      const k = row.estadoIdis || row.estadoOt;
+      s[k] = (s[k] ?? 0) + 1;
+    }
+    return s;
+  }, [filteredBase]);
+
   function SortIcon({ k }: { k: SortKey }) {
     if (sortKey !== k) return <ChevronsUpDown className="h-3 w-3 text-slate-300 inline ml-1" />;
     return sortDir === 'asc'
@@ -559,16 +592,16 @@ export default function SeguimientoPage() {
 
         {/* Barra Kanban: distribución de todos los estados como % sobre 100 */}
         <EstadosKanbanBar
-          summary={summary}
-          total={data.length}
+          summary={filteredSummary}
+          total={filteredBase.length}
           activo={estadoFiltro}
           onChange={setEstadoFiltro}
         />
 
         {/* Pills de estado: top 5 inline + dropdown "Más" */}
         <EstadosPills
-          summary={summary}
-          totalAll={data.length}
+          summary={filteredSummary}
+          totalAll={filteredBase.length}
           activo={estadoFiltro}
           onChange={setEstadoFiltro}
         />
