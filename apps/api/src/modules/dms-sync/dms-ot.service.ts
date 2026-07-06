@@ -624,34 +624,96 @@ export class DmsOtService {
   }
 
   // ── GET /dms/ot-seguimiento/reportes/dashboard/detail ────────────────────────
-  async getReportesDashboardDetail(kind: string, filters?: OtFilters): Promise<any[]> {
+  async getReportesDashboardDetail(kind: string, filters?: OtFilters): Promise<Record<string, unknown>> {
     const whereMap: Record<string, string> = {
-      vencidas:
-        `fecha_compromiso_cliente < NOW() AND fecha_cierre_ot IS NULL AND estado_ot = 'Abierto'`,
-      criticas:
-        `estado_ot = 'Abierto' AND (CURRENT_DATE - fecha_ingreso) > 30`,
-      abiertas:
-        `estado_ot = 'Abierto'`,
-      cerradas:
-        `fecha_cierre_ot IS NOT NULL`,
+      abiertas:      `estado_ot = 'Abierto'`,
+      vencidas:      `fecha_compromiso_cliente < NOW() AND fecha_cierre_ot IS NULL AND estado_ot = 'Abierto'`,
+      atrasoCritico: `estado_ot = 'Abierto' AND (CURRENT_DATE - fecha_ingreso) > 30`,
+      diasPromedio:  `estado_ot = 'Abierto'`,
+      montoTotal:    `estado_ot = 'Abierto'`,
+      tasaCierre30d: `fecha_cierre_ot >= CURRENT_DATE - INTERVAL '30 days'`,
+      facturadas:    `fecha_cierre_ot IS NOT NULL`,
+      antiguedad:    `estado_ot = 'Abierto'`,
     };
 
-    const condition = whereMap[kind] ?? '1=1';
+    const titleMap: Record<string, string> = {
+      abiertas:      'OTs abiertas',
+      vencidas:      'Compromisos vencidos',
+      atrasoCritico: 'Atraso crítico (+30 d)',
+      diasPromedio:  'OTs abiertas (días promedio)',
+      montoTotal:    'Monto en taller',
+      tasaCierre30d: 'Cerradas últimos 30 días',
+      facturadas:    'OTs facturadas',
+      antiguedad:    'Antigüedad de OTs abiertas',
+    };
+
+    let condition = whereMap[kind] ?? `estado_ot = 'Abierto'`;
+
+    if (kind === 'antiguedad' && filters?.search) {
+      condition += ` AND (CURRENT_DATE - fecha_ingreso)::text ILIKE '%${filters.search}%'`;
+    }
+    if (filters?.sucursal) {
+      condition += ` AND sucursal_desc ILIKE '%${filters.sucursal.replace(/'/g, "''")}%'`;
+    }
+    if (filters?.asesor) {
+      condition += ` AND asesor ILIKE '%${filters.asesor.replace(/'/g, "''")}%'`;
+    }
 
     const rows: any[] = await this.otRepo.query(`
       SELECT
-        nroot, nrocliente, nombrecliente, chasis, modelo,
-        estado_ot, estado_taller, asesor, sucursal_desc,
-        fecha_ingreso, hora_ingreso, fecha_compromiso_cliente,
-        fecha_cierre_ot, monto, tipo_desc, codcliente, synced_at,
-        (CURRENT_DATE - fecha_ingreso) AS "diasIngreso"
+        nroot                                                       AS ot,
+        nombrecliente                                               AS cliente,
+        modelo,
+        chasis,
+        sucursal_desc                                               AS sucursal,
+        COALESCE(estado_taller, estado_ot)                         AS "estadoOt",
+        tipo_desc                                                   AS "tipoServicio",
+        asesor,
+        fecha_ingreso::text                                         AS "fechaIngreso",
+        hora_ingreso                                                AS "horaIngreso",
+        fecha_compromiso_cliente::text                              AS "fechaCompromiso",
+        fecha_cierre_ot::text                                       AS "fechaFinalizado",
+        GREATEST(0, (CURRENT_DATE - fecha_ingreso))                AS "diasIngreso",
+        GREATEST(0, EXTRACT(EPOCH FROM (NOW() - fecha_compromiso_cliente)) / 86400)::int
+          FILTER (WHERE fecha_compromiso_cliente < NOW() AND fecha_cierre_ot IS NULL)
+                                                                    AS "diasRetraso",
+        COALESCE(monto, 0)                                          AS monto
       FROM dms_ot_rows
       WHERE ${condition}
       ORDER BY fecha_ingreso ASC
       LIMIT 500
     `);
 
-    return rows;
+    const mapped = rows.map(r => ({
+      ot:              Number(r.ot),
+      cliente:         String(r.cliente ?? '').trim(),
+      modelo:          String(r.modelo ?? '').trim(),
+      chasis:          String(r.chasis ?? '').trim(),
+      sucursal:        String(r.sucursal ?? '').trim(),
+      estadoOt:        String(r.estadoOt ?? '').trim(),
+      tipoServicio:    String(r.tipoServicio ?? '').trim(),
+      asesor:          String(r.asesor ?? '').trim(),
+      fechaIngreso:    r.fechaIngreso ? String(r.fechaIngreso).split('T')[0] : null,
+      horaIngreso:     r.horaIngreso ? String(r.horaIngreso).trim() || null : null,
+      fechaCompromiso: r.fechaCompromiso ? String(r.fechaCompromiso).split('T')[0] : null,
+      fechaFinalizado: r.fechaFinalizado ? String(r.fechaFinalizado).split('T')[0] : null,
+      diasIngreso:     Math.max(0, Number(r.diasIngreso ?? 0)),
+      diasRetraso:     Math.max(0, Number(r.diasRetraso ?? 0)),
+      monto:           Number(r.monto ?? 0),
+    }));
+
+    return {
+      kpi:         kind,
+      title:       titleMap[kind] ?? kind,
+      total:       mapped.length,
+      rows:        mapped,
+      filters:     {
+        days:      filters?.days ?? 0,
+        sucursal:  filters?.sucursal ?? '',
+        tipo:      filters?.tipo ?? '',
+      },
+      generatedAt: new Date().toISOString(),
+    };
   }
 
   // ── GET /dms/ot-detail/:nroot ────────────────────────────────────────────────

@@ -50,7 +50,7 @@ export class DmsOtController {
 
   @Get('ot-seguimiento/reportes/dashboard/detail')
   async getDashboardDetail(@Query() q: Record<string, any>) {
-    const kind = String(q.kind ?? 'abiertas');
+    const kind = String(q.kpi ?? q.kind ?? 'abiertas');
     return this.service.getReportesDashboardDetail(kind, parseFilters(q));
   }
 
