@@ -108,6 +108,7 @@ export default function SeguimientoPage() {
   const [asesorFiltro, setAsesorFiltro]     = useState('');
   const [tipoServicioFiltro, setTipoServicioFiltro] = useState('');
   const [antiguedadFiltro, setAntiguedadFiltro] = useState<number>(0);
+  const [activeTab, setActiveTab] = useState<'ots' | 'presupuestos'>('ots');
   const [sortKey, setSortKey]   = useState<SortKey>('fechaIngreso');
   const [sortDir, setSortDir]   = useState<SortDir>('desc');
   const [rangeDays, setRangeDays] = useState<number>(90);
@@ -265,6 +266,8 @@ export default function SeguimientoPage() {
 
   const filtered = useMemo(() => {
     let rows = data;
+    if (activeTab === 'ots') rows = rows.filter(r => (r.estadoIdis || r.estadoOt) !== 'En Presupuesto');
+    else                     rows = rows.filter(r => (r.estadoIdis || r.estadoOt) === 'En Presupuesto');
     // Filtro automático: SOLO aplica si el taller activo tiene su propia sucursal del DMS
     // configurada. Si no, el usuario ve todas las OTs (los demás talleres no se ven afectados
     // por las sucursales que tengan configuradas otros talleres).
@@ -293,13 +296,15 @@ export default function SeguimientoPage() {
       const cmp = String(av) < String(bv) ? -1 : String(av) > String(bv) ? 1 : 0;
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [data, workshopBranch, fechaEspecifica, estadoFiltro, sucursalFiltro, asesorFiltro, tipoServicioFiltro, antiguedadFiltro, search, sortKey, sortDir]);
+  }, [data, activeTab, workshopBranch, fechaEspecifica, estadoFiltro, sucursalFiltro, asesorFiltro, tipoServicioFiltro, antiguedadFiltro, search, sortKey, sortDir]);
 
   // Base filtrada sin estadoFiltro ni sort — usada para el kanban bar y pills
   // para que reflejen los filtros activos (sucursal, asesor, etc.) pero sigan mostrando
   // la distribución de todos los estados (no solo el estado seleccionado).
   const filteredBase = useMemo(() => {
     let rows = data;
+    if (activeTab === 'ots') rows = rows.filter(r => (r.estadoIdis || r.estadoOt) !== 'En Presupuesto');
+    else                     rows = rows.filter(r => (r.estadoIdis || r.estadoOt) === 'En Presupuesto');
     if (workshopBranch)      rows = rows.filter(r => r.sucursal === workshopBranch);
     if (fechaEspecifica)     rows = rows.filter(r => r.fechaIngreso === fechaEspecifica);
     if (sucursalFiltro)      rows = rows.filter(r => r.sucursal === sucursalFiltro);
@@ -317,7 +322,7 @@ export default function SeguimientoPage() {
       );
     }
     return rows;
-  }, [data, workshopBranch, fechaEspecifica, sucursalFiltro, asesorFiltro, tipoServicioFiltro, antiguedadFiltro, search]);
+  }, [data, activeTab, workshopBranch, fechaEspecifica, sucursalFiltro, asesorFiltro, tipoServicioFiltro, antiguedadFiltro, search]);
 
   const filteredSummary = useMemo(() => {
     const s: Record<string, number> = {};
@@ -471,6 +476,34 @@ export default function SeguimientoPage() {
               <BarChart3 className="h-3.5 w-3.5" /> Reportes
             </Link>
           </div>
+        </div>
+
+        {/* Tabs: OTs · Presupuestos */}
+        <div className="flex items-center gap-1 mt-4 border-b border-slate-200">
+          {([
+            { key: 'ots',          label: 'OTs',          icon: ClipboardList },
+            { key: 'presupuestos', label: 'Presupuestos', icon: FileText       },
+          ] as const).map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => { setActiveTab(key); setEstadoFiltro(''); }}
+              className={`flex items-center gap-1.5 text-sm font-medium px-4 py-2 border-b-2 transition-all -mb-px ${
+                activeTab === key
+                  ? 'border-indigo-600 text-indigo-700'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+              <span className={`ml-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-full ${
+                activeTab === key ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'
+              }`}>
+                {key === 'ots'
+                  ? data.filter(r => (r.estadoIdis || r.estadoOt) !== 'En Presupuesto').length
+                  : data.filter(r => (r.estadoIdis || r.estadoOt) === 'En Presupuesto').length}
+              </span>
+            </button>
+          ))}
         </div>
 
         {/* Segunda fila: filtros */}
