@@ -1487,6 +1487,67 @@ export async function getResourceAgenda(workshopId: string): Promise<ResourceAge
   return http<ResourceAgendaItem[]>(`/tracking/resources?workshopId=${encodeURIComponent(workshopId)}`);
 }
 
+// ── Tracking productivity report ───────────────────────────────────────────────
+
+export interface TechProcessProductivity {
+  processCode:    string;
+  processName:    string;
+  completedCount: number;
+  plannedHours:   number;
+  realHours:      number;
+  netHours:       number;
+  deviation:      number;
+  efficiencyPct:  number;
+}
+
+export interface TechProductivityRow {
+  technicianId:       string;
+  technicianName:     string;
+  completedProcesses: number;
+  plannedHours:       number;
+  realHours:          number;
+  netHours:           number;
+  pausedMinutes:      number;
+  deviation:          number;
+  efficiencyPct:      number;
+  rankByEfficiency:   number;
+  processes:          TechProcessProductivity[];
+}
+
+export interface TechMonthlyTrendRow {
+  technicianId:   string;
+  technicianName: string;
+  month:          string;
+  plannedHours:   number;
+  netHours:       number;
+  efficiencyPct:  number;
+}
+
+export interface TechProductivityReport {
+  workshopName: string;
+  from:         string;
+  to:           string;
+  technicians:  TechProductivityRow[];
+  trend:        TechMonthlyTrendRow[];
+  dataQuality:  { unattributedCompletedCount: number };
+}
+
+export async function getTrackingProductivity(
+  workshopId: string,
+  from: string,
+  to: string,
+): Promise<TechProductivityReport> {
+  if (MOCK) {
+    return delay({
+      workshopName: 'Mock', from, to,
+      technicians: [], trend: [],
+      dataQuality: { unattributedCompletedCount: 0 },
+    });
+  }
+  const qs = new URLSearchParams({ workshopId, from, to });
+  return http<TechProductivityReport>(`/tracking/productivity?${qs.toString()}`);
+}
+
 // ── Budget Appointments ────────────────────────────────────────────────────────
 
 import type { BudgetAppointment, BudgetProcess } from '@/types';

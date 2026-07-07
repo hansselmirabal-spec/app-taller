@@ -3,6 +3,8 @@ import { Throttle } from '@nestjs/throttler';
 import { TrackingService } from './tracking.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { WorkshopAccessGuard } from '../../common/guards/workshop-access.guard';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { IsOptional, IsString } from 'class-validator';
 
 class CompleteProcessDto {
@@ -42,6 +44,21 @@ export class TrackingController {
   ) {
     if (!date || !workshopId) throw new BadRequestException('date y workshopId son requeridos');
     return wrap(await this.service.getBoard(date, workshopId));
+  }
+
+  @Get('productivity')
+  @UseGuards(PermissionsGuard)
+  @RequirePermission('reports', 'view')
+  async getProductivity(
+    @Query('workshopId') workshopId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('sourceType') sourceType?: 'mechanic' | 'bodyshop',
+  ) {
+    if (!workshopId || !from || !to) {
+      throw new BadRequestException('workshopId, from y to son requeridos');
+    }
+    return wrap(await this.service.getTechProductivityReport(workshopId, from, to, sourceType));
   }
 
   @Get('card/:sourceType/:sourceId')

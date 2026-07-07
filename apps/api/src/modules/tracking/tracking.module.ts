@@ -6,10 +6,12 @@ import { TrackingController } from './tracking.controller';
 import { Appointment } from '../appointments/appointment.entity';
 import { BodyshopEntry } from '../bodyshop/bodyshop-entry.entity';
 import { Workshop } from '../workshops/workshop.entity';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([TrackingLog, Appointment, BodyshopEntry, Workshop]),
+    UsersModule,
   ],
   providers: [TrackingService],
   controllers: [TrackingController],

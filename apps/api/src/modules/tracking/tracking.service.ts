@@ -674,6 +674,175 @@ export class TrackingService {
     }));
   }
 
+  // ── GET /tracking/productivity ───────────────────────────────────────────────
+  async getTechProductivityReport(
+    workshopId: string,
+    from: string,
+    to: string,
+    sourceType?: 'mechanic' | 'bodyshop',
+  ): Promise<Record<string, unknown>> {
+    const workshop = await this.workshopRepo.findOne({ where: { id: workshopId } });
+    if (!workshop) throw new NotFoundException('Taller no encontrado');
+    const workshopName = workshop.name;
+
+    const sourceFilter = sourceType ? `AND tl.source_type = $4` : '';
+    const mainParams: any[] = [from, to, workshopName];
+    if (sourceType) mainParams.push(sourceType);
+
+    const [mainRows, trendRows, unattributedRows] = await Promise.all([
+      this.logRepo.manager.query(`
+        SELECT
+          tl.technician_id                                                      AS "technicianId",
+          tl.technician_name                                                    AS "technicianName",
+          tl.process_code                                                       AS "processCode",
+          tl.process_name                                                       AS "processName",
+          COUNT(*)::int                                                         AS "completedCount",
+          SUM(tl.planned_hours)::float                                          AS "plannedHours",
+          SUM(EXTRACT(EPOCH FROM (tl.completed_at - tl.started_at)) / 3600.0)::float AS "realHours",
+          SUM(tl.paused_duration_minutes)::float                                AS "pausedMinutes"
+        FROM tracking_logs tl
+        JOIN technicians t ON t.id::text = tl.technician_id
+        WHERE tl.status = 'completed'
+          AND tl.process_code != 'AGENDA'
+          AND tl.technician_id IS NOT NULL
+          AND tl.started_at IS NOT NULL
+          AND tl.completed_at >= $1::date
+          AND tl.completed_at < ($2::date + INTERVAL '1 day')
+          AND t.workshop_name = $3
+          ${sourceFilter}
+        GROUP BY tl.technician_id, tl.technician_name, tl.process_code, tl.process_name
+        ORDER BY tl.technician_id, tl.process_code
+      `, mainParams),
+      this.logRepo.manager.query(`
+        SELECT
+          tl.technician_id                                                      AS "technicianId",
+          tl.technician_name                                                    AS "technicianName",
+          TO_CHAR(DATE_TRUNC('month', tl.completed_at), 'YYYY-MM')             AS month,
+          SUM(tl.planned_hours)::float                                          AS "plannedHours",
+          SUM(EXTRACT(EPOCH FROM (tl.completed_at - tl.started_at)) / 3600.0)::float AS "realHours",
+          SUM(tl.paused_duration_minutes)::float                                AS "pausedMinutes"
+        FROM tracking_logs tl
+        JOIN technicians t ON t.id::text = tl.technician_id
+        WHERE tl.status = 'completed'
+          AND tl.process_code != 'AGENDA'
+          AND tl.technician_id IS NOT NULL
+          AND tl.started_at IS NOT NULL
+          AND tl.completed_at >= (DATE_TRUNC('month', NOW()) - INTERVAL '5 months')
+          AND t.workshop_name = $1
+        GROUP BY tl.technician_id, tl.technician_name, DATE_TRUNC('month', tl.completed_at)
+        ORDER BY tl.technician_id, month
+      `, [workshopName]),
+      this.logRepo.manager.query(`
+        SELECT COUNT(*)::int AS count
+        FROM tracking_logs tl
+        WHERE tl.status = 'completed'
+          AND tl.process_code != 'AGENDA'
+          AND tl.technician_id IS NULL
+          AND tl.completed_at >= $1::date
+          AND tl.completed_at < ($2::date + INTERVAL '1 day')
+          AND tl.source_id IN (
+            SELECT id::text FROM bodyshop_entries WHERE workshop_id = $3
+            UNION ALL
+            SELECT a.id::text FROM appointments a
+            JOIN technicians t ON t.id = a.technician_id
+            WHERE t.workshop_name = $4
+          )
+      `, [from, to, workshopId, workshopName]),
+    ]);
+
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const efficiency = (planned: number, net: number) =>
+      net > 0.001 ? Math.min(200, Math.round((planned / net) * 100)) : 0;
+
+    const byTech = new Map<string, {
+      technicianId: string;
+      technicianName: string;
+      completedProcesses: number;
+      plannedHours: number;
+      realHours: number;
+      pausedMinutes: number;
+      processes: any[];
+    }>();
+
+    for (const r of mainRows) {
+      let tech = byTech.get(r.technicianId);
+      if (!tech) {
+        tech = {
+          technicianId: r.technicianId,
+          technicianName: r.technicianName ?? '',
+          completedProcesses: 0,
+          plannedHours: 0,
+          realHours: 0,
+          pausedMinutes: 0,
+          processes: [],
+        };
+        byTech.set(r.technicianId, tech);
+      }
+      const planned = Number(r.plannedHours ?? 0);
+      const real = Number(r.realHours ?? 0);
+      const paused = Number(r.pausedMinutes ?? 0);
+      const net = real - paused / 60;
+
+      tech.completedProcesses += Number(r.completedCount ?? 0);
+      tech.plannedHours += planned;
+      tech.realHours += real;
+      tech.pausedMinutes += paused;
+      tech.processes.push({
+        processCode:    r.processCode,
+        processName:    r.processName,
+        completedCount: Number(r.completedCount ?? 0),
+        plannedHours:   round2(planned),
+        realHours:      round2(real),
+        netHours:       round2(net),
+        deviation:      round2(real - planned),
+        efficiencyPct:  efficiency(planned, net),
+      });
+    }
+
+    const technicians = Array.from(byTech.values())
+      .map(t => {
+        const netHours = t.realHours - t.pausedMinutes / 60;
+        return {
+          technicianId:       t.technicianId,
+          technicianName:     t.technicianName,
+          completedProcesses: t.completedProcesses,
+          plannedHours:       round2(t.plannedHours),
+          realHours:          round2(t.realHours),
+          netHours:           round2(netHours),
+          pausedMinutes:      round2(t.pausedMinutes),
+          deviation:          round2(t.realHours - t.plannedHours),
+          efficiencyPct:      efficiency(t.plannedHours, netHours),
+          processes:          t.processes,
+        };
+      })
+      .sort((a, b) => b.efficiencyPct - a.efficiencyPct)
+      .map((t, i) => ({ ...t, rankByEfficiency: i + 1 }));
+
+    const trend = trendRows.map((r: any) => {
+      const planned = Number(r.plannedHours ?? 0);
+      const net = Number(r.realHours ?? 0) - Number(r.pausedMinutes ?? 0) / 60;
+      return {
+        technicianId:   r.technicianId,
+        technicianName: r.technicianName ?? '',
+        month:          r.month,
+        plannedHours:   round2(planned),
+        netHours:       round2(net),
+        efficiencyPct:  efficiency(planned, net),
+      };
+    });
+
+    return {
+      workshopName,
+      from,
+      to,
+      technicians,
+      trend,
+      dataQuality: {
+        unattributedCompletedCount: Number(unattributedRows[0]?.count ?? 0),
+      },
+    };
+  }
+
   private toProcessSummary(l: TrackingLog): ProcessSummary {
     const realHours = (l.status === 'completed' && l.startedAt && l.completedAt)
       ? Math.round((l.completedAt.getTime() - l.startedAt.getTime()) / 36_000) / 100
