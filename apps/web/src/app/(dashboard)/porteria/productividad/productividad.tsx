@@ -215,7 +215,8 @@ function RankingChart({ rows }: { rows: TechProductivityRow[] }) {
         <CartesianGrid strokeDasharray="3 3" horizontal={false} />
         <XAxis type="number" unit="%" domain={[0, 200]} tick={{ fontSize: 10 }} />
         <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} />
-        <Tooltip formatter={(v: number) => [`${v}% (>100% = más rápido que lo planificado)`, 'Eficiencia']} />
+        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+        <Tooltip formatter={(v: any) => [`${v}% (>100% = más rápido que lo planificado)`, 'Eficiencia']} />
         <ReferenceLine x={100} stroke="#94a3b8" strokeDasharray="4 4" />
         <Bar dataKey="eff" radius={[0, 4, 4, 0]} barSize={20}>
           {chartData.map((d, i) => <Cell key={i} fill={effColor(d.eff)} />)}
@@ -257,7 +258,8 @@ function TrendChart({ trend, technicians }: {
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis dataKey="month" tick={{ fontSize: 10 }} />
         <YAxis unit="%" domain={[0, 200]} tick={{ fontSize: 10 }} />
-        <Tooltip formatter={(v: number, key: string) => [`${v}%`, nameOf(key)]} />
+        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+        <Tooltip formatter={(v: any, key: any) => [`${v}%`, nameOf(String(key))]} />
         <Legend formatter={(id: string) => <span style={{ fontSize: 10, color: '#64748b' }}>{nameOf(id)}</span>} />
         <ReferenceLine y={100} stroke="#94a3b8" strokeDasharray="4 4" />
         {topIds.map((id, i) => (
