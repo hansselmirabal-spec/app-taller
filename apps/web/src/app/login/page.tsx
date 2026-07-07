@@ -33,7 +33,7 @@ export default function LoginPage() {
       // solo persiste el perfil para que la UI lo use sin re-fetch.
       const { user } = await login(email, password);
       storeAuth(user);
-      router.push(mustChangePassword() ? '/change-password' : '/appointments');
+      router.push(mustChangePassword() ? '/change-password' : '/dashboard');
     } catch (err: any) {
       setError(err.message || 'Error al iniciar sesion');
     } finally {

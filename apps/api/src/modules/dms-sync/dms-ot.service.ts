@@ -337,6 +337,10 @@ export class DmsOtService {
 
   // ── GET /dms/ot-seguimiento/reportes ─────────────────────────────────────────
   async getReportes(filters?: OtFilters): Promise<any> {
+    const sucursalCond = filters?.sucursal
+      ? `AND sucursal_desc = '${filters.sucursal.replace(/'/g, "''")}'`
+      : '';
+
     const sucursalSummary: any[] = await this.otRepo.query(`
       SELECT
         sucursal_desc                                                         AS sucursal,
@@ -348,7 +352,7 @@ export class DmsOtService {
         ROUND(AVG(CASE WHEN estado_ot = 'Abierto'
                        THEN (CURRENT_DATE - fecha_ingreso) END)::NUMERIC, 1) AS "diasPromedio"
       FROM dms_ot_rows
-      WHERE sucursal_desc IS NOT NULL
+      WHERE sucursal_desc IS NOT NULL ${sucursalCond}
       GROUP BY sucursal_desc
       ORDER BY abiertas DESC
     `);
@@ -371,7 +375,7 @@ export class DmsOtService {
                THEN (fecha_cierre_ot::date - fecha_ingreso::date) END
         )::NUMERIC, 1), 0)                                                   AS "diasPromedioCierre"
       FROM dms_ot_rows
-      WHERE asesor IS NOT NULL ${asesorDateFilter}
+      WHERE asesor IS NOT NULL ${sucursalCond} ${asesorDateFilter}
       GROUP BY asesor
       ORDER BY "totalOts" DESC
     `);
@@ -726,10 +730,17 @@ export class DmsOtService {
       vencidas:      `fecha_compromiso_cliente < NOW() AND fecha_cierre_ot IS NULL AND estado_ot = 'Abierto'`,
       atrasoCritico: `estado_ot = 'Abierto' AND (CURRENT_DATE - fecha_ingreso) > 30`,
       diasPromedio:  `estado_ot = 'Abierto'`,
-      montoTotal:    `estado_ot = 'Abierto'`,
+      montoTotal:    `estado_ot = 'Abierto' AND monto IS NOT NULL AND monto > 0`,
       tasaCierre30d: `fecha_cierre_ot >= CURRENT_DATE - INTERVAL '30 days'`,
       facturadas:    `fecha_cierre_ot IS NOT NULL`,
       antiguedad:    `estado_ot = 'Abierto'`,
+    };
+
+    const orderMap: Record<string, string> = {
+      montoTotal:    'monto DESC',
+      tasaCierre30d: 'monto DESC NULLS LAST',
+      facturadas:    'monto DESC NULLS LAST',
+      vencidas:      '"diasRetraso" DESC',
     };
 
     const titleMap: Record<string, string> = {
@@ -777,7 +788,7 @@ export class DmsOtService {
         COALESCE(monto, 0)                                          AS monto
       FROM dms_ot_rows
       WHERE ${condition}
-      ORDER BY (CURRENT_DATE - fecha_ingreso) DESC
+      ORDER BY ${orderMap[kind] ?? '(CURRENT_DATE - fecha_ingreso) DESC'}
       LIMIT 500
     `);
 
