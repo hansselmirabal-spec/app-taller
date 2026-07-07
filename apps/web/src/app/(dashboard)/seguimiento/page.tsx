@@ -229,22 +229,6 @@ export default function SeguimientoPage() {
     else { setSortKey(key); setSortDir('asc'); }
   }
 
-  // Opciones del dropdown de sucursales:
-  //  · Si el taller activo tiene su propia sucursal configurada → solo esa.
-  //  · Si no → todas las sucursales del DMS (no se restringe por lo que tengan otros talleres).
-  const sucursales = useMemo(() => {
-    if (workshopBranch) return [workshopBranch];
-    return Array.from(new Set(filteredBase.map(r => r.sucursal).filter(Boolean))).sort((a, b) => a.localeCompare(b));
-  }, [filteredBase, workshopBranch]);
-  const asesores = useMemo(
-    () => Array.from(new Set(filteredBase.map(r => r.asesor).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [filteredBase],
-  );
-  const tiposServicio = useMemo(
-    () => Array.from(new Set(filteredBase.map(r => r.tipoServicio).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [filteredBase],
-  );
-
   // Umbrales de alerta vienen del taller activo (configurables en /settings/workshops).
   // Si están vacíos o son inválidos, caen a los defaults globales.
   const alertaAtraso  = Number(activeWorkshop?.alertAtrasoDays  ?? DEFAULT_ALERTA_ATRASO);
@@ -332,6 +316,20 @@ export default function SeguimientoPage() {
     }
     return s;
   }, [filteredBase]);
+
+  // Opciones de dropdowns derivadas de filteredBase (respetan el tab activo y filtros aplicados).
+  const sucursales = useMemo(() => {
+    if (workshopBranch) return [workshopBranch];
+    return Array.from(new Set(filteredBase.map(r => r.sucursal).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  }, [filteredBase, workshopBranch]);
+  const asesores = useMemo(
+    () => Array.from(new Set(filteredBase.map(r => r.asesor).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [filteredBase],
+  );
+  const tiposServicio = useMemo(
+    () => Array.from(new Set(filteredBase.map(r => r.tipoServicio).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [filteredBase],
+  );
 
   function SortIcon({ k }: { k: SortKey }) {
     if (sortKey !== k) return <ChevronsUpDown className="h-3 w-3 text-slate-300 inline ml-1" />;
