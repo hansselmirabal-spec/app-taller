@@ -12,6 +12,7 @@ import type {
   BodyshopCatalogGroup, BodyshopCatalogProcess, BodyshopCatalogGrade, BodyshopCatalogPiece,
 } from '@/types';
 import { calcMonthlyLoadReport, type TechMonthlyRow } from './bodyshop-analytics';
+import { randomId } from './utils';
 
 const MOCK = process.env.NEXT_PUBLIC_MOCK_MODE !== 'false';
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
@@ -895,7 +896,7 @@ export async function getRoles(): Promise<Role[]> {
 
 export async function createRole(data: { name: string; permissions: Permissions }): Promise<Role> {
   if (MOCK) {
-    const role: Role = { id: crypto.randomUUID(), ...data, active: true };
+    const role: Role = { id: randomId(), ...data, active: true };
     _mockRoles.push(role);
     return delay(role);
   }
@@ -947,7 +948,7 @@ export async function createUser(data: {
 }): Promise<User> {
   if (MOCK) {
     const user: User = {
-      id: crypto.randomUUID(), name: data.name, email: data.email,
+      id: randomId(), name: data.name, email: data.email,
       role: data.role, active: true, mustChangePassword: true,
       roleId: data.roleId ?? null,
       allowedWorkshopIds: data.allowedWorkshopIds ?? null,
