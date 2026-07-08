@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards } from '@nestjs/common';
 import { UsersService, CreateUserDto, UpdateUserDto } from './users.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -25,5 +25,12 @@ export class UsersController {
   @Roles('admin', 'admin_taller')
   async update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
     return { data: await this.service.update(id, dto), meta: { timestamp: new Date().toISOString() } };
+  }
+
+  @Delete(':id')
+  @Roles('admin')
+  async remove(@Param('id') id: string) {
+    await this.service.remove(id);
+    return { data: { deleted: true }, meta: { timestamp: new Date().toISOString() } };
   }
 }

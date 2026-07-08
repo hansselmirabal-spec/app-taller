@@ -1,8 +1,8 @@
 'use client';
 import { useState } from 'react';
-import { Plus, Pencil, ShieldCheck, ShieldOff, KeyRound, X, Check, Tag, Building2, Mail, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil, ShieldCheck, ShieldOff, KeyRound, X, Check, Tag, Building2, Mail, AlertTriangle, Trash2 } from 'lucide-react';
 import { useRequirePermission } from '@/hooks/use-require-permission';
-import { useUsers, useCreateUser, useUpdateUser } from '@/hooks/use-users';
+import { useUsers, useCreateUser, useUpdateUser, useDeleteUser } from '@/hooks/use-users';
 import { useRoles } from '@/hooks/use-roles';
 import { useWorkshops } from '@/hooks/use-workshops';
 import { Button } from '@/components/ui/button';
@@ -410,6 +410,7 @@ export default function UsersSettingsPage() {
   const { data: workshops = [] }        = useWorkshops();
   const update   = useUpdateUser();
 
+  const deleteUser = useDeleteUser();
   const [showForm, setShowForm]     = useState(false);
   const [editing, setEditing]       = useState<User | null>(null);
 
@@ -426,6 +427,11 @@ export default function UsersSettingsPage() {
   function handleToggleActive(user: User) {
     if (!confirm(`¿${user.active ? 'Desactivar' : 'Activar'} al usuario "${user.name}"?`)) return;
     update.mutate({ id: user.id, data: { active: !user.active } });
+  }
+
+  function handleDelete(user: User) {
+    if (!confirm(`¿Eliminar permanentemente al usuario "${user.name}" (${user.email})?\n\nEsta acción no se puede deshacer.`)) return;
+    deleteUser.mutate(user.id);
   }
 
   const activeUsers   = users.filter(u => u.active);
@@ -477,8 +483,10 @@ export default function UsersSettingsPage() {
                 key={user.id}
                 user={user}
                 workshops={workshops}
+                isAdmin={admin}
                 onEdit={() => setEditing(user)}
                 onToggleActive={() => handleToggleActive(user)}
+                onDelete={() => handleDelete(user)}
               />
             ))}
             {activeUsers.length === 0 && (
@@ -500,8 +508,10 @@ export default function UsersSettingsPage() {
                 key={user.id}
                 user={user}
                 workshops={workshops}
+                isAdmin={admin}
                 onEdit={() => setEditing(user)}
                 onToggleActive={() => handleToggleActive(user)}
+                onDelete={() => handleDelete(user)}
               />
             ))}
           </div>
@@ -519,13 +529,17 @@ export default function UsersSettingsPage() {
 function UserRow({
   user,
   workshops,
+  isAdmin,
   onEdit,
   onToggleActive,
+  onDelete,
 }: {
   user: User;
   workshops: Workshop[];
+  isAdmin: boolean;
   onEdit: () => void;
   onToggleActive: () => void;
+  onDelete: () => void;
 }) {
   return (
     <div className="flex items-center gap-4 bg-white border border-slate-200 rounded-xl px-4 py-3 hover:border-slate-300 transition-colors">
@@ -598,6 +612,15 @@ function UserRow({
         >
           {user.active ? <ShieldOff className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
         </button>
+        {isAdmin && (
+          <button
+            onClick={onDelete}
+            className="p-1.5 rounded-lg text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors"
+            title="Eliminar usuario"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );

@@ -1000,6 +1000,11 @@ export async function updateUser(
   return http<User>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 }
 
+export async function deleteUser(id: string): Promise<void> {
+  if (MOCK) { _mockUsers.splice(0, _mockUsers.length, ..._mockUsers.filter(u => u.id !== id)); return delay(undefined as any); }
+  await http<unknown>(`/users/${id}`, { method: 'DELETE' });
+}
+
 // ─── Bodyshop Catalog ─────────────────────────────────────────────────────────
 
 // ─── Field adapters: new API uses `name`, settings page expects `label` ─────────
