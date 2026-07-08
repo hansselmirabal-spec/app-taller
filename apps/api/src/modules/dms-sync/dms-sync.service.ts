@@ -259,7 +259,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
           ISNULL(LTRIM(RTRIM(ts.abreviatura)), '')                             AS TipoServicio,
           m.horaingreso
         FROM dbo.MasterOT_Condor m
-        LEFT JOIN dbo.controltiempo_DimSucursal s ON s.IdSucursal = m.taller
+        LEFT JOIN dbo.controltiempo_DimSucursal s ON TRY_CAST(s.db2idfilial AS INT) = m.taller AND s.idempresa = 1
         LEFT JOIN dbo.controltiempo_DimTipoServicio ts ON ts.idtipo_servicio = m.idtiposervicio
         ${whereClause}
         ORDER BY m.fechaingreso DESC
@@ -716,7 +716,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
         NULL                                    AS codcliente
       FROM dbo.MasterOT_Condor m
       LEFT JOIN dbo.controltiempo_DimSucursal s
-             ON s.IdSucursal = m.taller
+             ON TRY_CAST(s.db2idfilial AS INT) = m.taller AND s.idempresa = 1
       LEFT JOIN dbo.controltiempo_DimTipoServicio ts
              ON ts.idtipo_servicio = m.idtiposervicio
       ${whereClause}
@@ -766,7 +766,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
           NULL                                    AS codcliente
         FROM dbo.MasterOT_Condor m
         LEFT JOIN dbo.controltiempo_DimSucursal s
-               ON s.IdSucursal = m.taller
+               ON TRY_CAST(s.db2idfilial AS INT) = m.taller AND s.idempresa = 1
         LEFT JOIN dbo.controltiempo_DimTipoServicio ts
                ON ts.idtipo_servicio = m.idtiposervicio
         ${whereClause}
