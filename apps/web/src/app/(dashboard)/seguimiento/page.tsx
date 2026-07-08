@@ -317,6 +317,18 @@ export default function SeguimientoPage() {
     return s;
   }, [filteredBase]);
 
+  const presupuestosBySucursal = useMemo(() => {
+    const rows = data.filter(r => (r.estadoIdis || r.estadoOt) === 'En Presupuesto');
+    const map = new Map<string, number>();
+    for (const r of rows) {
+      const suc = r.sucursal || '(sin sucursal)';
+      map.set(suc, (map.get(suc) ?? 0) + 1);
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([sucursal, total]) => ({ sucursal, total }));
+  }, [data]);
+
   // Opciones de dropdowns derivadas de filteredBase (respetan el tab activo y filtros aplicados).
   const sucursales = useMemo(() => {
     if (workshopBranch) return [workshopBranch];
@@ -675,6 +687,30 @@ export default function SeguimientoPage() {
           </div>
         )}
       </div>
+
+      {/* Presupuestos por sucursal — solo visible en tab Presupuestos */}
+      {activeTab === 'presupuestos' && presupuestosBySucursal.length > 0 && (
+        <div className="px-6 py-4 bg-white border-b border-slate-200">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Presupuestos por sucursal</p>
+          <div className="flex flex-wrap gap-3">
+            {presupuestosBySucursal.map(({ sucursal, total }) => (
+              <button
+                key={sucursal}
+                onClick={() => setSucursalFiltro(sucursalFiltro === sucursal ? '' : sucursal)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${
+                  sucursalFiltro === sucursal
+                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-indigo-200 hover:bg-indigo-50/50'
+                }`}
+              >
+                <Building2 className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                <span className="font-medium">{sucursal}</span>
+                <span className="ml-1 text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700">{total}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Body: Tabla o Kanban */}
       <div className="flex-1 overflow-auto">
