@@ -26,6 +26,7 @@ export class MailService {
   async sendWelcome(name: string, email: string, tempPassword: string): Promise<void> {
     const appName = this.config.get<string>('APP_NAME') ?? 'App Taller';
     const fromAddress = this.config.get<string>('SMTP_FROM') ?? `noreply@taller.com`;
+    const appUrl = this.config.get<string>('FRONTEND_URL') ?? '';
 
     const subject = `Bienvenido a ${appName} — Activá tu cuenta`;
     const html = `
@@ -39,6 +40,11 @@ export class MailService {
           <p style="margin: 0; color: #64748b; font-size: 13px;">Contraseña temporal</p>
           <p style="margin: 4px 0 0; font-weight: 700; font-size: 20px; letter-spacing: 2px; color: #0f172a; font-family: monospace;">${tempPassword}</p>
         </div>
+        ${appUrl ? `
+        <div style="margin: 24px 0; text-align: center;">
+          <a href="${appUrl}/login" style="display: inline-block; background: #0f172a; color: #ffffff; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px;">Ingresar al sistema</a>
+        </div>
+        ` : ''}
         <p style="color: #ef4444; font-size: 13px;">Al iniciar sesión, el sistema te pedirá que cambies esta contraseña.</p>
         <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
         <p style="color: #94a3b8; font-size: 12px;">Si no esperabas este mensaje, podés ignorarlo.</p>
