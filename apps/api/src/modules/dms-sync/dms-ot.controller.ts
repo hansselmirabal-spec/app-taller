@@ -6,6 +6,7 @@ function parseFilters(q: Record<string, any>): OtFilters {
   return {
     estadoOt:  q.estado     ?? q.estadoOt,
     sucursal:  q.sucursal,
+    empresa:   q.empresa,
     asesor:    q.asesor,
     tipo:      q.tipo,
     taller:    q.taller   != null ? Number(q.taller)  : undefined,

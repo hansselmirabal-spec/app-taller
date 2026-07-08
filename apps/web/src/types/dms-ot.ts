@@ -16,6 +16,7 @@ export interface OtRow {
   estadoFinanciero: string;
   asesor: string;
   sucursal: string;
+  empresa: string | null;
   diasIngreso: number;
   diasEnEstado: number;
   fechaIngreso: string | null;

@@ -105,6 +105,7 @@ export default function SeguimientoPage() {
   const [search, setSearch]     = useState('');
   const [estadoFiltro, setEstadoFiltro] = useState('');
   const [sucursalFiltro, setSucursalFiltro] = useState('');
+  const [empresaFiltro, setEmpresaFiltro]   = useState('');
   const [asesorFiltro, setAsesorFiltro]     = useState('');
   const [tipoServicioFiltro, setTipoServicioFiltro] = useState('');
   const [antiguedadFiltro, setAntiguedadFiltro] = useState<number>(0);
@@ -261,6 +262,7 @@ export default function SeguimientoPage() {
     if (fechaEspecifica)    rows = rows.filter(r => r.fechaIngreso === fechaEspecifica);
     if (estadoFiltro)       rows = rows.filter(r => (r.estadoIdis || r.estadoOt) === estadoFiltro);
     if (sucursalFiltro)     rows = rows.filter(r => r.sucursal === sucursalFiltro);
+    if (empresaFiltro)      rows = rows.filter(r => r.empresa === empresaFiltro);
     if (asesorFiltro)       rows = rows.filter(r => r.asesor === asesorFiltro);
     if (tipoServicioFiltro) rows = rows.filter(r => r.tipoServicio === tipoServicioFiltro);
     if (antiguedadFiltro > 0) rows = rows.filter(r => r.diasIngreso > antiguedadFiltro);
@@ -280,7 +282,7 @@ export default function SeguimientoPage() {
       const cmp = String(av) < String(bv) ? -1 : String(av) > String(bv) ? 1 : 0;
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [data, activeTab, workshopBranch, fechaEspecifica, estadoFiltro, sucursalFiltro, asesorFiltro, tipoServicioFiltro, antiguedadFiltro, search, sortKey, sortDir]);
+  }, [data, activeTab, workshopBranch, fechaEspecifica, estadoFiltro, sucursalFiltro, empresaFiltro, asesorFiltro, tipoServicioFiltro, antiguedadFiltro, search, sortKey, sortDir]);
 
   // Base filtrada sin estadoFiltro ni sort — usada para el kanban bar y pills
   // para que reflejen los filtros activos (sucursal, asesor, etc.) pero sigan mostrando
@@ -292,6 +294,7 @@ export default function SeguimientoPage() {
     if (workshopBranch)      rows = rows.filter(r => r.sucursal === workshopBranch);
     if (fechaEspecifica)     rows = rows.filter(r => r.fechaIngreso === fechaEspecifica);
     if (sucursalFiltro)      rows = rows.filter(r => r.sucursal === sucursalFiltro);
+    if (empresaFiltro)       rows = rows.filter(r => r.empresa === empresaFiltro);
     if (asesorFiltro)        rows = rows.filter(r => r.asesor === asesorFiltro);
     if (tipoServicioFiltro)  rows = rows.filter(r => r.tipoServicio === tipoServicioFiltro);
     if (antiguedadFiltro > 0) rows = rows.filter(r => r.diasIngreso > antiguedadFiltro);
@@ -306,7 +309,7 @@ export default function SeguimientoPage() {
       );
     }
     return rows;
-  }, [data, activeTab, workshopBranch, fechaEspecifica, sucursalFiltro, asesorFiltro, tipoServicioFiltro, antiguedadFiltro, search]);
+  }, [data, activeTab, workshopBranch, fechaEspecifica, sucursalFiltro, empresaFiltro, asesorFiltro, tipoServicioFiltro, antiguedadFiltro, search]);
 
   const filteredSummary = useMemo(() => {
     const s: Record<string, number> = {};
@@ -341,6 +344,10 @@ export default function SeguimientoPage() {
   const tiposServicio = useMemo(
     () => Array.from(new Set(filteredBase.map(r => r.tipoServicio).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
     [filteredBase],
+  );
+  const empresas = useMemo(
+    () => Array.from(new Set(data.map(r => r.empresa).filter(Boolean) as string[])).sort(),
+    [data],
   );
 
   function SortIcon({ k }: { k: SortKey }) {
@@ -573,6 +580,19 @@ export default function SeguimientoPage() {
                 <option key={opt.value} value={opt.value}>{opt.value === 0 ? 'Todo el histórico' : `Últimos ${opt.label}`}</option>
               ))}
             </select>
+            {empresas.length > 1 && (
+              <select
+                value={empresaFiltro}
+                onChange={e => { setEmpresaFiltro(e.target.value); }}
+                className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                title="Filtrar por empresa"
+              >
+                <option value="">Todas las empresas</option>
+                {empresas.map(e => (
+                  <option key={e} value={e}>{e}</option>
+                ))}
+              </select>
+            )}
             <select
               value={sucursalFiltro}
               onChange={e => setSucursalFiltro(e.target.value)}
@@ -650,7 +670,7 @@ export default function SeguimientoPage() {
         />
 
         {/* Chips de filtros activos */}
-        {(fechaEspecifica || sucursalFiltro || asesorFiltro || search.trim()) && (
+        {(fechaEspecifica || sucursalFiltro || empresaFiltro || asesorFiltro || search.trim()) && (
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Filtros:</span>
             {fechaEspecifica && (
@@ -663,6 +683,9 @@ export default function SeguimientoPage() {
             )}
             {sucursalFiltro && (
               <FilterChip label="Sucursal" value={sucursalFiltro} onClear={() => setSucursalFiltro('')} tone="indigo" />
+            )}
+            {empresaFiltro && (
+              <FilterChip label="Empresa" value={empresaFiltro} onClear={() => setEmpresaFiltro('')} tone="indigo" />
             )}
             {asesorFiltro && (
               <FilterChip label="Asesor" value={asesorFiltro} onClear={() => setAsesorFiltro('')} tone="emerald" />
@@ -679,7 +702,7 @@ export default function SeguimientoPage() {
               <FilterChip label="Búsqueda" value={search.trim()} onClear={() => setSearch('')} tone="slate" />
             )}
             <button
-              onClick={() => { setFechaEspecifica(''); setSucursalFiltro(''); setAsesorFiltro(''); setAntiguedadFiltro(0); setSearch(''); }}
+              onClick={() => { setFechaEspecifica(''); setSucursalFiltro(''); setEmpresaFiltro(''); setAsesorFiltro(''); setAntiguedadFiltro(0); setSearch(''); }}
               className="text-[11px] font-semibold text-slate-400 hover:text-red-500 transition-colors ml-1"
             >
               Limpiar todo

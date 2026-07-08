@@ -7,6 +7,7 @@ import { DmsSyncState } from './dms-sync-state.entity';
 export interface OtFilters {
   estadoOt?: string;
   sucursal?: string;
+  empresa?: string;
   asesor?: string;
   tipo?: string;
   taller?: number;
@@ -61,6 +62,7 @@ export class DmsOtService {
         'ot.asesor AS asesor',
         'ot.taller AS taller',
         'ot.sucursalDesc AS "sucursalDesc"',
+        'ot.empresa AS empresa',
         'ot.fechaIngreso AS "fechaIngreso"',
         'ot.horaIngreso AS "horaIngreso"',
         'ot.fechaCompromisoCliente AS "fechaCompromisoCliente"',
@@ -106,6 +108,7 @@ export class DmsOtService {
       estadoFinanciero:       String(r.estadoFinanciero ?? '').trim(),
       asesor:                 String(r.asesor ?? '').trim(),
       sucursal:               String(r.sucursalDesc ?? '').trim(),
+      empresa:                String(r.empresa ?? '').trim() || null,
       diasIngreso:            r.diasIngreso != null ? Math.max(0, Math.floor(Number(r.diasIngreso))) : 0,
       diasEnEstado:           0,
       fechaIngreso:           r.fechaIngreso ? new Date(r.fechaIngreso).toISOString().split('T')[0] : null,
@@ -905,6 +908,9 @@ export class DmsOtService {
     }
     if (filters.sucursal) {
       qb.andWhere('ot.sucursalDesc ILIKE :sucursal', { sucursal: `%${filters.sucursal}%` });
+    }
+    if (filters.empresa) {
+      qb.andWhere('ot.empresa = :empresa', { empresa: filters.empresa });
     }
     if (filters.asesor) {
       qb.andWhere('ot.asesor ILIKE :asesor', { asesor: `%${filters.asesor}%` });

@@ -79,6 +79,9 @@ export class DmsOtRow {
   @Column({ type: 'varchar', length: 50, nullable: true })
   codcliente: string | null;
 
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  empresa: string | null;
+
   @Column({ name: 'synced_at', type: 'timestamptz', default: () => 'NOW()' })
   syncedAt: Date;
 }

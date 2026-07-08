@@ -609,7 +609,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
               'asesor', 'taller', 'sucursal_desc',
               'fecha_ingreso', 'hora_ingreso',
               'fecha_compromiso_cliente', 'fecha_cierre_ot', 'fecha_fin_taller',
-              'monto', 'idtiposervicio', 'tipo_desc', 'tipo_abrev', 'codcliente', 'synced_at',
+              'monto', 'idtiposervicio', 'tipo_desc', 'tipo_abrev', 'codcliente', 'empresa', 'synced_at',
             ],
             ['nroot'],
           )
@@ -668,6 +668,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
         asesor:                 String(r.asesor ?? '').trim() || null,
         taller:                 r.taller != null ? Number(r.taller) : null,
         sucursalDesc:           String(r.sucursal_desc ?? '').trim() || null,
+        empresa:                String(r.empresa ?? '').trim() || null,
         fechaIngreso:           r.fecha_ingreso ? new Date(r.fecha_ingreso) : null,
         horaIngreso:            r.hora_ingreso ? String(r.hora_ingreso).trim() || null : null,
         fechaCompromisoCliente: r.fecha_compromiso_cliente ? new Date(r.fecha_compromiso_cliente) : null,
@@ -704,6 +705,12 @@ export class DmsSyncService implements OnApplicationBootstrap {
         LTRIM(RTRIM(m.asesor))                  AS asesor,
         m.taller,
         ISNULL(LTRIM(RTRIM(s.Descripcion)), '') AS sucursal_desc,
+        CASE s.idempresa
+          WHEN 1 THEN 'CONDOR'
+          WHEN 6 THEN 'IDICON'
+          WHEN 7 THEN 'HALLEY'
+          ELSE 'OTRO'
+        END AS empresa,
         m.fechaingreso                           AS fecha_ingreso,
         m.horaingreso                            AS hora_ingreso,
         m.fechacompromisoCliente                 AS fecha_compromiso_cliente,
@@ -714,9 +721,9 @@ export class DmsSyncService implements OnApplicationBootstrap {
         ISNULL(LTRIM(RTRIM(ts.descripcion)), '') AS tipo_desc,
         ISNULL(LTRIM(RTRIM(ts.abreviatura)), '') AS tipo_abrev,
         NULL                                    AS codcliente
-      FROM dbo.MasterOT_Condor m
+      FROM dbo.MasterOT m
       LEFT JOIN dbo.controltiempo_DimSucursal s
-             ON TRY_CAST(s.db2idfilial AS INT) = m.taller AND s.idempresa = 1
+             ON TRY_CAST(s.db2idfilial AS INT) = m.taller
       LEFT JOIN dbo.controltiempo_DimTipoServicio ts
              ON ts.idtipo_servicio = m.idtiposervicio
       ${whereClause}
@@ -754,6 +761,12 @@ export class DmsSyncService implements OnApplicationBootstrap {
           LTRIM(RTRIM(m.asesor))                  AS asesor,
           m.taller,
           ISNULL(LTRIM(RTRIM(s.Descripcion)), '') AS sucursal_desc,
+          CASE s.idempresa
+            WHEN 1 THEN 'CONDOR'
+            WHEN 6 THEN 'IDICON'
+            WHEN 7 THEN 'HALLEY'
+            ELSE 'OTRO'
+          END AS empresa,
           m.fechaingreso                           AS fecha_ingreso,
           m.horaingreso                            AS hora_ingreso,
           m.fechacompromisoCliente                 AS fecha_compromiso_cliente,
@@ -764,9 +777,9 @@ export class DmsSyncService implements OnApplicationBootstrap {
           ISNULL(LTRIM(RTRIM(ts.descripcion)), '') AS tipo_desc,
           ISNULL(LTRIM(RTRIM(ts.abreviatura)), '') AS tipo_abrev,
           NULL                                    AS codcliente
-        FROM dbo.MasterOT_Condor m
+        FROM dbo.MasterOT m
         LEFT JOIN dbo.controltiempo_DimSucursal s
-               ON TRY_CAST(s.db2idfilial AS INT) = m.taller AND s.idempresa = 1
+               ON TRY_CAST(s.db2idfilial AS INT) = m.taller
         LEFT JOIN dbo.controltiempo_DimTipoServicio ts
                ON ts.idtipo_servicio = m.idtiposervicio
         ${whereClause}
@@ -785,6 +798,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
         asesor:                 String(r.asesor ?? '').trim() || null,
         taller:                 r.taller != null ? Number(r.taller) : null,
         sucursalDesc:           String(r.sucursal_desc ?? '').trim() || null,
+        empresa:                String(r.empresa ?? '').trim() || null,
         fechaIngreso:           r.fecha_ingreso ? new Date(r.fecha_ingreso) : null,
         horaIngreso:            r.hora_ingreso ? String(r.hora_ingreso).trim() || null : null,
         fechaCompromisoCliente: r.fecha_compromiso_cliente ? new Date(r.fecha_compromiso_cliente) : null,
