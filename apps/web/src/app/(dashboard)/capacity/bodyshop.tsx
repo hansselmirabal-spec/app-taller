@@ -7,6 +7,7 @@ import { useBodyshopWeekCapacity } from '@/hooks/use-bodyshop';
 import { useTechnicians } from '@/hooks/use-technicians';
 import { formatDate } from '@/lib/utils';
 import type { ProcessCapacity, CapacityStatus, Technician, BodyshopTechDayCapacity, BodyshopDayCapacity } from '@/types';
+import { InfoButton } from '@/components/ui/info-button';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -466,6 +467,7 @@ export default function BodyshopCapacityPage() {
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-bold text-slate-900">Capacidad Carrocería</h1>
               <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">BODYSHOP</span>
+              <InfoButton helpKey="capacity" />
             </div>
             <div className="flex items-center gap-2 mt-1">
               <button onClick={e => { e.stopPropagation(); setWeekStart(subWeeks(weekStart, 1)); }} className="p-0.5 rounded hover:bg-slate-100">

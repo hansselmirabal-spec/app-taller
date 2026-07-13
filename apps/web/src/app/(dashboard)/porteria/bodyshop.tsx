@@ -21,6 +21,7 @@ import { useBodyshopWeekCapacity, useMonthlyLoadReport, type TechMonthlyRow } fr
 import { useWorkTypes } from '@/hooks/use-work-types';
 import { formatDate } from '@/lib/utils';
 import type { BodyshopDayCapacity, BodyshopEntry } from '@/types';
+import { InfoButton } from '@/components/ui/info-button';
 
 import 'react-grid-layout/css/styles.css';
 
@@ -1292,6 +1293,7 @@ export default function BodyshopReporteriaPage() {
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-bold text-slate-900">Reportería</h1>
             <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">BODYSHOP</span>
+            <InfoButton helpKey="reportes" />
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
             {format(parseISO(from + 'T12:00:00'), 'd MMM', { locale: es })} — {format(parseISO(to + 'T12:00:00'), 'd MMM yyyy', { locale: es })}

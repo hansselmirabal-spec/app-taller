@@ -25,7 +25,7 @@ const NAV_MAIN: Array<{ href: string; label: string; icon: any; module: ModuleId
   { href: '/porteria',     label: 'Reportería',              icon: BarChart3,       module: 'reports'      },
   { href: '/kanban',       label: 'Kanban Operativo',        icon: KanbanSquare,    module: 'kanban'       },
   { href: '/seguimiento',  label: 'Seguimiento OTs',         icon: FileSearch,      module: null           },
-  { href: '/documentacion', label: 'Documentación',          icon: BookOpen,        module: null           },
+  { href: '/documentacion', label: 'Documentación',          icon: BookOpen,        module: 'documentation' },
 ];
 
 export function Sidebar() {

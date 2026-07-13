@@ -9,6 +9,7 @@ import { useActiveWorkshop } from '@/hooks/use-active-workshop';
 import { formatDate } from '@/lib/utils';
 import { AbsenceModal } from '@/components/capacity/absence-modal';
 import { TechnicianDayModal } from '@/components/capacity/technician-day-modal';
+import { InfoButton } from '@/components/ui/info-button';
 import type { TechnicianCapacity, WeekDay } from '@/types';
 import { DEFAULT_WEEKLY_SCHEDULE } from '@/types';
 
@@ -74,7 +75,10 @@ export default function MechanicCapacityPage() {
       <div className="bg-white border-b border-slate-200 px-6 py-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-bold text-slate-900">Planificación de Capacidad</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold text-slate-900">Planificación de Capacidad</h1>
+              <InfoButton helpKey="capacity" />
+            </div>
             <div className="flex items-center gap-2 mt-1">
               <button onClick={() => setWeekStart(subWeeks(weekStart, 1))} className="p-0.5 rounded hover:bg-slate-100">
                 <ChevronLeft className="h-4 w-4 text-slate-400" />

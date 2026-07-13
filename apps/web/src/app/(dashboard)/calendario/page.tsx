@@ -13,6 +13,7 @@ import { es } from 'date-fns/locale';
 import { useAppointmentsByRange } from '@/hooks/use-appointments';
 import { useRequirePermission } from '@/hooks/use-require-permission';
 import { AppointmentDetailModal } from '@/components/appointments/appointment-detail-modal';
+import { InfoButton } from '@/components/ui/info-button';
 import type { Appointment } from '@/types';
 
 type ViewMode = 'month' | 'week';
@@ -182,7 +183,10 @@ export default function CalendarioPage() {
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex-shrink-0 bg-white border-b border-slate-200 px-5 py-3 flex items-center gap-3">
         <CalendarDays className="h-5 w-5 text-blue-600 flex-shrink-0" />
-        <h1 className="text-base font-bold text-slate-900 flex-1">Calendario</h1>
+        <div className="flex items-center gap-2 flex-1">
+          <h1 className="text-base font-bold text-slate-900">Calendario</h1>
+          <InfoButton helpKey="calendario" />
+        </div>
 
         {/* Hoy */}
         <button

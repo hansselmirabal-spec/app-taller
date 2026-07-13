@@ -10,6 +10,7 @@ import { useTechnicians } from '@/hooks/use-technicians';
 import { useDailyCapacity } from '@/hooks/use-capacity';
 import { formatDate, timeToMinutes, minutesToTime } from '@/lib/utils';
 import type { Appointment } from '@/types';
+import { InfoButton } from '@/components/ui/info-button';
 import { AppointmentDetailModal } from '@/components/appointments/appointment-detail-modal';
 
 const HOUR_START = 8;
@@ -155,7 +156,10 @@ export default function MechanicAppointmentsPage() {
               <CalendarCheck className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-slate-900">Agenda de Mecánica</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-bold text-slate-900">Agenda de Mecánica</h1>
+                <InfoButton helpKey="appointments" />
+              </div>
               <p className="text-xs text-slate-500 capitalize">
                 {format(parseISO(date + 'T12:00:00'), "EEEE, d 'de' MMMM yyyy", { locale: es })}
               </p>

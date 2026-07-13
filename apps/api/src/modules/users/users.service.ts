@@ -131,6 +131,7 @@ function buildDefaultReceptionistPermissions(): Permissions {
     reports:      { view: false, edit: false },
     settings:     { view: false, edit: false },
     presupuesto:  { view: false, edit: false },
+    documentation: { view: true, edit: false },
   };
 }
 
@@ -143,10 +144,11 @@ function buildDefaultPeritoPermissions(): Permissions {
     reports:      { view: false, edit: false },
     settings:     { view: false, edit: false },
     presupuesto:  { view: true,  edit: true  },
+    documentation: { view: true, edit: false },
   };
 }
 
-const MODULES = ['dashboard', 'capacity', 'appointments', 'kanban', 'reports', 'settings', 'presupuesto'];
+const MODULES = ['dashboard', 'capacity', 'appointments', 'kanban', 'reports', 'settings', 'presupuesto', 'documentation'];
 
 function generateTempPassword(): string {
   return crypto.randomBytes(6).toString('base64url').slice(0, 10) + '#1Aa';

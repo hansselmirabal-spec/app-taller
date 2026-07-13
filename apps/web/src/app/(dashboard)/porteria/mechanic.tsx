@@ -24,6 +24,7 @@ import { useTechnicians } from '@/hooks/use-technicians';
 import { useServiceTypes } from '@/hooks/use-service-types';
 import { formatDate } from '@/lib/utils';
 import type { Appointment } from '@/types';
+import { InfoButton } from '@/components/ui/info-button';
 
 import 'react-grid-layout/css/styles.css';
 
@@ -946,7 +947,10 @@ export default function MechanicReporteriaPage() {
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between flex-shrink-0">
         <div>
-          <h1 className="text-lg font-bold text-slate-900">Reportería Mecánica</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-bold text-slate-900">Reportería Mecánica</h1>
+            <InfoButton helpKey="reportes" />
+          </div>
           <p className="text-xs text-slate-500 mt-0.5">
             {editMode ? 'Modo edición — arrastrá y redimensioná los widgets'
               : `Período: ${format(parseISO(from + 'T12:00:00'), "d MMM", { locale: es })} — ${format(parseISO(to + 'T12:00:00'), "d MMM yyyy", { locale: es })}`}
