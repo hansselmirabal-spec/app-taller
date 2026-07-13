@@ -16,6 +16,7 @@ import { statusLabel, statusColor } from '@/lib/utils';
 import { isAdmin } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 import type { Appointment } from '@/types';
+import { InfoButton } from '@/components/ui/info-button';
 
 // ─── Config defaults ──────────────────────────────────────────────────────────
 
@@ -474,6 +475,7 @@ export default function MechanicKanban() {
       <div className="flex items-center gap-3 px-6 py-4 bg-white border-b border-slate-200 flex-shrink-0 flex-wrap gap-y-2">
         <KanbanSquare className="h-5 w-5 text-blue-600 flex-shrink-0" />
         <h1 className="text-base font-bold text-slate-900">Seguimiento de Turnos</h1>
+        <InfoButton helpKey="kanban" />
 
         <div className="flex items-center gap-1.5 ml-4 flex-wrap">
           <Button size="sm" variant="outline" className="text-xs h-7 px-2.5"

@@ -10,6 +10,7 @@ import { formatDate } from '@/lib/utils';
 import { useBudgetAppointments } from '@/hooks/use-budget-appointments';
 import { useWorkshopId } from '@/context/workshop-context';
 import { AppointmentSearchModal } from '@/components/ui/appointment-search';
+import { InfoButton } from '@/components/ui/info-button';
 import type { BudgetAppointment } from '@/types';
 
 const STATUS_CONFIG = {
@@ -127,6 +128,7 @@ export default function PresupuestoPage() {
           <div className="flex items-center gap-3">
             <FileText className="h-5 w-5 text-slate-400" />
             <h1 className="text-base font-semibold text-slate-900">Agenda de Presupuestos</h1>
+            <InfoButton helpKey="presupuesto" />
             {pending.length > 0 && (
               <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-semibold">
                 {pending.length} pendiente{pending.length !== 1 ? 's' : ''}

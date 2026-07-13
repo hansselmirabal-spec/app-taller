@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { Package, RefreshCw, PackageX, Clock, Loader2, AlertTriangle } from 'lucide-react';
 import { useWorkshopId } from '@/context/workshop-context';
 import { useResourceAgenda, useClearResource } from '@/hooks/use-tracking';
+import { InfoButton } from '@/components/ui/info-button';
 
 function timeAgo(isoStr: string | null): string {
   if (!isoStr) return '—';
@@ -30,6 +31,7 @@ export default function RecursosPage() {
           <div className="flex items-center gap-3">
             <Package className="h-5 w-5 text-yellow-500" />
             <h1 className="text-base font-semibold text-slate-900">Agenda de Recursos</h1>
+            <InfoButton helpKey="recursos" />
             {items.length > 0 && (
               <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-semibold">
                 {items.length} pendiente{items.length !== 1 ? 's' : ''}

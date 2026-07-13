@@ -12,6 +12,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { createBodyshopEntry, releaseTechNoStart } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import type { TrackingCard, TrackingColumn, TrackingProcessSummary } from '@/lib/api';
+import { InfoButton } from '@/components/ui/info-button';
 import {
   AlertTriangle, RefreshCw, Car, Clock, TrendingDown,
   TrendingUp, Minus, Play, CheckCircle2, ChevronLeft, ChevronRight,
@@ -1854,6 +1855,7 @@ export default function TrackingKanbanPage() {
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <h1 className="text-base font-semibold text-slate-900">Seguimiento Operativo</h1>
+            <InfoButton helpKey="kanban" />
             {workshopName && (
               <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
                 {workshopName}

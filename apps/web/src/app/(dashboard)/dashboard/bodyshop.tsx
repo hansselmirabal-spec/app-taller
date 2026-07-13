@@ -21,6 +21,7 @@ import { useBodyshopDayCapacity, useBodyshopWeekCapacity, useBodyshopEntriesKanb
 import { formatDate } from '@/lib/utils';
 import type { CapacityStatus, BodyshopWeekCapacity } from '@/types';
 
+import { InfoButton } from '@/components/ui/info-button';
 import 'react-grid-layout/css/styles.css';
 
 const GridLayout = dynamic(
@@ -717,6 +718,7 @@ export default function BodyshopDashboard() {
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-bold text-slate-900">Panel de Control</h1>
             <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">BODYSHOP</span>
+            <InfoButton helpKey="dashboard" />
           </div>
           <p className="text-xs text-slate-500 mt-0.5 capitalize">{periodLabel}</p>
         </div>

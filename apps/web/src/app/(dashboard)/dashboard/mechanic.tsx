@@ -26,6 +26,7 @@ import { useServiceTypes } from '@/hooks/use-service-types';
 import { formatDate } from '@/lib/utils';
 import type { Appointment, TechnicianCapacity } from '@/types';
 
+import { InfoButton } from '@/components/ui/info-button';
 import 'react-grid-layout/css/styles.css';
 
 const GridLayout = dynamic(
@@ -819,6 +820,7 @@ export default function MechanicDashboard() {
       <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
           <h1 className="text-base font-bold text-slate-900">Panel de Control</h1>
+          <InfoButton helpKey="dashboard" />
           <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
             {(['today','week','month','custom'] as PeriodMode[]).map(m => (
               <button key={m} onClick={() => setMode(m)}

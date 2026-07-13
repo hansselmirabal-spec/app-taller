@@ -47,6 +47,7 @@ import { useWorkshops } from '@/hooks/use-workshops';
 import type { OtRow } from '@/app/api/ot-seguimiento/route';
 import type { OtDetail } from '@/app/api/ot-detail/[ot]/route';
 import { OtDetailPanel } from '@/components/ui/ot-detail-panel';
+import { InfoButton } from '@/components/ui/info-button';
 
 type SortKey = 'ot' | 'nombreCliente' | 'modelo' | 'estadoOt' | 'asesor' | 'diasIngreso' | 'fechaIngreso' | 'fechaCompromisoCliente';
 type SortDir = 'asc' | 'desc';
@@ -383,7 +384,10 @@ export default function SeguimientoPage() {
               <ClipboardList className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-slate-900">Seguimiento de OTs</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-bold text-slate-900">Seguimiento de OTs</h1>
+                <InfoButton helpKey="seguimiento" />
+              </div>
               <p className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
                 <span>{totalFiltrados.toLocaleString()} órdenes{estadoFiltro ? ` · ${estadoFiltro}` : ' · todos los estados'}</span>
                 {loadMs !== null && <span className="text-slate-300">· {loadMs}ms</span>}

@@ -17,6 +17,7 @@ import { getWeekDays, entriesOnDay } from '@/lib/bodyshop-calendar';
 import { ActivitiesPanel } from '@/components/kanban/activities-panel';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import type { BodyshopEntry, CapacityStatus, Technician } from '@/types';
+import { InfoButton } from '@/components/ui/info-button';
 
 const statusStyles: Record<CapacityStatus, string> = {
   OK:         'bg-emerald-50 border-emerald-200 text-emerald-700',
@@ -100,6 +101,7 @@ export default function BodyshopAppointmentsPage() {
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-bold text-slate-900">Agenda Carrocería</h1>
               <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">BODYSHOP</span>
+              <InfoButton helpKey="appointments" />
             </div>
             {/* Tab switcher */}
             <div className="flex bg-slate-100 rounded-lg p-0.5 text-xs font-semibold">

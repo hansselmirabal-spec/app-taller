@@ -1,4 +1,7 @@
+'use client';
+
 import { BookOpen } from 'lucide-react';
+import { useRequirePermission } from '@/hooks/use-require-permission';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -37,6 +40,8 @@ function Table({ head, rows }: { head: string[]; rows: string[][] }) {
 }
 
 export default function DocumentacionPage() {
+  useRequirePermission('documentation');
+
   return (
     <div className="h-screen flex flex-col bg-slate-50">
       {/* Header */}

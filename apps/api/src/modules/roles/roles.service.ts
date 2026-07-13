@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 import { Role, Permissions } from './role.entity';
 import { IsString, IsObject, IsOptional } from 'class-validator';
 
-const VALID_MODULES = ['dashboard', 'capacity', 'appointments', 'kanban', 'reports', 'settings', 'presupuesto'];
+const VALID_MODULES = ['dashboard', 'capacity', 'appointments', 'kanban', 'reports', 'settings', 'presupuesto', 'documentation'];
 
 function validatePermissions(perms: unknown): perms is Permissions {
   if (typeof perms !== 'object' || perms === null || Array.isArray(perms)) return false;
