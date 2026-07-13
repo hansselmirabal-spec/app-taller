@@ -40,6 +40,11 @@ services:
       DMS_USER: "ituser"
       DMS_PASSWORD: "123456ituser"
       DMS_DATABASE: "MYSQL_DW"
+      CTT_HOST: "53.103.13.113"
+      CTT_PORT: 3306
+      CTT_USER: "claude"
+      CTT_PASSWORD: "claude123"
+      CTT_DATABASE: "controltiempo"
     depends_on:
       postgres:
         condition: service_healthy

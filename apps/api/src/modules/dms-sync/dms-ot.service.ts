@@ -69,6 +69,7 @@ export class DmsOtService {
         'ot.fechaCierreOt AS "fechaCierreOt"',
         'ot.fechaFinTaller AS "fechaFinTaller"',
         'ot.monto AS monto',
+        'ot.idTipoServicio AS "idTipoServicio"',
         'ot.tipoDesc AS "tipoDesc"',
         'ot.tipoAbrev AS "tipoAbrev"',
         'ot.codcliente AS codcliente',
@@ -102,7 +103,7 @@ export class DmsOtService {
       chasis:                 String(r.chasis ?? '').trim(),
       modelo:                 String(r.modelo ?? '').trim(),
       estadoOt:               String(r.estadoOt ?? '').trim(),
-      estadoIdis:             String(r.nroot).startsWith('9')
+      estadoIdis:             Number(r.idTipoServicio) === 9
                                 ? 'En Presupuesto'
                                 : String(r.estadoTaller ?? r.estadoOt ?? '').trim(),
       estadoFinanciero:       String(r.estadoFinanciero ?? '').trim(),

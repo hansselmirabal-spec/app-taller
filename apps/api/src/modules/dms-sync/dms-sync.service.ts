@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import * as sql from 'mssql';
+import * as mysql from 'mysql2/promise';
 import { DmsSnapshot } from './dms-snapshot.entity';
 import { DmsAdvisorSlot } from './dms-advisor-slot.entity';
 import { DmsOtRow } from './dms-ot-row.entity';
@@ -30,6 +31,21 @@ async function getDmsPool(): Promise<sql.ConnectionPool> {
   const pool = new sql.ConnectionPool(getDmsConfig());
   await pool.connect();
   return pool;
+}
+
+/**
+ * Opens a new MySQL connection to the controltiempo live DMS database.
+ * Caller must call conn.end() in a finally block.
+ */
+async function getMysqlPool(): Promise<mysql.Connection> {
+  return mysql.createConnection({
+    host:     process.env.CTT_HOST ?? '',
+    port:     Number(process.env.CTT_PORT ?? 3306),
+    user:     process.env.CTT_USER,
+    password: process.env.CTT_PASSWORD,
+    database: process.env.CTT_DATABASE ?? 'controltiempo',
+    timezone: '+00:00',
+  });
 }
 
 const HARD_LIMIT = 10_000;
@@ -578,8 +594,8 @@ export class DmsSyncService implements OnApplicationBootstrap {
   // Upserts the full open set + recently-closed OTs from DMS into dms_ot_rows.
   // Uses raw SQL ON CONFLICT for atomic batch upsert (same pattern as advisor-slots).
   async syncOtRows(): Promise<void> {
-    if (!process.env.DMS_HOST) {
-      this.logger.warn('DMS_HOST no configurado, salteando syncOtRows');
+    if (!process.env.CTT_HOST) {
+      this.logger.warn('CTT_HOST no configurado, salteando syncOtRows');
       return;
     }
 
@@ -636,23 +652,32 @@ export class DmsSyncService implements OnApplicationBootstrap {
     );
   }
 
-  // Opens one pool, runs open + closed queries, closes pool once
+  // Opens one MySQL connection, runs open + closed queries, closes connection once
   private async fetchOtsBatch(lastSync: Date | null): Promise<{
     openOts: Partial<DmsOtRow>[];
     closedOts: Partial<DmsOtRow>[];
   }> {
-    let pool: sql.ConnectionPool | null = null;
+    if (!process.env.CTT_HOST) {
+      this.logger.warn('CTT_HOST not configured, skipping MySQL OT fetch');
+      return { openOts: [], closedOts: [] };
+    }
+
+    let conn: mysql.Connection | null = null;
     try {
-      pool = await getDmsPool();
+      conn = await getMysqlPool();
 
-      const openReq = pool.request();
-      const openResult = await openReq.query(this.buildOtQuery("WHERE m.EstadoOT = 'Abierto'"));
+      const [openRows] = await conn.query<any[]>(
+        this.buildMysqlOtQuery('WHERE eo.estado = 1'),
+      );
 
-      let closedResult: { recordset: any[] } = { recordset: [] };
+      let closedRows: any[] = [];
       if (lastSync) {
-        const closedReq = pool.request();
-        closedReq.input('closedSince', sql.DateTime, new Date(lastSync.getTime() - 2 * 60 * 60 * 1000));
-        closedResult = await closedReq.query(this.buildOtQuery('WHERE m.fecha_cierre_ot >= @closedSince'));
+        const since = new Date(lastSync.getTime() - 2 * 60 * 60 * 1000);
+        const [rows] = await conn.query<any[]>(
+          this.buildMysqlOtQuery('WHERE eo.estado = 0 AND m.fecha_actualizacion >= ?'),
+          [since],
+        );
+        closedRows = rows;
       }
 
       const now = new Date();
@@ -683,49 +708,48 @@ export class DmsSyncService implements OnApplicationBootstrap {
       });
 
       return {
-        openOts:   (openResult.recordset as any[]).map(mapRow),
-        closedOts: (closedResult.recordset as any[]).map(mapRow),
+        openOts:   (openRows as any[]).map(mapRow),
+        closedOts: (closedRows as any[]).map(mapRow),
       };
     } finally {
-      await pool?.close();
+      await conn?.end();
     }
   }
 
-  private buildOtQuery(whereClause: string): string {
+  private buildMysqlOtQuery(whereClause: string): string {
     return `
       SELECT
         m.nroot,
-        LTRIM(RTRIM(m.nrocliente))             AS nrocliente,
-        LTRIM(RTRIM(m.nombrecliente))           AS nombrecliente,
-        LTRIM(RTRIM(m.chasis))                  AS chasis,
-        LTRIM(RTRIM(m.modelo))                  AS modelo,
-        LTRIM(RTRIM(m.EstadoOT))               AS estado_ot,
-        LTRIM(RTRIM(m.EstadoTaller))            AS estado_taller,
-        LTRIM(RTRIM(m.Estadofinanciero))        AS estado_financiero,
-        LTRIM(RTRIM(m.asesor))                  AS asesor,
+        m.nrocliente,
+        m.nombrecliente,
+        m.chapa                                                    AS chasis,
+        m.modelo,
+        eo.descripcion                                             AS estado_ot,
+        eo.descripcion                                             AS estado_taller,
+        NULL                                                       AS estado_financiero,
+        m.asesor,
         m.taller,
-        ISNULL(LTRIM(RTRIM(s.Descripcion)), '') AS sucursal_desc,
+        IFNULL(s.Descripcion, '')                                  AS sucursal_desc,
         CASE s.idempresa
           WHEN 1 THEN 'CONDOR'
           WHEN 6 THEN 'IDICON'
           WHEN 7 THEN 'HALLEY'
           ELSE 'OTRO'
-        END AS empresa,
-        m.fechaingreso                           AS fecha_ingreso,
-        m.horaingreso                            AS hora_ingreso,
-        m.fechacompromisoCliente                 AS fecha_compromiso_cliente,
-        m.fecha_cierre_ot,
+        END                                                        AS empresa,
+        DATE(m.fechaingreso)                                       AS fecha_ingreso,
+        m.horaingreso                                              AS hora_ingreso,
+        m.fecha_compromiso_cliente,
+        NULL                                                       AS fecha_cierre_ot,
         m.fecha_fin_taller,
-        CAST(m.monto AS FLOAT)                  AS monto,
+        m.monto,
         m.idtiposervicio,
-        ISNULL(LTRIM(RTRIM(ts.descripcion)), '') AS tipo_desc,
-        ISNULL(LTRIM(RTRIM(ts.abreviatura)), '') AS tipo_abrev,
-        NULL                                    AS codcliente
-      FROM dbo.MasterOT m
-      LEFT JOIN dbo.controltiempo_DimSucursal s
-             ON TRY_CAST(s.db2idfilial AS INT) = m.taller
-      LEFT JOIN dbo.controltiempo_DimTipoServicio ts
-             ON ts.idtipo_servicio = m.idtiposervicio
+        IFNULL(ts.descripcion, '')                                  AS tipo_desc,
+        IFNULL(ts.abreviatura, '')                                  AS tipo_abrev,
+        m.nrocliente                                               AS codcliente
+      FROM ot_master m
+      LEFT JOIN estados_ot eo ON eo.idestadoot = m.idestado_ot
+      LEFT JOIN sucursal s ON CAST(s.db2idfilial AS UNSIGNED) = m.taller
+      LEFT JOIN tipo_servicio ts ON ts.idtipo_servicio = m.idtiposervicio
       ${whereClause}
     `;
   }
@@ -733,60 +757,23 @@ export class DmsSyncService implements OnApplicationBootstrap {
   private async fetchOtsFromDms(
     opts: { onlyOpen?: boolean; closedSince?: Date },
   ): Promise<Partial<DmsOtRow>[]> {
-    let pool: sql.ConnectionPool | null = null;
+    if (!process.env.CTT_HOST) return [];
+    let conn: mysql.Connection | null = null;
     try {
-      pool = await getDmsPool();
-      const request = pool.request();
-
+      conn = await getMysqlPool();
       let whereClause: string;
+      const params: any[] = [];
       if (opts.onlyOpen) {
-        whereClause = "WHERE m.EstadoOT = 'Abierto'";
+        whereClause = 'WHERE eo.estado = 1';
       } else if (opts.closedSince) {
-        request.input('closedSince', sql.DateTime, opts.closedSince);
-        whereClause = 'WHERE m.fecha_cierre_ot >= @closedSince';
+        whereClause = 'WHERE eo.estado = 0 AND m.fecha_actualizacion >= ?';
+        params.push(opts.closedSince);
       } else {
         whereClause = '';
       }
-
-      const result = await request.query(`
-        SELECT
-          m.nroot,
-          LTRIM(RTRIM(m.nrocliente))             AS nrocliente,
-          LTRIM(RTRIM(m.nombrecliente))           AS nombrecliente,
-          LTRIM(RTRIM(m.chasis))                  AS chasis,
-          LTRIM(RTRIM(m.modelo))                  AS modelo,
-          LTRIM(RTRIM(m.EstadoOT))               AS estado_ot,
-          LTRIM(RTRIM(m.EstadoTaller))            AS estado_taller,
-          LTRIM(RTRIM(m.Estadofinanciero))        AS estado_financiero,
-          LTRIM(RTRIM(m.asesor))                  AS asesor,
-          m.taller,
-          ISNULL(LTRIM(RTRIM(s.Descripcion)), '') AS sucursal_desc,
-          CASE s.idempresa
-            WHEN 1 THEN 'CONDOR'
-            WHEN 6 THEN 'IDICON'
-            WHEN 7 THEN 'HALLEY'
-            ELSE 'OTRO'
-          END AS empresa,
-          m.fechaingreso                           AS fecha_ingreso,
-          m.horaingreso                            AS hora_ingreso,
-          m.fechacompromisoCliente                 AS fecha_compromiso_cliente,
-          m.fecha_cierre_ot,
-          m.fecha_fin_taller,
-          CAST(m.monto AS FLOAT)                  AS monto,
-          m.idtiposervicio,
-          ISNULL(LTRIM(RTRIM(ts.descripcion)), '') AS tipo_desc,
-          ISNULL(LTRIM(RTRIM(ts.abreviatura)), '') AS tipo_abrev,
-          NULL                                    AS codcliente
-        FROM dbo.MasterOT m
-        LEFT JOIN dbo.controltiempo_DimSucursal s
-               ON TRY_CAST(s.db2idfilial AS INT) = m.taller
-        LEFT JOIN dbo.controltiempo_DimTipoServicio ts
-               ON ts.idtipo_servicio = m.idtiposervicio
-        ${whereClause}
-      `);
-
+      const [rows] = await conn.query<any[]>(this.buildMysqlOtQuery(whereClause), params);
       const now = new Date();
-      return (result.recordset as any[]).map(r => ({
+      return (rows as any[]).map(r => ({
         nroot:                  Number(r.nroot),
         nrocliente:             String(r.nrocliente ?? '').trim() || null,
         nombrecliente:          String(r.nombrecliente ?? '').trim() || null,
@@ -794,7 +781,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
         modelo:                 String(r.modelo ?? '').trim() || null,
         estadoOt:               String(r.estado_ot ?? '').trim() || null,
         estadoTaller:           String(r.estado_taller ?? '').trim() || null,
-        estadoFinanciero:       String(r.estado_financiero ?? '').trim() || null,
+        estadoFinanciero:       null,
         asesor:                 String(r.asesor ?? '').trim() || null,
         taller:                 r.taller != null ? Number(r.taller) : null,
         sucursalDesc:           String(r.sucursal_desc ?? '').trim() || null,
@@ -802,7 +789,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
         fechaIngreso:           r.fecha_ingreso ? new Date(r.fecha_ingreso) : null,
         horaIngreso:            r.hora_ingreso ? String(r.hora_ingreso).trim() || null : null,
         fechaCompromisoCliente: r.fecha_compromiso_cliente ? new Date(r.fecha_compromiso_cliente) : null,
-        fechaCierreOt:          r.fecha_cierre_ot ? new Date(r.fecha_cierre_ot) : null,
+        fechaCierreOt:          null,
         fechaFinTaller:         r.fecha_fin_taller ? new Date(r.fecha_fin_taller) : null,
         monto:                  r.monto != null ? Number(r.monto) : null,
         idTipoServicio:         r.idtiposervicio != null ? Number(r.idtiposervicio) : null,
@@ -812,7 +799,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
         syncedAt:               now,
       }));
     } finally {
-      await pool?.close();
+      await conn?.end();
     }
   }
 
