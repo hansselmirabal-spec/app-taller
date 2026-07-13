@@ -48,6 +48,7 @@ import type { OtRow } from '@/app/api/ot-seguimiento/route';
 import type { OtDetail } from '@/app/api/ot-detail/[ot]/route';
 import { OtDetailPanel } from '@/components/ui/ot-detail-panel';
 import { InfoButton } from '@/components/ui/info-button';
+import { MotivationalLoader } from '@/components/ui/motivational-loader';
 
 type SortKey = 'ot' | 'nombreCliente' | 'modelo' | 'estadoOt' | 'asesor' | 'diasIngreso' | 'fechaIngreso' | 'fechaCompromisoCliente';
 type SortDir = 'asc' | 'desc';
@@ -744,10 +745,7 @@ export default function SeguimientoPage() {
         {error ? (
           <div className="flex items-center justify-center h-40 text-sm text-red-500">{error}</div>
         ) : loading ? (
-          <div className="flex items-center justify-center h-40 gap-3 text-slate-400">
-            <div className="h-5 w-5 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
-            <span className="text-sm">Cargando OTs desde DMS...</span>
-          </div>
+          <MotivationalLoader />
         ) : view === 'kanban' ? (
           <KanbanView rows={filtered} onCardClick={openOt} />
         ) : (

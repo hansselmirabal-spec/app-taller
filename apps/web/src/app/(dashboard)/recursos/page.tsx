@@ -5,6 +5,7 @@ import { Package, RefreshCw, PackageX, Clock, Loader2, AlertTriangle } from 'luc
 import { useWorkshopId } from '@/context/workshop-context';
 import { useResourceAgenda, useClearResource } from '@/hooks/use-tracking';
 import { InfoButton } from '@/components/ui/info-button';
+import { MotivationalLoader } from '@/components/ui/motivational-loader';
 
 function timeAgo(isoStr: string | null): string {
   if (!isoStr) return '—';
@@ -51,9 +52,7 @@ export default function RecursosPage() {
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-6">
         {isLoading ? (
-          <div className="flex items-center justify-center h-40">
-            <Loader2 className="h-6 w-6 text-slate-400 animate-spin" />
-          </div>
+          <MotivationalLoader />
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 gap-3 text-slate-400">
             <Package className="h-10 w-10 opacity-30" />

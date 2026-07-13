@@ -10,6 +10,7 @@ import { formatDate } from '@/lib/utils';
 import { AbsenceModal } from '@/components/capacity/absence-modal';
 import { TechnicianDayModal } from '@/components/capacity/technician-day-modal';
 import { InfoButton } from '@/components/ui/info-button';
+import { MotivationalLoader } from '@/components/ui/motivational-loader';
 import type { TechnicianCapacity, WeekDay } from '@/types';
 import { DEFAULT_WEEKLY_SCHEDULE } from '@/types';
 
@@ -108,7 +109,7 @@ export default function MechanicCapacityPage() {
 
       <div className="flex-1 overflow-auto p-6">
         {isLoading ? (
-          <div className="flex items-center justify-center h-64 text-slate-400 text-sm">Cargando...</div>
+          <MotivationalLoader className="h-64" />
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: '200px repeat(6, 1fr)' }}>

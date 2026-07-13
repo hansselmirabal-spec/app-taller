@@ -18,6 +18,7 @@ import { ActivitiesPanel } from '@/components/kanban/activities-panel';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import type { BodyshopEntry, CapacityStatus, Technician } from '@/types';
 import { InfoButton } from '@/components/ui/info-button';
+import { MotivationalLoader } from '@/components/ui/motivational-loader';
 
 const statusStyles: Record<CapacityStatus, string> = {
   OK:         'bg-emerald-50 border-emerald-200 text-emerald-700',
@@ -155,7 +156,7 @@ export default function BodyshopAppointmentsPage() {
 
       <div className={`flex-1 overflow-y-auto p-6 space-y-5 ${tab !== 'agenda' ? 'hidden' : ''}`}>
         {isLoading ? (
-          <div className="flex items-center justify-center h-64 text-slate-400 text-sm">Cargando...</div>
+          <MotivationalLoader className="h-64" />
         ) : (
           <>
             {/* Capacity header + toggle */}

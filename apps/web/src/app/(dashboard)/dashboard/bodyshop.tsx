@@ -22,6 +22,7 @@ import { formatDate } from '@/lib/utils';
 import type { CapacityStatus, BodyshopWeekCapacity } from '@/types';
 
 import { InfoButton } from '@/components/ui/info-button';
+import { MotivationalLoader } from '@/components/ui/motivational-loader';
 import 'react-grid-layout/css/styles.css';
 
 const GridLayout = dynamic(
@@ -794,7 +795,7 @@ export default function BodyshopDashboard() {
 
       <div ref={containerRef} className="flex-1 overflow-y-auto p-4">
         {loading ? (
-          <div className="flex items-center justify-center h-64 text-slate-400 text-sm">Cargando...</div>
+          <MotivationalLoader className="h-64" />
         ) : mounted && (
           <GL
               layout={rglLayouts as any}
