@@ -27,9 +27,11 @@ services:
       PORT: 3001
       NODE_ENV: production
       FRONTEND_URL: http://53.103.13.238:8090
-      SMTP_HOST: ""
+      SMTP_HOST: "53.103.13.216"
       SMTP_PORT: 25
-      SMTP_FROM: ""
+      SMTP_USER: "agenda@grupocondor.com.py"
+      SMTP_PASSWORD: ""
+      SMTP_FROM: "agenda@grupocondor.com.py"
       APP_NAME: App Taller QAS
       COOKIE_SECURE: "false"
       DB_SYNC: "false"
@@ -38,6 +40,11 @@ services:
       DMS_USER: "ituser"
       DMS_PASSWORD: "123456ituser"
       DMS_DATABASE: "MYSQL_DW"
+      CTT_HOST: "53.103.13.113"
+      CTT_PORT: 3306
+      CTT_USER: "claude"
+      CTT_PASSWORD: "claude123"
+      CTT_DATABASE: "controltiempo"
     depends_on:
       postgres:
         condition: service_healthy

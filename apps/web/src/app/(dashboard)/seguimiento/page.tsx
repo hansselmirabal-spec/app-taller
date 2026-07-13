@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, RefreshCw, ClipboardList, ChevronUp, ChevronDown, ChevronsUpDown, X, LayoutGrid, Table as TableIcon, User, Building2, CalendarClock, Clock, Calendar, Info, Database, BarChart3, CheckCircle2, Timer } from 'lucide-react';
+import { Search, RefreshCw, ClipboardList, ChevronUp, ChevronDown, ChevronsUpDown, X, LayoutGrid, Table as TableIcon, User, Building2, CalendarClock, Clock, Calendar, Info, Database, BarChart3, CheckCircle2, Timer, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { OT_ESTADOS, getEstado, resolveEstado, isFacturada, type OtEstado } from '@/lib/ot-estados';
 
@@ -105,9 +105,11 @@ export default function SeguimientoPage() {
   const [search, setSearch]     = useState('');
   const [estadoFiltro, setEstadoFiltro] = useState('');
   const [sucursalFiltro, setSucursalFiltro] = useState('');
+  const [empresaFiltro, setEmpresaFiltro]   = useState('');
   const [asesorFiltro, setAsesorFiltro]     = useState('');
   const [tipoServicioFiltro, setTipoServicioFiltro] = useState('');
   const [antiguedadFiltro, setAntiguedadFiltro] = useState<number>(0);
+  const [activeTab, setActiveTab] = useState<'ots' | 'presupuestos'>('ots');
   const [sortKey, setSortKey]   = useState<SortKey>('fechaIngreso');
   const [sortDir, setSortDir]   = useState<SortDir>('desc');
   const [rangeDays, setRangeDays] = useState<number>(90);
@@ -125,16 +127,24 @@ export default function SeguimientoPage() {
   const [otDetail, setOtDetail]           = useState<OtDetail | null>(null);
   const [otDetailLoading, setOtDetailLoading] = useState(false);
   const [otDetailError, setOtDetailError]     = useState('');
+  const otDetailCache = useRef<Map<number, OtDetail>>(new Map());
 
   async function openOt(num: number) {
     setSelectedOtNum(num);
-    setOtDetail(null);
     setOtDetailError('');
+    const cached = otDetailCache.current.get(num);
+    if (cached) {
+      setOtDetail(cached);
+      return;
+    }
+    setOtDetail(null);
     setOtDetailLoading(true);
     try {
       const res = await fetch(`/api/ot-detail/${num}`);
       if (!res.ok) throw new Error('No se pudo cargar el detalle de la OT');
-      setOtDetail(await res.json());
+      const data: OtDetail = await res.json();
+      otDetailCache.current.set(num, data);
+      setOtDetail(data);
     } catch (e: any) {
       setOtDetailError(e.message);
     } finally {
@@ -220,22 +230,6 @@ export default function SeguimientoPage() {
     else { setSortKey(key); setSortDir('asc'); }
   }
 
-  // Opciones del dropdown de sucursales:
-  //  · Si el taller activo tiene su propia sucursal configurada → solo esa.
-  //  · Si no → todas las sucursales del DMS (no se restringe por lo que tengan otros talleres).
-  const sucursales = useMemo(() => {
-    if (workshopBranch) return [workshopBranch];
-    return Array.from(new Set(data.map(r => r.sucursal).filter(Boolean))).sort((a, b) => a.localeCompare(b));
-  }, [data, workshopBranch]);
-  const asesores = useMemo(
-    () => Array.from(new Set(data.map(r => r.asesor).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [data],
-  );
-  const tiposServicio = useMemo(
-    () => Array.from(new Set(data.map(r => r.tipoServicio).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [data],
-  );
-
   // Umbrales de alerta vienen del taller activo (configurables en /settings/workshops).
   // Si están vacíos o son inválidos, caen a los defaults globales.
   const alertaAtraso  = Number(activeWorkshop?.alertAtrasoDays  ?? DEFAULT_ALERTA_ATRASO);
@@ -257,6 +251,8 @@ export default function SeguimientoPage() {
 
   const filtered = useMemo(() => {
     let rows = data;
+    if (activeTab === 'ots') rows = rows.filter(r => (r.estadoIdis || r.estadoOt) !== 'En Presupuesto');
+    else                     rows = rows.filter(r => (r.estadoIdis || r.estadoOt) === 'En Presupuesto');
     // Filtro automático: SOLO aplica si el taller activo tiene su propia sucursal del DMS
     // configurada. Si no, el usuario ve todas las OTs (los demás talleres no se ven afectados
     // por las sucursales que tengan configuradas otros talleres).
@@ -266,6 +262,7 @@ export default function SeguimientoPage() {
     if (fechaEspecifica)    rows = rows.filter(r => r.fechaIngreso === fechaEspecifica);
     if (estadoFiltro)       rows = rows.filter(r => (r.estadoIdis || r.estadoOt) === estadoFiltro);
     if (sucursalFiltro)     rows = rows.filter(r => r.sucursal === sucursalFiltro);
+    if (empresaFiltro)      rows = rows.filter(r => r.empresa === empresaFiltro);
     if (asesorFiltro)       rows = rows.filter(r => r.asesor === asesorFiltro);
     if (tipoServicioFiltro) rows = rows.filter(r => r.tipoServicio === tipoServicioFiltro);
     if (antiguedadFiltro > 0) rows = rows.filter(r => r.diasIngreso > antiguedadFiltro);
@@ -285,7 +282,73 @@ export default function SeguimientoPage() {
       const cmp = String(av) < String(bv) ? -1 : String(av) > String(bv) ? 1 : 0;
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [data, workshopBranch, fechaEspecifica, estadoFiltro, sucursalFiltro, asesorFiltro, tipoServicioFiltro, antiguedadFiltro, search, sortKey, sortDir]);
+  }, [data, activeTab, workshopBranch, fechaEspecifica, estadoFiltro, sucursalFiltro, empresaFiltro, asesorFiltro, tipoServicioFiltro, antiguedadFiltro, search, sortKey, sortDir]);
+
+  // Base filtrada sin estadoFiltro ni sort — usada para el kanban bar y pills
+  // para que reflejen los filtros activos (sucursal, asesor, etc.) pero sigan mostrando
+  // la distribución de todos los estados (no solo el estado seleccionado).
+  const filteredBase = useMemo(() => {
+    let rows = data;
+    if (activeTab === 'ots') rows = rows.filter(r => (r.estadoIdis || r.estadoOt) !== 'En Presupuesto');
+    else                     rows = rows.filter(r => (r.estadoIdis || r.estadoOt) === 'En Presupuesto');
+    if (workshopBranch)      rows = rows.filter(r => r.sucursal === workshopBranch);
+    if (fechaEspecifica)     rows = rows.filter(r => r.fechaIngreso === fechaEspecifica);
+    if (sucursalFiltro)      rows = rows.filter(r => r.sucursal === sucursalFiltro);
+    if (empresaFiltro)       rows = rows.filter(r => r.empresa === empresaFiltro);
+    if (asesorFiltro)        rows = rows.filter(r => r.asesor === asesorFiltro);
+    if (tipoServicioFiltro)  rows = rows.filter(r => r.tipoServicio === tipoServicioFiltro);
+    if (antiguedadFiltro > 0) rows = rows.filter(r => r.diasIngreso > antiguedadFiltro);
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      rows = rows.filter(r =>
+        String(r.ot).includes(q) ||
+        r.nombreCliente.toLowerCase().includes(q) ||
+        r.chasis.toLowerCase().includes(q) ||
+        r.modelo.toLowerCase().includes(q) ||
+        r.asesor.toLowerCase().includes(q)
+      );
+    }
+    return rows;
+  }, [data, activeTab, workshopBranch, fechaEspecifica, sucursalFiltro, empresaFiltro, asesorFiltro, tipoServicioFiltro, antiguedadFiltro, search]);
+
+  const filteredSummary = useMemo(() => {
+    const s: Record<string, number> = {};
+    for (const row of filteredBase) {
+      const k = row.estadoIdis || row.estadoOt;
+      s[k] = (s[k] ?? 0) + 1;
+    }
+    return s;
+  }, [filteredBase]);
+
+  const presupuestosBySucursal = useMemo(() => {
+    const rows = data.filter(r => (r.estadoIdis || r.estadoOt) === 'En Presupuesto');
+    const map = new Map<string, number>();
+    for (const r of rows) {
+      const suc = r.sucursal || '(sin sucursal)';
+      map.set(suc, (map.get(suc) ?? 0) + 1);
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([sucursal, total]) => ({ sucursal, total }));
+  }, [data]);
+
+  // Opciones de dropdowns derivadas de filteredBase (respetan el tab activo y filtros aplicados).
+  const sucursales = useMemo(() => {
+    if (workshopBranch) return [workshopBranch];
+    return Array.from(new Set(filteredBase.map(r => r.sucursal).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  }, [filteredBase, workshopBranch]);
+  const asesores = useMemo(
+    () => Array.from(new Set(filteredBase.map(r => r.asesor).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [filteredBase],
+  );
+  const tiposServicio = useMemo(
+    () => Array.from(new Set(filteredBase.map(r => r.tipoServicio).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [filteredBase],
+  );
+  const empresas = useMemo(
+    () => Array.from(new Set(data.map(r => r.empresa).filter(Boolean) as string[])).sort(),
+    [data],
+  );
 
   function SortIcon({ k }: { k: SortKey }) {
     if (sortKey !== k) return <ChevronsUpDown className="h-3 w-3 text-slate-300 inline ml-1" />;
@@ -432,6 +495,34 @@ export default function SeguimientoPage() {
           </div>
         </div>
 
+        {/* Tabs: OTs · Presupuestos */}
+        <div className="flex items-center gap-1 mt-4 border-b border-slate-200">
+          {([
+            { key: 'ots',          label: 'OTs',          icon: ClipboardList },
+            { key: 'presupuestos', label: 'Presupuestos', icon: FileText       },
+          ] as const).map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => { setActiveTab(key); setEstadoFiltro(''); }}
+              className={`flex items-center gap-1.5 text-sm font-medium px-4 py-2 border-b-2 transition-all -mb-px ${
+                activeTab === key
+                  ? 'border-indigo-600 text-indigo-700'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+              <span className={`ml-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-full ${
+                activeTab === key ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'
+              }`}>
+                {key === 'ots'
+                  ? data.filter(r => (r.estadoIdis || r.estadoOt) !== 'En Presupuesto').length
+                  : data.filter(r => (r.estadoIdis || r.estadoOt) === 'En Presupuesto').length}
+              </span>
+            </button>
+          ))}
+        </div>
+
         {/* Segunda fila: filtros */}
         <div className="flex items-center gap-2 flex-wrap mt-3">
             {/* Atajos: Hoy / Esta semana */}
@@ -489,6 +580,19 @@ export default function SeguimientoPage() {
                 <option key={opt.value} value={opt.value}>{opt.value === 0 ? 'Todo el histórico' : `Últimos ${opt.label}`}</option>
               ))}
             </select>
+            {empresas.length > 1 && (
+              <select
+                value={empresaFiltro}
+                onChange={e => { setEmpresaFiltro(e.target.value); }}
+                className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                title="Filtrar por empresa"
+              >
+                <option value="">Todas las empresas</option>
+                {empresas.map(e => (
+                  <option key={e} value={e}>{e}</option>
+                ))}
+              </select>
+            )}
             <select
               value={sucursalFiltro}
               onChange={e => setSucursalFiltro(e.target.value)}
@@ -551,22 +655,22 @@ export default function SeguimientoPage() {
 
         {/* Barra Kanban: distribución de todos los estados como % sobre 100 */}
         <EstadosKanbanBar
-          summary={summary}
-          total={data.length}
+          summary={filteredSummary}
+          total={filteredBase.length}
           activo={estadoFiltro}
           onChange={setEstadoFiltro}
         />
 
         {/* Pills de estado: top 5 inline + dropdown "Más" */}
         <EstadosPills
-          summary={summary}
-          totalAll={data.length}
+          summary={filteredSummary}
+          totalAll={filteredBase.length}
           activo={estadoFiltro}
           onChange={setEstadoFiltro}
         />
 
         {/* Chips de filtros activos */}
-        {(fechaEspecifica || sucursalFiltro || asesorFiltro || search.trim()) && (
+        {(fechaEspecifica || sucursalFiltro || empresaFiltro || asesorFiltro || search.trim()) && (
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Filtros:</span>
             {fechaEspecifica && (
@@ -579,6 +683,9 @@ export default function SeguimientoPage() {
             )}
             {sucursalFiltro && (
               <FilterChip label="Sucursal" value={sucursalFiltro} onClear={() => setSucursalFiltro('')} tone="indigo" />
+            )}
+            {empresaFiltro && (
+              <FilterChip label="Empresa" value={empresaFiltro} onClear={() => setEmpresaFiltro('')} tone="indigo" />
             )}
             {asesorFiltro && (
               <FilterChip label="Asesor" value={asesorFiltro} onClear={() => setAsesorFiltro('')} tone="emerald" />
@@ -595,7 +702,7 @@ export default function SeguimientoPage() {
               <FilterChip label="Búsqueda" value={search.trim()} onClear={() => setSearch('')} tone="slate" />
             )}
             <button
-              onClick={() => { setFechaEspecifica(''); setSucursalFiltro(''); setAsesorFiltro(''); setAntiguedadFiltro(0); setSearch(''); }}
+              onClick={() => { setFechaEspecifica(''); setSucursalFiltro(''); setEmpresaFiltro(''); setAsesorFiltro(''); setAntiguedadFiltro(0); setSearch(''); }}
               className="text-[11px] font-semibold text-slate-400 hover:text-red-500 transition-colors ml-1"
             >
               Limpiar todo
@@ -603,6 +710,30 @@ export default function SeguimientoPage() {
           </div>
         )}
       </div>
+
+      {/* Presupuestos por sucursal — solo visible en tab Presupuestos */}
+      {activeTab === 'presupuestos' && presupuestosBySucursal.length > 0 && (
+        <div className="px-6 py-4 bg-white border-b border-slate-200">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Presupuestos por sucursal</p>
+          <div className="flex flex-wrap gap-3">
+            {presupuestosBySucursal.map(({ sucursal, total }) => (
+              <button
+                key={sucursal}
+                onClick={() => setSucursalFiltro(sucursalFiltro === sucursal ? '' : sucursal)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${
+                  sucursalFiltro === sucursal
+                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-indigo-200 hover:bg-indigo-50/50'
+                }`}
+              >
+                <Building2 className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                <span className="font-medium">{sucursal}</span>
+                <span className="ml-1 text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700">{total}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Body: Tabla o Kanban */}
       <div className="flex-1 overflow-auto">

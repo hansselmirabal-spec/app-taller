@@ -14,7 +14,7 @@ const BudgetPdfLink = dynamic(
   )},
 );
 import { useWorkshopId } from '@/context/workshop-context';
-import { formatDate } from '@/lib/utils';
+import { formatDate, randomId } from '@/lib/utils';
 import { useBudgetSimulatorPiezas, useBudgetSimulatorEstimate } from '@/hooks/use-budget-simulator';
 import { useCreateBudgetAppointment, useUpdateBudgetProcesses } from '@/hooks/use-budget-appointments';
 import { useVehicleLookup } from '@/hooks/use-vehicle-lookup';
@@ -36,7 +36,7 @@ const DAMAGE_LEVELS: { value: DamageLevel; label: string }[] = [
 ];
 
 function newItem(): Item {
-  return { id: crypto.randomUUID(), pieza: '', damageLevel: 'Leve', qty: 1 };
+  return { id: randomId(), pieza: '', damageLevel: 'Leve', qty: 1 };
 }
 
 export default function SimuladorPresupuestoPage() {

@@ -12,8 +12,9 @@ import {
   Plus, Settings2, Trash2, X, GripVertical,
   BarChart3, PieChart as PieIcon, Table2, TrendingDown,
   Users, ChevronLeft, ChevronRight,
-  AlignLeft, Hash, Pencil, Check,
+  AlignLeft, Hash, Pencil, Check, Gauge,
 } from 'lucide-react';
+import Link from 'next/link';
 import {
   format, subDays, parseISO, eachDayOfInterval, differenceInDays,
 } from 'date-fns';
@@ -952,6 +953,13 @@ export default function MechanicReporteriaPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href="/porteria/productividad"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+            title="Reporte de productividad por técnico"
+          >
+            <Gauge className="h-3.5 w-3.5" /> Productividad
+          </Link>
           {editMode && (
             <>
               <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors">

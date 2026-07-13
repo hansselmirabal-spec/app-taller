@@ -35,6 +35,7 @@ export default function ReportesPage() {
   const [error, setError] = useState('');
   const [sucursalFiltro, setSucursalFiltro] = useState('');
   const [asesoresFiltro, setAsesoresFiltro] = useState<string[]>([]);
+  const [asesorDays, setAsesorDays]         = useState<number>(30);
 
   // OT detail panel
   const [selectedOtNum, setSelectedOtNum]     = useState<number | null>(null);
@@ -71,6 +72,7 @@ export default function ReportesPage() {
     if (opts?.force) params.set('force', '1');
     if (sucursalFiltro)        params.set('sucursal', sucursalFiltro);
     if (asesoresFiltro.length) params.set('asesor', asesoresFiltro.join(','));
+    if (tab === 'asesores')    params.set('days', String(asesorDays));
     try {
       const res = await fetch(`/api/ot-seguimiento/reportes?${params.toString()}`);
       if (!res.ok) throw new Error('No se pudo generar el reporte');
@@ -84,7 +86,7 @@ export default function ReportesPage() {
   }
 
   // Refetch automático al cambiar los filtros.
-  useEffect(() => { fetchData(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sucursalFiltro, asesoresFiltro]);
+  useEffect(() => { fetchData(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sucursalFiltro, asesoresFiltro, asesorDays, tab]);
 
   function addAsesor(a: string) {
     if (!a || asesoresFiltro.includes(a)) return;
@@ -141,6 +143,22 @@ export default function ReportesPage() {
                 <Users className="h-3.5 w-3.5" /> Productividad asesores
               </button>
             </div>
+
+            {tab === 'asesores' && (
+              <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
+                {([30, 90, 180, 0] as const).map(d => (
+                  <button
+                    key={d}
+                    onClick={() => setAsesorDays(d)}
+                    className={`text-xs px-3 py-1.5 rounded-md font-medium transition-all ${
+                      asesorDays === d ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    {d === 0 ? 'Todo' : `${d} d`}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {tab !== 'dashboard' && (
               <>
@@ -250,7 +268,7 @@ export default function ReportesPage() {
                 : <ReporteSucursales    rows={data.sucursales}        generatedAt={data.generatedAt} filtros={data.filtros} />)
             : (data.asesorDetail
                 ? <ReporteAsesorDetail   detail={data.asesorDetail}   generatedAt={data.generatedAt} filtros={data.filtros} onOtClick={openOt} />
-                : <ReporteAsesores       rows={data.asesores}         generatedAt={data.generatedAt} filtros={data.filtros} />)
+                : <ReporteAsesores       rows={data.asesores}         generatedAt={data.generatedAt} filtros={data.filtros} days={asesorDays} />)
         ) : null}
       </div>
 
@@ -393,7 +411,7 @@ function ReporteSucursales({ rows, generatedAt, filtros }: { rows: SucursalRepor
 
 // ─── Reporte 2: Productividad de asesores (último mes) ───────────────────────
 
-function ReporteAsesores({ rows, generatedAt, filtros }: { rows: AsesorReportRow[]; generatedAt: string; filtros: { sucursal: string; asesores: string[] } }) {
+function ReporteAsesores({ rows, generatedAt, filtros, days }: { rows: AsesorReportRow[]; generatedAt: string; filtros: { sucursal: string; asesores: string[] }; days: number }) {
   const totalOts        = rows.reduce((s, r) => s + r.totalOts, 0);
   const totalFinalizadas = rows.reduce((s, r) => s + r.finalizadas, 0);
   const tasaCierre      = totalOts > 0 ? (totalFinalizadas / totalOts) * 100 : 0;
@@ -410,7 +428,7 @@ function ReporteAsesores({ rows, generatedAt, filtros }: { rows: AsesorReportRow
           <div>
             <p className="text-[11px] uppercase tracking-wider font-bold text-indigo-600">Reporte ejecutivo</p>
             <h2 className="text-2xl font-bold text-slate-900 mt-1">Productividad de asesores</h2>
-            <p className="text-xs text-slate-500 mt-1">Últimos 30 días · {rows.length} asesor{rows.length !== 1 ? 'es' : ''}</p>
+            <p className="text-xs text-slate-500 mt-1">{days === 0 ? 'Todo el historial' : `Últimos ${days} días`} · {rows.length} asesor{rows.length !== 1 ? 'es' : ''}</p>
             <FiltrosBanner filtros={filtros} />
           </div>
           <div className="text-right text-[11px] text-slate-400">

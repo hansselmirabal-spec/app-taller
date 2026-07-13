@@ -12,8 +12,9 @@ import {
   Plus, Settings2, Trash2, X, GripVertical,
   BarChart3, PieChart as PieIcon, Table2, TrendingDown,
   Users, ChevronLeft, ChevronRight,
-  SlidersHorizontal, Hash, AlignLeft,
+  SlidersHorizontal, Hash, AlignLeft, Gauge,
 } from 'lucide-react';
+import Link from 'next/link';
 import { format, subDays, parseISO, eachDayOfInterval } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useBodyshopWeekCapacity, useMonthlyLoadReport, type TechMonthlyRow } from '@/hooks/use-bodyshop';
@@ -1299,6 +1300,13 @@ export default function BodyshopReporteriaPage() {
 
         {/* Acciones */}
         <div className="flex items-center gap-2">
+          <Link
+            href="/porteria/productividad"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+            title="Reporte de productividad por técnico"
+          >
+            <Gauge className="h-3.5 w-3.5" /> Productividad
+          </Link>
           {editMode && (
             <>
               <button onClick={() => setShowCatalog(true)} disabled={atMax}

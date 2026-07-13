@@ -98,6 +98,12 @@ export class UsersService {
     return serializeUser(await this.repo.findOne({ where: { id: saved.id }, relations: ['customRole'] }) as User);
   }
 
+  async remove(id: string): Promise<void> {
+    const user = await this.repo.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    await this.repo.delete(id);
+  }
+
   async clearMustChangePassword(id: string): Promise<void> {
     await this.repo.update(id, { mustChangePassword: false });
   }

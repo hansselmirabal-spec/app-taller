@@ -501,6 +501,13 @@ function GradesTab({ canEdit }: { canEdit: boolean }) {
                 </td>
               </tr>
             )}
+            {grades.length === 0 && !isNew && (
+              <tr>
+                <td colSpan={canEdit ? 4 : 3} className="px-4 py-10 text-center text-sm text-slate-400">
+                  No hay grados registrados
+                </td>
+              </tr>
+            )}
             {grades.map(grade => {
               const editing = editId === grade.id && !isNew;
               const pct = grade.factor != null ? Math.round(Number(grade.factor) * 100) : null;

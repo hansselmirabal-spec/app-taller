@@ -12,6 +12,7 @@ import type {
   BodyshopCatalogGroup, BodyshopCatalogProcess, BodyshopCatalogGrade, BodyshopCatalogPiece,
 } from '@/types';
 import { calcMonthlyLoadReport, type TechMonthlyRow } from './bodyshop-analytics';
+import { randomId } from './utils';
 
 const MOCK = process.env.NEXT_PUBLIC_MOCK_MODE !== 'false';
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
@@ -895,7 +896,7 @@ export async function getRoles(): Promise<Role[]> {
 
 export async function createRole(data: { name: string; permissions: Permissions }): Promise<Role> {
   if (MOCK) {
-    const role: Role = { id: crypto.randomUUID(), ...data, active: true };
+    const role: Role = { id: randomId(), ...data, active: true };
     _mockRoles.push(role);
     return delay(role);
   }
@@ -947,7 +948,7 @@ export async function createUser(data: {
 }): Promise<User> {
   if (MOCK) {
     const user: User = {
-      id: crypto.randomUUID(), name: data.name, email: data.email,
+      id: randomId(), name: data.name, email: data.email,
       role: data.role, active: true, mustChangePassword: true,
       roleId: data.roleId ?? null,
       allowedWorkshopIds: data.allowedWorkshopIds ?? null,
@@ -997,6 +998,11 @@ export async function updateUser(
     return delay({ ...u, customRole: _mockRoles.find(r => r.id === u.roleId) ?? null });
   }
   return http<User>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  if (MOCK) { _mockUsers.splice(0, _mockUsers.length, ..._mockUsers.filter(u => u.id !== id)); return delay(undefined as any); }
+  await http<unknown>(`/users/${id}`, { method: 'DELETE' });
 }
 
 // ─── Bodyshop Catalog ─────────────────────────────────────────────────────────
@@ -1485,6 +1491,67 @@ export async function clearTrackingResource(entryId: string): Promise<void> {
 export async function getResourceAgenda(workshopId: string): Promise<ResourceAgendaItem[]> {
   if (MOCK) return delay([]);
   return http<ResourceAgendaItem[]>(`/tracking/resources?workshopId=${encodeURIComponent(workshopId)}`);
+}
+
+// ── Tracking productivity report ───────────────────────────────────────────────
+
+export interface TechProcessProductivity {
+  processCode:    string;
+  processName:    string;
+  completedCount: number;
+  plannedHours:   number;
+  realHours:      number;
+  netHours:       number;
+  deviation:      number;
+  efficiencyPct:  number;
+}
+
+export interface TechProductivityRow {
+  technicianId:       string;
+  technicianName:     string;
+  completedProcesses: number;
+  plannedHours:       number;
+  realHours:          number;
+  netHours:           number;
+  pausedMinutes:      number;
+  deviation:          number;
+  efficiencyPct:      number;
+  rankByEfficiency:   number;
+  processes:          TechProcessProductivity[];
+}
+
+export interface TechMonthlyTrendRow {
+  technicianId:   string;
+  technicianName: string;
+  month:          string;
+  plannedHours:   number;
+  netHours:       number;
+  efficiencyPct:  number;
+}
+
+export interface TechProductivityReport {
+  workshopName: string;
+  from:         string;
+  to:           string;
+  technicians:  TechProductivityRow[];
+  trend:        TechMonthlyTrendRow[];
+  dataQuality:  { unattributedCompletedCount: number };
+}
+
+export async function getTrackingProductivity(
+  workshopId: string,
+  from: string,
+  to: string,
+): Promise<TechProductivityReport> {
+  if (MOCK) {
+    return delay({
+      workshopName: 'Mock', from, to,
+      technicians: [], trend: [],
+      dataQuality: { unattributedCompletedCount: 0 },
+    });
+  }
+  const qs = new URLSearchParams({ workshopId, from, to });
+  return http<TechProductivityReport>(`/tracking/productivity?${qs.toString()}`);
 }
 
 // ── Budget Appointments ────────────────────────────────────────────────────────
