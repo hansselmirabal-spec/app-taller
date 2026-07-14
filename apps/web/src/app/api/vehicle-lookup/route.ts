@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as sql from 'mssql';
-import { getDmsPool } from '@/lib/dms-connection';
+import { cookies } from 'next/headers';
+
+const INTERNAL_API = process.env.INTERNAL_API_URL ?? 'http://api:3001';
 
 export async function GET(req: NextRequest) {
   const raw = req.nextUrl.searchParams.get('plate')?.toUpperCase().trim();
@@ -8,55 +9,44 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'plate required (min 3 chars)' }, { status: 400 });
   }
 
-  let pool: sql.ConnectionPool | null = null;
-  try {
-    pool = await getDmsPool();
+  const cookieStore = await cookies();
+  const token = cookieStore.get('auth_token')?.value ?? '';
 
-    const result = await pool.request()
-      .input('plate', sql.VarChar(20), raw)
-      .query<any>(`
-        SELECT TOP 1
-          ISNULL(UPPER(LTRIM(RTRIM(m.chapa))),  '') AS Chapa,
-          ISNULL(m.chasis,        '')               AS Chasis,
-          ISNULL(m.modelo,        '')               AS Modelo,
-          ISNULL(m.nombrecliente, '')               AS NombreCliente
-        FROM MYSQL_DW.dbo.MasterOT_Condor m
-        WHERE UPPER(LTRIM(RTRIM(m.chapa)))  = @plate
-           OR UPPER(LTRIM(RTRIM(m.chasis))) = @plate
-        ORDER BY m.fechaingreso DESC
-      `);
+  const res = await fetch(`${INTERNAL_API}/api/v1/dms/vehicle-lookup?plate=${encodeURIComponent(raw)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
 
-    if (result.recordset.length === 0) {
-      return NextResponse.json({ found: false }, { headers: { 'Cache-Control': 'no-store' } });
-    }
-
-    const r = result.recordset[0];
-    return NextResponse.json({
-      found:   true,
-      vehicle: {
-        plate:            String(r.Chapa).trim() || raw,
-        chassis:          String(r.Chasis).trim(),
-        vehicleType:      String(r.Modelo).trim(),
-        engine:           '',
-        mileage:          '',
-        registrationDate: '',
-        lastService:      '',
-      },
-      customer: {
-        customerName:   String(r.NombreCliente).trim(),
-        customerNumber: '',
-        cedula:         '',
-        ruc:            '',
-        telPrincipal:   '',
-        telOficina:     '',
-        celular:        '',
-        address:        '',
-      },
-    }, { headers: { 'Cache-Control': 'no-store' } });
-  } catch (err: any) {
-    console.error('[vehicle-lookup]', err.message);
+  if (!res.ok) {
     return NextResponse.json({ error: 'DMS unavailable' }, { status: 500 });
-  } finally {
-    await pool?.close();
   }
+
+  const data = await res.json();
+
+  if (!data.found) {
+    return NextResponse.json({ found: false }, { headers: { 'Cache-Control': 'no-store' } });
+  }
+
+  return NextResponse.json({
+    found: true,
+    vehicle: {
+      plate:            data.vehicle.plate,
+      chassis:          data.vehicle.chassis,
+      vehicleType:      data.vehicle.vehicleType,
+      engine:           '',
+      mileage:          '',
+      registrationDate: '',
+      lastService:      '',
+    },
+    customer: {
+      customerName:   data.customer.customerName,
+      customerNumber: data.customer.customerNumber,
+      cedula:         '',
+      ruc:            '',
+      telPrincipal:   '',
+      telOficina:     '',
+      celular:        '',
+      address:        '',
+    },
+  }, { headers: { 'Cache-Control': 'no-store' } });
 }

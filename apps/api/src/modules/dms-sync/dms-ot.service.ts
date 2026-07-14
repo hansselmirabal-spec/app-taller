@@ -901,6 +901,39 @@ export class DmsOtService {
     };
   }
 
+  // ── GET /dms/vehicle-lookup ──────────────────────────────────────────────────
+  // Busca por chapa (el campo "chasis" del materializado guarda la chapa, no el VIN)
+  // en la última OT sincronizada de dms_ot_rows — sin tocar DMS en vivo.
+  async vehicleLookup(query: string): Promise<{
+    found: boolean;
+    vehicle?: { plate: string; chassis: string; vehicleType: string };
+    customer?: { customerName: string; customerNumber: string };
+  }> {
+    const q = query.trim().toUpperCase();
+    if (!q) return { found: false };
+
+    const row = await this.otRepo
+      .createQueryBuilder('r')
+      .where('UPPER(r.chasis) = :q', { q })
+      .orderBy('r.fechaIngreso', 'DESC')
+      .getOne();
+
+    if (!row) return { found: false };
+
+    return {
+      found: true,
+      vehicle: {
+        plate:       row.chasis ?? '',
+        chassis:     row.chasis ?? '',
+        vehicleType: row.modelo ?? '',
+      },
+      customer: {
+        customerName:   row.nombrecliente ?? '',
+        customerNumber: row.nrocliente ?? row.codcliente ?? '',
+      },
+    };
+  }
+
   // ── Private helpers ───────────────────────────────────────────────────────────
 
   private applyCommonFilters(qb: any, filters: OtFilters): void {
