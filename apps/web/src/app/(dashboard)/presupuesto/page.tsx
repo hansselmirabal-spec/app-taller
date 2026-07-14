@@ -11,6 +11,7 @@ import { useBudgetAppointments } from '@/hooks/use-budget-appointments';
 import { useWorkshopId } from '@/context/workshop-context';
 import { AppointmentSearchModal } from '@/components/ui/appointment-search';
 import { InfoButton } from '@/components/ui/info-button';
+import { MotivationalLoader } from '@/components/ui/motivational-loader';
 import type { BudgetAppointment } from '@/types';
 
 const STATUS_CONFIG = {
@@ -189,9 +190,7 @@ export default function PresupuestoPage() {
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-6">
         {isLoading ? (
-          <div className="flex items-center justify-center h-40">
-            <RefreshCw className="h-6 w-6 text-slate-400 animate-spin" />
-          </div>
+          <MotivationalLoader />
         ) : appts.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 gap-3 text-slate-400">
             <FileText className="h-10 w-10 opacity-30" />

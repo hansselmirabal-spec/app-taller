@@ -8,6 +8,7 @@ import { useTechnicians } from '@/hooks/use-technicians';
 import { formatDate } from '@/lib/utils';
 import type { ProcessCapacity, CapacityStatus, Technician, BodyshopTechDayCapacity, BodyshopDayCapacity } from '@/types';
 import { InfoButton } from '@/components/ui/info-button';
+import { MotivationalLoader } from '@/components/ui/motivational-loader';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -515,7 +516,7 @@ export default function BodyshopCapacityPage() {
       {/* ── Grid ──────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-auto p-6" onClick={closePopup}>
         {isLoading ? (
-          <div className="flex items-center justify-center h-64 text-slate-400 text-sm">Cargando...</div>
+          <MotivationalLoader className="h-64" />
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
 

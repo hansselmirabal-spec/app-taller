@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import type { OperativoData, VencidoRow, ProximoVencerRow, AsesorOpRow, Periodo, DrillMetric, DrillResult, DrillRow } from '@/app/api/ot-seguimiento/operativo/route';
 import { OT_ESTADOS } from '@/lib/ot-estados';
+import { MotivationalLoader } from '@/components/ui/motivational-loader';
 
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' });
@@ -576,12 +577,7 @@ export default function OperativoPage() {
       {/* ── Body ── */}
       <div className="flex-1 p-5 space-y-5">
 
-        {loading && !data && (
-          <div className="flex items-center justify-center h-40 gap-2 text-slate-400">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            <span className="text-sm">Consultando DMS...</span>
-          </div>
-        )}
+        {loading && !data && <MotivationalLoader />}
 
         {/* Overlay de carga sobre datos existentes */}
         {loading && data && (

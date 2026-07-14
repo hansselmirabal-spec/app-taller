@@ -54,7 +54,7 @@ export class DmsOtService {
         'ot.nroot AS nroot',
         'ot.nrocliente AS nrocliente',
         'ot.nombrecliente AS nombrecliente',
-        'ot.chasis AS chasis',
+        'ot.plate AS plate',
         'ot.modelo AS modelo',
         'ot.estadoOt AS "estadoOt"',
         'ot.estadoTaller AS "estadoTaller"',
@@ -100,7 +100,7 @@ export class DmsOtService {
       ot:                     Number(r.nroot),
       codCliente:             String(r.codcliente ?? r.nrocliente ?? '').trim(),
       nombreCliente:          String(r.nombrecliente ?? '').trim(),
-      chasis:                 String(r.chasis ?? '').trim(),
+      plate:                  String(r.plate ?? '').trim(),
       modelo:                 String(r.modelo ?? '').trim(),
       estadoOt:               String(r.estadoOt ?? '').trim(),
       estadoIdis:             Number(r.idTipoServicio) === 9
@@ -166,7 +166,7 @@ export class DmsOtService {
     // vencidos detail — top 20 overdue OTs
     const vencidos: any[] = await this.otRepo.query(`
       SELECT
-        nroot, nombrecliente, chasis, modelo, asesor, sucursal_desc,
+        nroot, nombrecliente, plate, modelo, asesor, sucursal_desc,
         fecha_ingreso, fecha_compromiso_cliente,
         (CURRENT_DATE - fecha_compromiso_cliente) AS "diasRetraso"
       FROM dms_ot_rows
@@ -180,7 +180,7 @@ export class DmsOtService {
     // proximosVencer — OTs expiring in next 7 days
     const proximosVencer: any[] = await this.otRepo.query(`
       SELECT
-        nroot, nombrecliente, chasis, modelo, asesor, sucursal_desc,
+        nroot, nombrecliente, plate, modelo, asesor, sucursal_desc,
         fecha_ingreso, fecha_compromiso_cliente
       FROM dms_ot_rows
       WHERE fecha_compromiso_cliente BETWEEN NOW() AND NOW() + INTERVAL '7 days'
@@ -341,9 +341,8 @@ export class DmsOtService {
 
   // ── GET /dms/ot-seguimiento/reportes ─────────────────────────────────────────
   async getReportes(filters?: OtFilters): Promise<any> {
-    const sucursalCond = filters?.sucursal
-      ? `AND sucursal_desc = '${filters.sucursal.replace(/'/g, "''")}'`
-      : '';
+    const sucursalCond = filters?.sucursal ? 'AND sucursal_desc = $1' : '';
+    const sucursalParams: any[] = filters?.sucursal ? [filters.sucursal] : [];
 
     const sucursalSummary: any[] = await this.otRepo.query(`
       SELECT
@@ -359,7 +358,7 @@ export class DmsOtService {
       WHERE sucursal_desc IS NOT NULL ${sucursalCond}
       GROUP BY sucursal_desc
       ORDER BY abiertas DESC
-    `);
+    `, sucursalParams);
 
     const asesorDays = filters?.days && filters.days > 0 ? filters.days : null;
     const asesorDateFilter = asesorDays
@@ -382,7 +381,7 @@ export class DmsOtService {
       WHERE asesor IS NOT NULL ${sucursalCond} ${asesorDateFilter}
       GROUP BY asesor
       ORDER BY "totalOts" DESC
-    `);
+    `, sucursalParams);
 
     const sucursalOptions: any[] = await this.otRepo.query(
       `SELECT DISTINCT sucursal_desc AS sucursal FROM dms_ot_rows
@@ -759,15 +758,19 @@ export class DmsOtService {
     };
 
     let condition = whereMap[kind] ?? `estado_ot = 'Abierto'`;
+    const params: any[] = [];
 
     if (kind === 'antiguedad' && filters?.search) {
-      condition += ` AND (CURRENT_DATE - fecha_ingreso)::text ILIKE '%${filters.search}%'`;
+      params.push(`%${filters.search}%`);
+      condition += ` AND (CURRENT_DATE - fecha_ingreso)::text ILIKE $${params.length}`;
     }
     if (filters?.sucursal) {
-      condition += ` AND sucursal_desc ILIKE '%${filters.sucursal.replace(/'/g, "''")}%'`;
+      params.push(`%${filters.sucursal}%`);
+      condition += ` AND sucursal_desc ILIKE $${params.length}`;
     }
     if (filters?.asesor) {
-      condition += ` AND asesor ILIKE '%${filters.asesor.replace(/'/g, "''")}%'`;
+      params.push(`%${filters.asesor}%`);
+      condition += ` AND asesor ILIKE $${params.length}`;
     }
 
     const rows: any[] = await this.otRepo.query(`
@@ -775,7 +778,7 @@ export class DmsOtService {
         nroot                                                       AS ot,
         nombrecliente                                               AS cliente,
         modelo,
-        chasis,
+        plate,
         sucursal_desc                                               AS sucursal,
         COALESCE(estado_taller, estado_ot)                         AS "estadoOt",
         tipo_desc                                                   AS "tipoServicio",
@@ -794,13 +797,13 @@ export class DmsOtService {
       WHERE ${condition}
       ORDER BY ${orderMap[kind] ?? '(CURRENT_DATE - fecha_ingreso) DESC'}
       LIMIT 500
-    `);
+    `, params);
 
     const mapped = rows.map(r => ({
       ot:              Number(r.ot),
       cliente:         String(r.cliente ?? '').trim(),
       modelo:          String(r.modelo ?? '').trim(),
-      chasis:          String(r.chasis ?? '').trim(),
+      plate:           String(r.plate ?? '').trim(),
       sucursal:        String(r.sucursal ?? '').trim(),
       estadoOt:        String(r.estadoOt ?? '').trim(),
       tipoServicio:    String(r.tipoServicio ?? '').trim(),
@@ -831,7 +834,7 @@ export class DmsOtService {
   // ── GET /dms/ot-detail/:nroot ────────────────────────────────────────────────
   async getOtDetail(nroot: number): Promise<Record<string, unknown> | null> {
     const rows: any[] = await this.otRepo.query(
-      `SELECT nroot, nrocliente, nombrecliente, chasis, modelo,
+      `SELECT nroot, nrocliente, nombrecliente, plate, modelo,
               estado_ot, estado_taller, estado_financiero, asesor,
               taller, sucursal_desc, fecha_ingreso, hora_ingreso,
               fecha_compromiso_cliente, fecha_cierre_ot, fecha_fin_taller,
@@ -855,7 +858,7 @@ export class DmsOtService {
       ot:                     Number(r.nroot),
       codCliente:             String(r.nrocliente ?? '').trim(),
       nombreCliente:          String(r.nombrecliente ?? '').trim(),
-      chasis:                 String(r.chasis ?? '').trim(),
+      plate:                  String(r.plate ?? '').trim(),
       modelo:                 String(r.modelo ?? '').trim(),
       estadoOt:               String(r.estado_taller ?? r.estado_ot ?? '').trim(),
       estadoIdis:             String(r.estado_ot ?? '').trim(),
@@ -901,6 +904,54 @@ export class DmsOtService {
     };
   }
 
+  // ── GET /dms/branches ────────────────────────────────────────────────────────
+  // Sucursales distintas con conteo de OTs, para el selector de Workshop.dmsBranch
+  // en Configuraciones. Lee de la tabla materializada — sin tocar DMS en vivo.
+  async getBranches(): Promise<{ name: string; total: number }[]> {
+    const rows: any[] = await this.otRepo.query(`
+      SELECT sucursal_desc AS name, COUNT(*)::int AS total
+      FROM dms_ot_rows
+      WHERE sucursal_desc IS NOT NULL AND sucursal_desc != ''
+      GROUP BY sucursal_desc
+      ORDER BY sucursal_desc
+    `);
+    return rows.map(r => ({ name: String(r.name), total: Number(r.total) }));
+  }
+
+  // ── GET /dms/vehicle-lookup ──────────────────────────────────────────────────
+  // Busca por chapa en la última OT sincronizada de dms_ot_rows — sin tocar DMS en vivo.
+  async vehicleLookup(query: string): Promise<{
+    found: boolean;
+    vehicle?: { plate: string; chassis: string; vehicleType: string };
+    customer?: { customerName: string; customerNumber: string };
+  }> {
+    const q = query.trim().toUpperCase();
+    if (!q) return { found: false };
+
+    const row = await this.otRepo
+      .createQueryBuilder('r')
+      .where('UPPER(r.plate) = :q', { q })
+      .orderBy('r.fechaIngreso', 'DESC')
+      .getOne();
+
+    if (!row) return { found: false };
+
+    return {
+      found: true,
+      vehicle: {
+        plate:       row.plate ?? '',
+        // dms_ot_rows no tiene VIN real materializado — reusamos la chapa acá
+        // a propósito (no es un bug) porque el form la usa como respaldo visual.
+        chassis:     row.plate ?? '',
+        vehicleType: row.modelo ?? '',
+      },
+      customer: {
+        customerName:   row.nombrecliente ?? '',
+        customerNumber: row.nrocliente ?? row.codcliente ?? '',
+      },
+    };
+  }
+
   // ── Private helpers ───────────────────────────────────────────────────────────
 
   private applyCommonFilters(qb: any, filters: OtFilters): void {
@@ -936,7 +987,7 @@ export class DmsOtService {
     }
     if (filters.search) {
       qb.andWhere(
-        `(CAST(ot.nroot AS TEXT) ILIKE :search OR ot.nombrecliente ILIKE :search OR ot.chasis ILIKE :search)`,
+        `(CAST(ot.nroot AS TEXT) ILIKE :search OR ot.nombrecliente ILIKE :search OR ot.plate ILIKE :search)`,
         { search: `%${filters.search}%` },
       );
     }

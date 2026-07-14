@@ -13,6 +13,7 @@ import {
 import { es } from 'date-fns/locale';
 import { useBodyshopWeekCapacity, useBodyshopEntriesKanban } from '@/hooks/use-bodyshop';
 import { formatDate } from '@/lib/utils';
+import { MotivationalLoader } from '@/components/ui/motivational-loader';
 import type { BodyshopEntry, BodyshopWeekCapacity } from '@/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -209,7 +210,7 @@ export default function BodyshopReport() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center h-64 text-slate-400 text-sm">Cargando...</div>
+        <MotivationalLoader className="h-64" />
       ) : (
         <>
           {/* ── Summary cards ── */}

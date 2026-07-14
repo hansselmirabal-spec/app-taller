@@ -9,7 +9,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { DmsSyncService } from '../modules/dms-sync/dms-sync.service';
-import { DmsSnapshot } from '../modules/dms-sync/dms-snapshot.entity';
 import { DmsAdvisorSlot } from '../modules/dms-sync/dms-advisor-slot.entity';
 import { DmsOtRow } from '../modules/dms-sync/dms-ot-row.entity';
 import { DmsSyncState } from '../modules/dms-sync/dms-sync-state.entity';
@@ -21,7 +20,7 @@ function makeRepoMock() {
 describe('DmsSyncService.syncAll() - advisory lock', () => {
   let service: DmsSyncService;
   let dataSourceMock: { query: jest.Mock; createQueryBuilder: jest.Mock };
-  let syncOtSeguimientoSpy: jest.SpyInstance;
+  let syncAdvisorSlotsSpy: jest.SpyInstance;
 
   beforeEach(async () => {
     dataSourceMock = { query: jest.fn(), createQueryBuilder: jest.fn() };
@@ -29,10 +28,6 @@ describe('DmsSyncService.syncAll() - advisory lock', () => {
     const mod: TestingModule = await Test.createTestingModule({
       providers: [
         DmsSyncService,
-        {
-          provide: getRepositoryToken(DmsSnapshot),
-          useValue: makeRepoMock(),
-        },
         {
           provide: getRepositoryToken(DmsAdvisorSlot),
           useValue: makeRepoMock(),
@@ -51,7 +46,7 @@ describe('DmsSyncService.syncAll() - advisory lock', () => {
 
     service = mod.get(DmsSyncService);
     // Stub del trabajo real: nos interesa ver SI se ejecuta, no lo que hace adentro.
-    syncOtSeguimientoSpy = jest.spyOn(service, 'syncOtSeguimiento').mockResolvedValue(undefined);
+    syncAdvisorSlotsSpy = jest.spyOn(service, 'syncAdvisorSlots').mockResolvedValue(undefined);
     // Stub OT rows sync so advisory lock tests stay focused
     jest.spyOn(service, 'maybeRunOtRowsSync').mockResolvedValue(undefined);
   });
@@ -60,15 +55,14 @@ describe('DmsSyncService.syncAll() - advisory lock', () => {
     jest.restoreAllMocks();
   });
 
-  it('si obtiene el lock: ejecuta sync de los 2 presets y libera el lock', async () => {
+  it('si obtiene el lock: ejecuta el sync de asesores y libera el lock', async () => {
     dataSourceMock.query
       .mockResolvedValueOnce([{ acquired: true }])  // pg_try_advisory_lock
       .mockResolvedValueOnce([]);                    // pg_advisory_unlock
 
     await service.syncAll();
 
-    // Lock + 2 syncs + unlock
-    expect(syncOtSeguimientoSpy).toHaveBeenCalledTimes(2);
+    expect(syncAdvisorSlotsSpy).toHaveBeenCalledTimes(1);
     expect(dataSourceMock.query).toHaveBeenCalledWith(
       expect.stringContaining('pg_try_advisory_lock'),
       [7426158],
@@ -84,7 +78,7 @@ describe('DmsSyncService.syncAll() - advisory lock', () => {
 
     await service.syncAll();
 
-    expect(syncOtSeguimientoSpy).not.toHaveBeenCalled();
+    expect(syncAdvisorSlotsSpy).not.toHaveBeenCalled();
     // Tampoco intenta liberar lo que no tiene
     expect(dataSourceMock.query).toHaveBeenCalledTimes(1);
   });
@@ -94,14 +88,14 @@ describe('DmsSyncService.syncAll() - advisory lock', () => {
 
     await service.syncAll();
 
-    expect(syncOtSeguimientoSpy).not.toHaveBeenCalled();
+    expect(syncAdvisorSlotsSpy).not.toHaveBeenCalled();
   });
 
   it('si el sync explota: igual libera el lock (finally)', async () => {
     dataSourceMock.query
       .mockResolvedValueOnce([{ acquired: true }])
       .mockResolvedValueOnce([]);
-    syncOtSeguimientoSpy.mockRejectedValueOnce(new Error('DMS down'));
+    syncAdvisorSlotsSpy.mockRejectedValueOnce(new Error('DMS down'));
 
     await service.syncAll();
 
@@ -119,7 +113,7 @@ describe('DmsSyncService.syncAll() - advisory lock', () => {
 
     // Ni siquiera consultó la DB
     expect(dataSourceMock.query).not.toHaveBeenCalled();
-    expect(syncOtSeguimientoSpy).not.toHaveBeenCalled();
+    expect(syncAdvisorSlotsSpy).not.toHaveBeenCalled();
   });
 
   it('two-tier: in-memory flag + advisory lock funcionan en orden', async () => {
@@ -135,7 +129,7 @@ describe('DmsSyncService.syncAll() - advisory lock', () => {
     // Inmediatamente después podemos volver a sincronizar
     await service.syncAll();
 
-    expect(syncOtSeguimientoSpy).toHaveBeenCalledTimes(4); // 2 presets × 2 corridas
+    expect(syncAdvisorSlotsSpy).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -149,7 +143,6 @@ describe('DmsSyncService.getHealth() + escalamiento', () => {
     const mod: TestingModule = await Test.createTestingModule({
       providers: [
         DmsSyncService,
-        { provide: getRepositoryToken(DmsSnapshot),    useValue: makeRepoMock() },
         { provide: getRepositoryToken(DmsAdvisorSlot), useValue: makeRepoMock() },
         { provide: getRepositoryToken(DmsOtRow),       useValue: makeRepoMock() },
         { provide: getRepositoryToken(DmsSyncState),   useValue: makeRepoMock() },
@@ -158,7 +151,6 @@ describe('DmsSyncService.getHealth() + escalamiento', () => {
     }).compile();
     service = mod.get(DmsSyncService);
     jest.spyOn(service, 'maybeRunOtRowsSync').mockResolvedValue(undefined);
-    jest.spyOn(service, 'syncAdvisorSlots').mockResolvedValue(undefined);
     loggerErrorSpy = jest.spyOn((service as any).logger, 'error').mockImplementation(() => undefined);
   });
 
@@ -178,7 +170,7 @@ describe('DmsSyncService.getHealth() + escalamiento', () => {
     dataSourceMock.query
       .mockResolvedValueOnce([{ acquired: true }])
       .mockResolvedValueOnce([]);
-    jest.spyOn(service, 'syncOtSeguimiento').mockResolvedValue(undefined);
+    jest.spyOn(service, 'syncAdvisorSlots').mockResolvedValue(undefined);
 
     await service.syncAll();
 
@@ -193,7 +185,7 @@ describe('DmsSyncService.getHealth() + escalamiento', () => {
     dataSourceMock.query
       .mockResolvedValueOnce([{ acquired: true }])
       .mockResolvedValueOnce([]);
-    jest.spyOn(service, 'syncOtSeguimiento').mockRejectedValue(new Error('DMS down'));
+    jest.spyOn(service, 'syncAdvisorSlots').mockRejectedValue(new Error('DMS down'));
 
     await service.syncAll();
 
@@ -204,7 +196,7 @@ describe('DmsSyncService.getHealth() + escalamiento', () => {
   });
 
   it('escala con [ALERT] al 3er fallo consecutivo', async () => {
-    jest.spyOn(service, 'syncOtSeguimiento').mockRejectedValue(new Error('DMS down'));
+    jest.spyOn(service, 'syncAdvisorSlots').mockRejectedValue(new Error('DMS down'));
     // 3 corridas fallidas
     for (let i = 0; i < 3; i++) {
       dataSourceMock.query
@@ -220,13 +212,13 @@ describe('DmsSyncService.getHealth() + escalamiento', () => {
   });
 
   it('un sync OK después de fallos resetea el contador', async () => {
-    const sync = jest.spyOn(service, 'syncOtSeguimiento');
-    // Fallo: el primer preset ya tira y aborta el for → se cuenta 1 fallo
+    const sync = jest.spyOn(service, 'syncAdvisorSlots');
+    // Fallo
     dataSourceMock.query.mockResolvedValueOnce([{ acquired: true }]).mockResolvedValueOnce([]);
     sync.mockRejectedValueOnce(new Error('boom'));
     await service.syncAll();
     expect(service.getHealth().consecutiveFailures).toBe(1);
-    // Éxito: ambos presets resuelven OK
+    // Éxito
     dataSourceMock.query.mockResolvedValueOnce([{ acquired: true }]).mockResolvedValueOnce([]);
     sync.mockResolvedValue(undefined);
     await service.syncAll();

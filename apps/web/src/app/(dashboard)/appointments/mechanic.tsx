@@ -11,6 +11,7 @@ import { useDailyCapacity } from '@/hooks/use-capacity';
 import { formatDate, timeToMinutes, minutesToTime } from '@/lib/utils';
 import type { Appointment } from '@/types';
 import { InfoButton } from '@/components/ui/info-button';
+import { MotivationalLoader } from '@/components/ui/motivational-loader';
 import { AppointmentDetailModal } from '@/components/appointments/appointment-detail-modal';
 
 const HOUR_START = 8;
@@ -228,10 +229,7 @@ export default function MechanicAppointmentsPage() {
       {viewMode !== 'day' && (
         <div className="flex-1 overflow-auto p-5 space-y-4">
           {loadingRange ? (
-            <div className="flex items-center justify-center h-40 gap-3 text-slate-400">
-              <div className="h-5 w-5 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
-              <span className="text-sm">Cargando...</span>
-            </div>
+            <MotivationalLoader />
           ) : (
             eachDayOfInterval({ start: parseISO(rangeFrom + 'T12:00:00'), end: parseISO(rangeTo + 'T12:00:00') })
               .filter(d => d.getDay() !== 0)

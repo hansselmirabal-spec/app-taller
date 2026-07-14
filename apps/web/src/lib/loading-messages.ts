@@ -1,0 +1,18 @@
+export const LOADING_MESSAGES: string[] = [
+  'Contando autos... 🚗💨',
+  'Esto va más rápido que un cambio de aceite 🛢️',
+  'Casi, casi... 🔧',
+  'Calentando motores...',
+  'Ordenando las OTs por vos 📋',
+  'Sincronizando con el DMS, aguantá un toque',
+  'Ajustando las últimas tuercas ⚙️',
+  'El taller nunca para, esto tampoco 🏎️',
+  'Buscando hasta debajo del capó...',
+  'Ya casi arrancamos 🔑',
+  'Poniendo todo en su lugar...',
+  'Más rápido que un mecánico un viernes a las 5 😅',
+  'Trayendo los datos frescos del horno 🔥',
+  'Un cafecito y listo ☕',
+  'Alineando y balanceando la info 🛞',
+  'Dándole una vuelta más al motor...',
+];

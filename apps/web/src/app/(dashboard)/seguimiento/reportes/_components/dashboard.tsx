@@ -805,7 +805,7 @@ function KpiDetailModal({
       String(r.ot).includes(q) ||
       r.cliente.toLowerCase().includes(q) ||
       r.modelo.toLowerCase().includes(q) ||
-      r.chasis.toLowerCase().includes(q) ||
+      r.plate.toLowerCase().includes(q) ||
       r.sucursal.toLowerCase().includes(q) ||
       r.asesor.toLowerCase().includes(q) ||
       r.tipoServicio.toLowerCase().includes(q)
@@ -814,9 +814,9 @@ function KpiDetailModal({
 
   function exportCSV() {
     if (!filtered.length) return;
-    const headers = ['OT','Cliente','Modelo','Chasis','Sucursal','Estado','Tipo','Asesor','Ingreso','Compromiso','Finalizado','Días en taller','Días retraso','Monto'];
+    const headers = ['OT','Cliente','Modelo','Chapa','Sucursal','Estado','Tipo','Asesor','Ingreso','Compromiso','Finalizado','Días en taller','Días retraso','Monto'];
     const rows = filtered.map(r => [
-      r.ot, r.cliente, r.modelo, r.chasis, r.sucursal, r.estadoOt, r.tipoServicio,
+      r.ot, r.cliente, r.modelo, r.plate, r.sucursal, r.estadoOt, r.tipoServicio,
       r.asesor, r.fechaIngreso ?? '', r.fechaCompromiso ?? '', r.fechaFinalizado ?? '',
       r.diasIngreso, r.diasRetraso, r.monto,
     ]);
@@ -885,7 +885,7 @@ function KpiDetailModal({
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Buscar por OT, cliente, chasis, modelo, sucursal, asesor o tipo..."
+                placeholder="Buscar por OT, cliente, chapa, modelo, sucursal, asesor o tipo..."
                 className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300"
               />
             </div>

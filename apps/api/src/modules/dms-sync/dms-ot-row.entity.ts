@@ -20,8 +20,11 @@ export class DmsOtRow {
   @Column({ type: 'varchar', length: 255, nullable: true })
   nombrecliente: string | null;
 
+  // Guarda la chapa/patente del vehículo (m.chapa en la fuente DMS), NO el VIN real.
+  // El nombre histórico "chasis" es engañoso — se mantiene el comentario para que
+  // nadie lo "corrija" apuntándolo al chasis real y reintroduzca el bug ya vivido.
   @Column({ type: 'varchar', length: 100, nullable: true })
-  chasis: string | null;
+  plate: string | null;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   modelo: string | null;

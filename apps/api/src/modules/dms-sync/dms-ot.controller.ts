@@ -66,4 +66,14 @@ export class DmsOtController {
   async getSyncStatus() {
     return this.service.getSyncStatus();
   }
+
+  @Get('vehicle-lookup')
+  async vehicleLookup(@Query('plate') plate: string) {
+    return this.service.vehicleLookup(plate ?? '');
+  }
+
+  @Get('branches')
+  async getBranches() {
+    return this.service.getBranches();
+  }
 }

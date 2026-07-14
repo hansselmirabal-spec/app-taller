@@ -232,7 +232,7 @@ export function OtDetailPanel({ otNum, detail, loading, error, onClose }: Props)
               {/* Vehículo */}
               <Section icon={Car} title="Vehículo">
                 <Row label="Modelo" value={detail.modelo || '—'} />
-                <Row label="Chasis (VIN)" value={detail.chasis || '—'} mono />
+                <Row label="Chapa" value={detail.plate || '—'} mono />
               </Section>
 
               {/* Cliente */}

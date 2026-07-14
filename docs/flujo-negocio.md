@@ -46,6 +46,17 @@ Son flujos separados porque su lógica de horas y de agenda es distinta (ver sec
 
 **Conclusión importante:** presupuesto/agenda y reportes usan la sucursal para cosas distintas — una es metadata de creación, la otra es agregación para analítica. No asumir que comparten lógica.
 
+### Las dos vías de acceso al DMS que están activas hoy
+
+Ya hubo un bug real de producción por confundir estas dos — no son la misma cosa:
+
+1. **Materializada (lectura, la fuente principal)** — `DmsSyncService` sincroniza cada 5-15 min desde MySQL `controltiempo.ot_master` hacia la tabla propia Postgres `dms_ot_rows`. Todo lo de OTs/reportes/seguimiento/búsqueda de vehículo (`vehicle-lookup`) lee de acá, vía `DmsOtService` — nunca toca el DMS en vivo por request.
+2. **En vivo (lectura + escritura puntual)** — `dms-agendamiento.service.ts` abre una conexión SQL Server directa contra `MYSQL_DW` en cada request, para: (a) listar sucursales/asesores en el formulario de Agenda, y (b) empujar (`push`) la cita nueva al sistema de agendamiento del DMS. Esto es necesariamente en vivo porque es una escritura, no puede salir de una tabla cacheada.
+
+Si algo de OTs/reportes se ve raro, el sospechoso #1 es la sincronización de la vía (1). Si falla crear/empujar una cita al DMS, el sospechoso es la vía (2).
+
+Hay además una tabla `dms_ot_rows.plate` que **guarda la chapa/patente, no el VIN real** — el nombre viejo de esa columna era `chasis`, lo cual llevó a confusión; se renombró para que quede claro.
+
 ---
 
 ## 4. Cómo se calculan las horas (el punto que más se pregunta)

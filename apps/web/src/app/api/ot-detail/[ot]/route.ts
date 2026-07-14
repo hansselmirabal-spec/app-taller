@@ -15,7 +15,7 @@ export interface OtDetail {
   ot:                     number;
   codCliente:             string;
   nombreCliente:          string;
-  chasis:                 string;
+  plate:                  string;
   modelo:                 string;
   estadoOt:               string;
   estadoIdis:             string;

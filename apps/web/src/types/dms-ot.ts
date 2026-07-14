@@ -9,7 +9,7 @@ export interface OtRow {
   ot: number;
   codCliente: string;
   nombreCliente: string;
-  chasis: string;
+  plate: string;
   modelo: string;
   estadoOt: string;
   estadoIdis: string;
@@ -206,7 +206,7 @@ export interface DetailRow {
   ot:              number;
   cliente:         string;
   modelo:          string;
-  chasis:          string;
+  plate:           string;
   sucursal:        string;
   estadoOt:        string;
   tipoServicio:    string;
