@@ -273,7 +273,7 @@ export default function SeguimientoPage() {
       rows = rows.filter(r =>
         String(r.ot).includes(q) ||
         r.nombreCliente.toLowerCase().includes(q) ||
-        r.chasis.toLowerCase().includes(q) ||
+        r.plate.toLowerCase().includes(q) ||
         r.modelo.toLowerCase().includes(q) ||
         r.asesor.toLowerCase().includes(q)
       );
@@ -305,7 +305,7 @@ export default function SeguimientoPage() {
       rows = rows.filter(r =>
         String(r.ot).includes(q) ||
         r.nombreCliente.toLowerCase().includes(q) ||
-        r.chasis.toLowerCase().includes(q) ||
+        r.plate.toLowerCase().includes(q) ||
         r.modelo.toLowerCase().includes(q) ||
         r.asesor.toLowerCase().includes(q)
       );
@@ -648,7 +648,7 @@ export default function SeguimientoPage() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="OT, cliente, chasis, modelo..."
+                placeholder="OT, cliente, chapa, modelo..."
                 className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300 w-56"
               />
             </div>
@@ -761,7 +761,7 @@ export default function SeguimientoPage() {
                 <th onClick={() => toggleSort('modelo')} title="Modelo del vehículo" className="text-left px-4 py-3 font-semibold text-slate-600 cursor-pointer whitespace-nowrap hover:text-slate-900">
                   Modelo <SortIcon k="modelo" />
                 </th>
-                <th title="Número de chasis (VIN) del vehículo" className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">Chasis</th>
+                <th title="Chapa/matrícula del vehículo" className="text-left px-4 py-3 font-semibold text-slate-600 whitespace-nowrap">Chapa</th>
                 <th onClick={() => toggleSort('estadoOt')} title="Estado actual de la OT en el flujo del taller" className="text-left px-4 py-3 font-semibold text-slate-600 cursor-pointer whitespace-nowrap hover:text-slate-900">
                   Estado <SortIcon k="estadoOt" />
                 </th>
@@ -815,7 +815,7 @@ export default function SeguimientoPage() {
                     </td>
                     <td className="px-4 py-2.5 text-slate-700 max-w-[220px] truncate" title={row.nombreCliente}>{row.nombreCliente || '—'}</td>
                     <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{row.modelo || '—'}</td>
-                    <td className="px-4 py-2.5 font-mono text-slate-500 text-[10px] whitespace-nowrap">{row.chasis || '—'}</td>
+                    <td className="px-4 py-2.5 font-mono text-slate-500 text-[10px] whitespace-nowrap">{row.plate || '—'}</td>
                     <td className="px-4 py-2.5"><EstadoBadge estado={row.estadoIdis || row.estadoOt} /></td>
                     <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{row.asesor || '—'}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap">
@@ -979,11 +979,11 @@ function KanbanCard({ row, estadoColor, onClick }: { row: OtRow; estadoColor: st
           {row.nombreCliente || '—'}
         </p>
 
-        {/* Modelo + chasis */}
+        {/* Modelo + chapa */}
         <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
           <span className="truncate" title={`Modelo: ${row.modelo || '—'}`}>{row.modelo || '—'}</span>
-          {row.chasis && (
-            <span className="font-mono text-[10px] text-slate-400 flex-shrink-0" title={`Chasis (VIN): ${row.chasis}`}>…{row.chasis.slice(-6)}</span>
+          {row.plate && (
+            <span className="font-mono text-[10px] text-slate-400 flex-shrink-0" title={`Chapa: ${row.plate}`}>…{row.plate.slice(-6)}</span>
           )}
         </div>
 

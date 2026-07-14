@@ -445,7 +445,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
           .values(allOts.slice(i, i + BATCH))
           .orUpdate(
             [
-              'nrocliente', 'nombrecliente', 'chasis', 'modelo',
+              'nrocliente', 'nombrecliente', 'plate', 'modelo',
               'estado_ot', 'estado_taller', 'estado_financiero',
               'asesor', 'taller', 'sucursal_desc',
               'fecha_ingreso', 'hora_ingreso',
@@ -510,7 +510,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
         nroot:                  Number(r.nroot),
         nrocliente:             String(r.nrocliente ?? '').trim() || null,
         nombrecliente:          String(r.nombrecliente ?? '').trim() || null,
-        chasis:                 String(r.chasis ?? '').trim() || null,
+        plate:                  String(r.plate ?? '').trim() || null,
         modelo:                 String(r.modelo ?? '').trim() || null,
         estadoOt:               String(r.estado_ot ?? '').trim() || null,
         estadoTaller:           String(r.estado_taller ?? '').trim() || null,
@@ -547,7 +547,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
         m.nroot,
         m.nrocliente,
         m.nombrecliente,
-        m.chapa                                                    AS chasis,
+        m.chapa                                                    AS plate,
         m.modelo,
         eo.descripcion                                             AS estado_ot,
         eo.descripcion                                             AS estado_taller,
@@ -602,7 +602,7 @@ export class DmsSyncService implements OnApplicationBootstrap {
         nroot:                  Number(r.nroot),
         nrocliente:             String(r.nrocliente ?? '').trim() || null,
         nombrecliente:          String(r.nombrecliente ?? '').trim() || null,
-        chasis:                 String(r.chasis ?? '').trim() || null,
+        plate:                  String(r.plate ?? '').trim() || null,
         modelo:                 String(r.modelo ?? '').trim() || null,
         estadoOt:               String(r.estado_ot ?? '').trim() || null,
         estadoTaller:           String(r.estado_taller ?? '').trim() || null,
