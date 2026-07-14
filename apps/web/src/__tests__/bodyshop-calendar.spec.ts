@@ -17,7 +17,7 @@ const baseEntry = {
   plate: 'ABC123',
   channel: 'phone' as const,
   bodyworkHours: 0, prepHours: 0, paintHours: 0,
-  status: 'scheduled' as const,
+  status: 'scheduled' as 'scheduled' | 'in_progress' | 'done' | 'cancelled',
 };
 
 function entry(overrides: Partial<typeof baseEntry> & { id: string; date: string; stayDays: number }) {

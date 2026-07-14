@@ -18,7 +18,13 @@ App web que reemplaza un Excel de gestión de capacidad de taller automotriz.
 - Cupos por tipo de servicio
 - Disponibilidad para agendar turnos
 
-**NO gestiona:** OT completa, facturación, CRM, inventario.
+**Además gestiona hoy (creció más allá del MVP original):** flujo completo de
+chapa y pintura (bodyshop), integración con el DMS de Grupo Cóndor (sync
+materializado + conexión en vivo para sucursales/asesores), tracking/kanban de
+OTs en taller, reportería por sucursal/asesor, y permisos por rol/módulo.
+
+**NO gestiona:** facturación, CRM, inventario. Fuente de verdad funcional
+completa: [`docs/flujo-negocio.md`](docs/flujo-negocio.md).
 
 **Stack:**
 - Frontend: Next.js (App Router)
@@ -26,7 +32,7 @@ App web que reemplaza un Excel de gestión de capacidad de taller automotriz.
 - DB: PostgreSQL
 - Auth: JWT stateless
 - Infra: Docker Compose
-- ORM: (pendiente decisión — ver log)
+- ORM: TypeORM
 
 ---
 
@@ -78,7 +84,7 @@ Fase 4 — Validación     : QA → HM aprueba
 Fase 5 — Entrega        : HM cierra
 ```
 
-**Estado actual:** Fase 1
+**Estado actual:** En producción activa (QAS y PROD desplegados y en uso real) — muy por delante de las 5 fases originales, que describían el arranque del MVP.
 
 ---
 
@@ -89,7 +95,7 @@ Fase 5 — Entrega        : HM cierra
 | 1 | Auth | JWT stateless | Simplicidad MVP, sin sesiones server-side |
 | 2 | Deploy | Docker Compose | Dev + prod simples, sin Kubernetes en MVP |
 | 3 | Frontend router | App Router Next.js | Standard actual, RSC disponible |
-| 4 | ORM | pendiente | Decidir entre Prisma y TypeORM en Fase 2 |
+| 4 | ORM | TypeORM | Ya implementado y en producción; no está pendiente |
 
 ---
 
@@ -124,27 +130,39 @@ Lee estos archivos cuando necesites contexto especializado:
 
 ---
 
-## ESTRUCTURA DEL PROYECTO
+## ESTRUCTURA DEL PROYECTO (real, no la del MVP original)
 
 ```
-workshop-capacity/
+cetus/
 ├── CLAUDE.md                  ← este archivo
+├── docs/
+│   ├── flujo-negocio.md       ← fuente de verdad funcional vigente
+│   └── spec.md                ← histórico, MVP Fase 1 (no actualizar como si fuera vigente)
 ├── .claude/
 │   └── skills/
-│       ├── hm-orchestrator/   ← protocolo HM
-│       ├── domain-rules/      ← dominio negocio
-│       └── capacity-calculator/ ← lógica capacidad
-├── backend/                   ← NestJS
-│   ├── src/
-│   │   ├── auth/
-│   │   ├── technicians/
-│   │   ├── capacity/
-│   │   ├── appointments/
-│   │   └── services/
-│   └── prisma/ (o typeorm/)
-├── frontend/                  ← Next.js
-│   └── src/
-│       ├── app/
-│       └── components/
-└── docker-compose.yml
+│       ├── hm-orchestrator/
+│       ├── domain-rules/
+│       └── capacity-calculator/ ← diseño histórico, ver disclaimer en el archivo
+├── apps/
+│   ├── api/                   ← NestJS + TypeORM
+│   │   └── src/modules/
+│   │       ├── auth/ users/ roles/
+│   │       ├── technicians/ service-types/ specialties/ work-types/
+│   │       ├── capacity/ appointments/
+│   │       ├── bodyshop/      ← chapa y pintura: entries, catálogo, scheduling
+│   │       ├── tracking/      ← kanban/seguimiento de OTs en taller
+│   │       ├── dms-sync/      ← integración DMS (materializada + en vivo)
+│   │       ├── budget-appointments/ workshops/ mail/
+│   └── web/                   ← Next.js (App Router)
+│       └── src/app/(dashboard)/
+│           ├── dashboard/ capacity/ calendario/ appointments/
+│           ├── presupuesto/ recursos/ porteria/ kanban/ seguimiento/
+│           └── settings/ documentacion/
+├── docker-compose.yml         ← dev local
+├── docker-compose.qas.yml     ← QAS (deploy-qas.yml)
+└── .github/workflows/         ← ci.yml, deploy-qas.yml, deploy-prod.yml
 ```
+
+Nota: `docker-compose.portainer.yml` (PROD) NO está versionado en este repo — vive
+solo en el servidor. Cualquier cambio de infraestructura de PROD hoy es invisible
+para quien lea este repo.

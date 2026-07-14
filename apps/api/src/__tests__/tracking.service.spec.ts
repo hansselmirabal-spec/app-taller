@@ -426,6 +426,43 @@ describe('TrackingService', () => {
         expect.objectContaining({ status: 'in_progress' }),
       );
     });
+
+    it('rejects starting when the technician is already in_progress on another vehicle', async () => {
+      const log = makeLog({ status: 'pending', sourceId: 'appt-002' });
+      const conflict = makeLog({
+        id: 'log-other', sourceId: APPT_ID, status: 'in_progress',
+        technicianId: TECH_ID, processName: 'Chapería',
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(log)      // the log being started
+          .mockResolvedValueOnce(conflict), // technician's other in_progress log
+      });
+
+      const { service } = await build({ logRepo });
+      await expect(service.startProcess(LOG_ID, TECH_ID, 'Técnico 1'))
+        .rejects.toThrow(BadRequestException);
+      expect(logRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('allows starting when the technician\'s other in_progress log is on the same vehicle', async () => {
+      const log = makeLog({ status: 'pending', processType: 'PARALLEL' });
+      const sameVehicleLog = makeLog({
+        id: 'log-mother', sourceId: APPT_ID, status: 'in_progress', technicianId: TECH_ID,
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(log)
+          .mockResolvedValueOnce(sameVehicleLog),
+      });
+
+      const { service } = await build({ logRepo });
+      await service.startProcess(LOG_ID, TECH_ID, 'Técnico 1');
+
+      expect(logRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'in_progress', technicianId: TECH_ID }),
+      );
+    });
   });
 
   // ── completeProcess ───────────────────────────────────────────────────────

@@ -111,13 +111,19 @@ export class BodyshopScheduleService {
       .addGroupBy('s.date')
       .getRawMany();
 
+    // Daily base capacity per process + per-tech map to compute absence reductions.
+    // Se necesita ANTES de armar committedMap: si PREP comparte pool con BODYWORK
+    // (sin técnico dedicado), hay que sumar los compromisos de ambos bajo la misma
+    // clave — si no, un PREP viejo en la base no frena una nueva reserva de BODYWORK
+    // para el mismo técnico, y viceversa.
+    const { dailyCap, techCapMap, poolKey } = await this.buildCapacityInfo(workshopId, workshop);
+
     const committedMap = new Map<string, number>();
     for (const row of committed) {
-      committedMap.set(`${row.process}|${row.date}`, Number(row.committed));
+      const pool = poolKey.get(row.process) ?? row.process;
+      const key  = `${pool}|${row.date}`;
+      committedMap.set(key, (committedMap.get(key) ?? 0) + Number(row.committed));
     }
-
-    // Daily base capacity per process + per-tech map to compute absence reductions
-    const { dailyCap, techCapMap } = await this.buildCapacityInfo(workshopId, workshop);
 
     // Pre-load absences over the lookahead window and build reduction map: `process|date` → hours lost
     const absences = await this.absenceRepo.find({
@@ -150,6 +156,11 @@ export class BodyshopScheduleService {
         continue;
       }
 
+      // pool: la clave real de horas comprometidas/ausencias para este proceso.
+      // Si comparte técnicos con otro proceso (ej. PREP sin dedicado → BODYWORK),
+      // usa la clave del proceso dueño para no contar el mismo técnico dos veces.
+      const pool = poolKey.get(proc.code) ?? proc.code;
+
       let sequence = 0;
       let daysSearched = 0;
 
@@ -166,9 +177,9 @@ export class BodyshopScheduleService {
           continue;
         }
 
-        const absReduction    = absenceReductionMap.get(`${proc.code}|${pointerDate}`) ?? 0;
+        const absReduction    = absenceReductionMap.get(`${pool}|${pointerDate}`) ?? 0;
         const cap             = Math.max(0, baseCap - absReduction);
-        const alreadyCommitted = committedMap.get(`${proc.code}|${pointerDate}`) ?? 0;
+        const alreadyCommitted = committedMap.get(`${pool}|${pointerDate}`) ?? 0;
         const dayAvailable     = Math.max(0, cap - alreadyCommitted);
 
         const fromMinutes  = this.toMinutes(pointerTime);
@@ -198,7 +209,9 @@ export class BodyshopScheduleService {
         });
 
         // Update in-memory committed so same-day multi-process doesn't double-book
-        const key = `${proc.code}|${pointerDate}`;
+        // (usa `pool`, no proc.code — así un slot de PREP también ocupa el cupo
+        // de BODYWORK cuando comparten los mismos técnicos, y viceversa)
+        const key = `${pool}|${pointerDate}`;
         committedMap.set(key, (committedMap.get(key) ?? 0) + canUseToday);
 
         remaining -= canUseToday;
@@ -234,6 +247,7 @@ export class BodyshopScheduleService {
   private async buildCapacityInfo(workshopId: string, ws?: any): Promise<{
     dailyCap:   Map<string, number>;
     techCapMap: Map<string, { process: string; dailyHours: number }>;
+    poolKey:    Map<string, string>;
   }> {
     if (!ws) ws = await this.workshopsService.findOne(workshopId);
     const technicians = await this.techniciansService.findAll(ws.name);
@@ -258,12 +272,22 @@ export class BodyshopScheduleService {
       techCapMap.set(tech.id, { process: code, dailyHours });
     }
 
-    // If PREP has no dedicated technician, BODYWORK techs cover it (common in bodyshops)
+    // poolKey: qué "pool" de horas comprometidas usa cada proceso al reservar cupo.
+    // Por defecto cada proceso es su propio pool.
+    const poolKey = new Map<string, string>();
+    for (const code of dailyCap.keys()) poolKey.set(code, code);
+
+    // Si PREP no tiene técnico dedicado, lo cubren los técnicos de BODYWORK
+    // (común en chaperías chicas) — comparten la MISMA persona, así que también
+    // tienen que compartir el mismo pool de horas comprometidas por día. Si no,
+    // el scheduler reserva 8h de BODYWORK y otras 8h de PREP para el mismo técnico
+    // el mismo día — sobreagenda fantasma (ver auditoría, hallazgo #8).
     if (!dailyCap.has('PREP') && dailyCap.has('BODYWORK')) {
       dailyCap.set('PREP', dailyCap.get('BODYWORK')!);
+      poolKey.set('PREP', 'BODYWORK');
     }
 
-    return { dailyCap, techCapMap };
+    return { dailyCap, techCapMap, poolKey };
   }
 
   private async isWorkingDay(date: string, workshopConfig?: any): Promise<boolean> {
