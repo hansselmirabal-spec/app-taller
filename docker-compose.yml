@@ -46,11 +46,6 @@ services:
       - "3000:3000"
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:3001/api/v1
-      DMS_HOST: "53.103.13.200"
-      DMS_PORT: "1433"
-      DMS_USER: "ituser"
-      DMS_PASSWORD: "123456ituser"
-      DMS_DATABASE: "MYSQL_DW"
       INTERNAL_API_URL: "http://api:3001"
     depends_on:
       - api

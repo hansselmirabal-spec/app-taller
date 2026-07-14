@@ -341,9 +341,8 @@ export class DmsOtService {
 
   // ── GET /dms/ot-seguimiento/reportes ─────────────────────────────────────────
   async getReportes(filters?: OtFilters): Promise<any> {
-    const sucursalCond = filters?.sucursal
-      ? `AND sucursal_desc = '${filters.sucursal.replace(/'/g, "''")}'`
-      : '';
+    const sucursalCond = filters?.sucursal ? 'AND sucursal_desc = $1' : '';
+    const sucursalParams: any[] = filters?.sucursal ? [filters.sucursal] : [];
 
     const sucursalSummary: any[] = await this.otRepo.query(`
       SELECT
@@ -359,7 +358,7 @@ export class DmsOtService {
       WHERE sucursal_desc IS NOT NULL ${sucursalCond}
       GROUP BY sucursal_desc
       ORDER BY abiertas DESC
-    `);
+    `, sucursalParams);
 
     const asesorDays = filters?.days && filters.days > 0 ? filters.days : null;
     const asesorDateFilter = asesorDays
@@ -382,7 +381,7 @@ export class DmsOtService {
       WHERE asesor IS NOT NULL ${sucursalCond} ${asesorDateFilter}
       GROUP BY asesor
       ORDER BY "totalOts" DESC
-    `);
+    `, sucursalParams);
 
     const sucursalOptions: any[] = await this.otRepo.query(
       `SELECT DISTINCT sucursal_desc AS sucursal FROM dms_ot_rows
@@ -759,15 +758,19 @@ export class DmsOtService {
     };
 
     let condition = whereMap[kind] ?? `estado_ot = 'Abierto'`;
+    const params: any[] = [];
 
     if (kind === 'antiguedad' && filters?.search) {
-      condition += ` AND (CURRENT_DATE - fecha_ingreso)::text ILIKE '%${filters.search}%'`;
+      params.push(`%${filters.search}%`);
+      condition += ` AND (CURRENT_DATE - fecha_ingreso)::text ILIKE $${params.length}`;
     }
     if (filters?.sucursal) {
-      condition += ` AND sucursal_desc ILIKE '%${filters.sucursal.replace(/'/g, "''")}%'`;
+      params.push(`%${filters.sucursal}%`);
+      condition += ` AND sucursal_desc ILIKE $${params.length}`;
     }
     if (filters?.asesor) {
-      condition += ` AND asesor ILIKE '%${filters.asesor.replace(/'/g, "''")}%'`;
+      params.push(`%${filters.asesor}%`);
+      condition += ` AND asesor ILIKE $${params.length}`;
     }
 
     const rows: any[] = await this.otRepo.query(`
@@ -794,7 +797,7 @@ export class DmsOtService {
       WHERE ${condition}
       ORDER BY ${orderMap[kind] ?? '(CURRENT_DATE - fecha_ingreso) DESC'}
       LIMIT 500
-    `);
+    `, params);
 
     const mapped = rows.map(r => ({
       ot:              Number(r.ot),

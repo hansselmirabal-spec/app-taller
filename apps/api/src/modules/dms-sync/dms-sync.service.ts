@@ -4,7 +4,6 @@ import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import * as sql from 'mssql';
 import * as mysql from 'mysql2/promise';
-import { DmsSnapshot } from './dms-snapshot.entity';
 import { DmsAdvisorSlot } from './dms-advisor-slot.entity';
 import { DmsOtRow } from './dms-ot-row.entity';
 import { DmsSyncState } from './dms-sync-state.entity';
@@ -48,29 +47,11 @@ async function getMysqlPool(): Promise<mysql.Connection> {
   });
 }
 
-const HARD_LIMIT = 10_000;
-
 // OT rows sync interval: default 30 minutes (1_800_000 ms). Override via DMS_SYNC_INTERVAL_MS.
 const OT_SYNC_INTERVAL_MS = Number(process.env.DMS_SYNC_INTERVAL_MS ?? 1_800_000);
 
 // Delay before the first OT rows sync tick after startup (60 seconds).
 const OT_STARTUP_DELAY_MS = 60_000;
-
-// Combinaciones de scope que el worker pre-genera. Cubren los rangos más usados
-// del frontend. Combinaciones raras (ej: filtro por tipo) caen al fallback.
-const PRESET_SCOPES = [
-  { days: 90,  soloAbiertas: true },
-  { days: 365, soloAbiertas: true },
-];
-
-interface OtSeguimientoSnapshot {
-  data: any[];
-  summary: Record<string, number>;
-  total: number;
-  truncated: boolean;
-  days: number;
-  cachedAt: string;
-}
 
 // ID arbitrario único para el advisory lock de Postgres. Tiene que ser estable
 // entre réplicas (mismo número en todos los pods). Cualquier int64 fijo sirve.
@@ -106,8 +87,6 @@ export class DmsSyncService implements OnApplicationBootstrap {
   private otSyncReady = false;
 
   constructor(
-    @InjectRepository(DmsSnapshot)
-    private snapshotRepo: Repository<DmsSnapshot>,
     @InjectRepository(DmsAdvisorSlot)
     private advisorSlotRepo: Repository<DmsAdvisorSlot>,
     @InjectRepository(DmsOtRow)
@@ -172,16 +151,12 @@ export class DmsSyncService implements OnApplicationBootstrap {
     const t0 = Date.now();
     this.lastSyncAt = new Date();
     try {
-      // OT seguimiento y advisor slots corren en paralelo — son conexiones DMS independientes.
-      await Promise.all([
-        ...PRESET_SCOPES.map(p => this.syncOtSeguimiento(p.days, p.soloAbiertas)),
-        this.syncAdvisorSlots(),
-      ]);
+      await this.syncAdvisorSlots();
       // Sync OK: reset contador de fallos.
       this.lastSuccessAt = new Date();
       this.lastError = null;
       this.consecutiveFailures = 0;
-      this.logger.log(`Sync completo en ${Date.now() - t0}ms (${PRESET_SCOPES.length + 1} scopes)`);
+      this.logger.log(`Sync completo en ${Date.now() - t0}ms`);
     } catch (err: any) {
       this.consecutiveFailures += 1;
       this.lastError = err.message;
@@ -229,118 +204,6 @@ export class DmsSyncService implements OnApplicationBootstrap {
       // Liberar el lock no es crítico (Postgres lo libera al cerrar la sesión),
       // pero loguear si falla para debug.
       this.logger.warn(`No se pudo liberar advisory lock: ${err.message}`);
-    }
-  }
-
-  // Sincroniza un scope específico de ot-seguimiento.
-  // Conecta a MYSQL_DW (SQL Server) y consulta MasterOT_Condor.
-  async syncOtSeguimiento(days: number, soloAbiertas: boolean): Promise<void> {
-    const scope = `days=${days}|abiertas=${soloAbiertas ? 1 : 0}`;
-    let pool: sql.ConnectionPool | null = null;
-    try {
-      pool = await getDmsPool();
-
-      const request = pool.request();
-
-      // In SQL Server: EstadoOT = 'Abierto' replaces the long IN(...) list.
-      const conditions: string[] = [];
-      if (soloAbiertas) {
-        conditions.push("m.EstadoOT = 'Abierto'");
-      }
-      if (days > 0) {
-        conditions.push('m.fechaingreso >= DATEADD(DAY, -@days, CAST(GETDATE() AS DATE))');
-        request.input('days', sql.Int, days);
-      }
-      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-      const result = await request.query(`
-        SELECT TOP (${HARD_LIMIT})
-          m.nroot                                                              AS OT,
-          LTRIM(RTRIM(m.nrocliente))                                           AS CODCLIENTE,
-          LTRIM(RTRIM(m.nombrecliente))                                        AS NOMBRECLIENTE,
-          LTRIM(RTRIM(m.chasis))                                               AS CHASIS,
-          LTRIM(RTRIM(m.modelo))                                               AS MODELO,
-          LTRIM(RTRIM(m.EstadoTaller))                                         AS ESTADOOT,
-          ''                                                                   AS ESTADOIDIS,
-          LTRIM(RTRIM(m.Estadofinanciero))                                     AS ESTADOFINANCIERO,
-          LTRIM(RTRIM(m.asesor))                                               AS ASESOR,
-          LTRIM(RTRIM(s.Descripcion))                                          AS SUCURSAL,
-          DATEDIFF(DAY, m.fechaingreso, GETDATE())                             AS DIASINGRESO,
-          m.fechaingreso,
-          m.fechacompromisoCliente                                             AS FechaCompromisoClienteMaster,
-          m.fecha_compromiso_taller                                            AS FechaCompromisoTaller,
-          COALESCE(m.fecha_cierre_ot, m.fecha_fin_taller)                      AS FechaFinalizado,
-          CAST(m.monto AS FLOAT)                                               AS MONTOTOTAL,
-          LTRIM(RTRIM(m.observaciones))                                        AS OBSERVACIONES,
-          ISNULL(LTRIM(RTRIM(ts.abreviatura)), '')                             AS TipoServicio,
-          m.horaingreso
-        FROM dbo.MasterOT_Condor m
-        LEFT JOIN dbo.controltiempo_DimSucursal s ON TRY_CAST(s.db2idfilial AS INT) = m.taller AND s.idempresa = 1
-        LEFT JOIN dbo.controltiempo_DimTipoServicio ts ON ts.idtipo_servicio = m.idtiposervicio
-        ${whereClause}
-        ORDER BY m.fechaingreso DESC
-      `);
-
-      const rows = result.recordset as any[];
-
-      const data = rows.map(r => {
-        const fechaIngresoIso = r.fechaingreso
-          ? new Date(r.fechaingreso).toISOString().split('T')[0]
-          : null;
-        // DIASINGRESO del DMS mide días desde el último cambio de estado, no desde el ingreso real.
-        // Recalculamos desde fechaingreso para consistencia con el endpoint Next.js.
-        const diasCalc = fechaIngresoIso
-          ? Math.floor((Date.now() - new Date(fechaIngresoIso + 'T00:00:00Z').getTime()) / 86_400_000)
-          : 0;
-        return {
-          ot:                     Number(r.OT),
-          codCliente:             String(r.CODCLIENTE ?? '').trim(),
-          nombreCliente:          String(r.NOMBRECLIENTE ?? '').trim(),
-          chasis:                 String(r.CHASIS ?? '').trim(),
-          modelo:                 String(r.MODELO ?? '').trim(),
-          estadoOt:               String(r.ESTADOOT ?? '').trim(),
-          estadoIdis:             String(r.ESTADOIDIS ?? '').trim(),
-          estadoFinanciero:       String(r.ESTADOFINANCIERO ?? '').trim(),
-          asesor:                 String(r.ASESOR ?? '').trim(),
-          sucursal:               String(r.SUCURSAL ?? '').trim(),
-          diasIngreso:            Math.max(0, diasCalc),
-          diasEnEstado:           Number(r.DIASINGRESO ?? 0),
-          fechaIngreso:           fechaIngresoIso,
-          horaIngreso:            r.horaingreso ? String(r.horaingreso).trim() || null : null,
-          fechaCompromisoCliente: r.FechaCompromisoClienteMaster ? new Date(r.FechaCompromisoClienteMaster).toISOString().split('T')[0] : null,
-          fechaCompromisoTaller:  r.FechaCompromisoTaller        ? new Date(r.FechaCompromisoTaller).toISOString().split('T')[0]        : null,
-          fechaFinalizado:        r.FechaFinalizado               ? new Date(r.FechaFinalizado).toISOString().split('T')[0]               : null,
-          montoTotal:             Number(r.MONTOTOTAL ?? 0),
-          observaciones:          String(r.OBSERVACIONES ?? '').trim(),
-          tipoServicio:           String(r.TipoServicio ?? '').trim(),
-        };
-      });
-
-      // Conteo por estado desde los datos reales (no desde la lista fija).
-      // Así aparecen estados nuevos del DMS sin necesidad de actualizar el código.
-      const summary: Record<string, number> = {};
-      for (const row of data) {
-        const k = row.estadoOt;
-        summary[k] = (summary[k] ?? 0) + 1;
-      }
-
-      const payload: OtSeguimientoSnapshot = {
-        data,
-        summary,
-        total: data.length,
-        truncated: data.length === HARD_LIMIT,
-        days,
-        cachedAt: new Date().toISOString(),
-      };
-
-      await this.upsertSnapshot('ot-seguimiento', scope, payload);
-      this.logger.log(`OK ot-seguimiento ${scope} → ${data.length} OTs`);
-    } catch (err: any) {
-      this.logger.error(`Falló sync ot-seguimiento ${scope}: ${err.message}`);
-      await this.markSnapshotError('ot-seguimiento', scope, err.message);
-      throw err;
-    } finally {
-      await pool?.close();
     }
   }
 
@@ -513,44 +376,6 @@ export class DmsSyncService implements OnApplicationBootstrap {
       [today],
     );
     return rows.map(r => ({ code: r.advisor_code, name: r.advisor_name, sucursalIdis: r.sucursal_idis }));
-  }
-
-  // Lee el snapshot más reciente para un scope. Devuelve null si no existe.
-  async getSnapshot(kind: string, scope: string): Promise<DmsSnapshot | null> {
-    return this.snapshotRepo.findOne({
-      where: { kind, scope },
-      order: { fetchedAt: 'DESC' },
-    });
-  }
-
-  // Lista snapshots — útil para diagnóstico y health check.
-  async listSnapshots(): Promise<DmsSnapshot[]> {
-    return this.snapshotRepo.find({
-      order: { fetchedAt: 'DESC' },
-      take: 50,
-    });
-  }
-
-  private async upsertSnapshot(kind: string, scope: string, data: any) {
-    const existing = await this.snapshotRepo.findOne({ where: { kind, scope } });
-    if (existing) {
-      existing.data = data;
-      existing.fetchedAt = new Date();
-      existing.lastError = null;
-      await this.snapshotRepo.save(existing);
-    } else {
-      await this.snapshotRepo.save(this.snapshotRepo.create({
-        kind, scope, data, fetchedAt: new Date(), lastError: null,
-      }));
-    }
-  }
-
-  private async markSnapshotError(kind: string, scope: string, message: string) {
-    const existing = await this.snapshotRepo.findOne({ where: { kind, scope } });
-    if (existing) {
-      existing.lastError = message.slice(0, 500);
-      await this.snapshotRepo.save(existing);
-    }
   }
 
   // ── OT rows materialized sync ────────────────────────────────────────────────
