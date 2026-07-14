@@ -37,6 +37,12 @@ const SLOT_INTERVAL = 30;
 const HOUR_START = 8;
 const HOUR_END = 18;
 
+// Chapas y chasis siempre incluyen letras. Un valor solo numérico suele ser
+// un número de OT o de cliente ingresado por error en este campo.
+function looksLikePlateOrChassis(value: string): boolean {
+  return /[A-Z]/i.test(value);
+}
+
 
 function generateTimeSlots() {
   const slots: string[] = [];
@@ -118,6 +124,10 @@ function MechanicNewForm() {
   async function handleVehicleLookup() {
     const value = searchValue.trim().toUpperCase();
     if (!value) return;
+    if (!looksLikePlateOrChassis(value)) {
+      setSearchError('Eso no parece una chapa ni un chasis (¿será un número de OT o de cliente?). La chapa lleva letras, ej: AACA898.');
+      return;
+    }
     setSearching(true);
     setSearchError('');
     try {
@@ -1087,6 +1097,10 @@ function BodyshopNewForm() {
   async function handleVehicleLookup() {
     const value = searchValue.trim().toUpperCase();
     if (!value) return;
+    if (!looksLikePlateOrChassis(value)) {
+      setSearchError('Eso no parece una chapa ni un chasis (¿será un número de OT o de cliente?). La chapa lleva letras, ej: AACA898.');
+      return;
+    }
     setSearching(true);
     setSearchError('');
     try {
