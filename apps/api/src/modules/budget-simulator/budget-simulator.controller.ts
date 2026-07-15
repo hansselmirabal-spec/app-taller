@@ -3,6 +3,7 @@ import {
   UseGuards, HttpCode, UseInterceptors, UploadedFile, ParseUUIDPipe,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { IsBoolean, IsNumber, IsOptional, IsString } from 'class-validator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -13,6 +14,12 @@ import {
   UpdateCatalogItemDto,
   CreateCatalogItemDto,
 } from './budget-simulator.service';
+
+class UpdateConfigDto {
+  @IsOptional() @IsNumber() tarifaMdo?: number;
+  @IsOptional() @IsString() moneda?: string;
+  @IsOptional() @IsBoolean() ivaIncluido?: boolean;
+}
 
 const wrap = (data: any) => ({ data, meta: { timestamp: new Date().toISOString() } });
 
@@ -38,7 +45,7 @@ export class BudgetSimulatorController {
 
   @Put('config')
   @UseGuards(RolesGuard) @Roles('admin')
-  async updateConfig(@Body() dto: { tarifaMdo?: number; moneda?: string; ivaIncluido?: boolean }) {
+  async updateConfig(@Body() dto: UpdateConfigDto) {
     return wrap(await this.service.updateConfig(dto));
   }
 
