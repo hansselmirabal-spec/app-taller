@@ -8,6 +8,8 @@ import { CapacityService } from '../modules/capacity/capacity.service';
 import { ServiceTypesService } from '../modules/service-types/service-types.service';
 import { TechniciansService } from '../modules/technicians/technicians.service';
 import { WorkshopsService } from '../modules/workshops/workshops.service';
+import { DmsSyncService } from '../modules/dms-sync/dms-sync.service';
+import { TrackingService } from '../modules/tracking/tracking.service';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -58,6 +60,7 @@ describe('AppointmentsService — create()', () => {
       where:        jest.fn().mockReturnThis(),
       andWhere:     jest.fn().mockReturnThis(),
       getCount:     jest.fn().mockResolvedValue(count),
+      getOne:       jest.fn().mockResolvedValue(null),
     };
     return qb;
   }
@@ -90,6 +93,8 @@ describe('AppointmentsService — create()', () => {
           findAll:    jest.fn().mockResolvedValue([]),
           findByName: jest.fn(),
         } },
+        { provide: DmsSyncService,  useValue: { pushToAgendamiento: jest.fn().mockResolvedValue(undefined) } },
+        { provide: TrackingService, useValue: { initForMechanic: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 
@@ -150,7 +155,7 @@ describe('AppointmentsService — create()', () => {
     ];
     capacityService.getDailyCapacity.mockResolvedValue(almostFull);
     repo.find.mockResolvedValue([
-      { id: 'appt-existing-1', status: 'scheduled', serviceType: { durationHours: 7 } },
+      { id: 'appt-existing-1', status: 'scheduled', timeStart: '08:00', timeEnd: '15:00' }, // 7h
     ]);
 
     await expect(service.create(baseDto, USER_ID)).rejects.toThrow(BadRequestException);
@@ -169,8 +174,8 @@ describe('AppointmentsService — create()', () => {
   it('suma correctamente las horas usadas de turnos previos del día', async () => {
     // 2 turnos de 2h cada uno → 4h usadas de 8h disponibles → 4h libres para servicio de 2h: OK
     repo.find.mockResolvedValue([
-      { id: 'appt-prev-1', status: 'scheduled', serviceType: { durationHours: 2 } },
-      { id: 'appt-prev-2', status: 'scheduled', serviceType: { durationHours: 2 } },
+      { id: 'appt-prev-1', status: 'scheduled', timeStart: '08:00', timeEnd: '10:00' }, // 2h
+      { id: 'appt-prev-2', status: 'scheduled', timeStart: '10:00', timeEnd: '12:00' }, // 2h
     ]);
 
     await service.create(baseDto, USER_ID);
@@ -182,8 +187,8 @@ describe('AppointmentsService — create()', () => {
 
   it('ignora turnos cancelados al calcular horas usadas', async () => {
     repo.find.mockResolvedValue([
-      { id: 'appt-cancelled-1', status: 'cancelled',  serviceType: { durationHours: 3 } }, // no cuenta
-      { id: 'appt-active-1',   status: 'scheduled',  serviceType: { durationHours: 2 } }, // cuenta
+      { id: 'appt-cancelled-1', status: 'cancelled', timeStart: '08:00', timeEnd: '11:00' }, // no cuenta (3h)
+      { id: 'appt-active-1',    status: 'scheduled', timeStart: '11:00', timeEnd: '13:00' }, // cuenta (2h)
     ]);
 
     await service.create(baseDto, USER_ID);

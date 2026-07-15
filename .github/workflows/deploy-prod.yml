@@ -60,6 +60,15 @@ jobs:
     runs-on: [self-hosted, app-taller-server]
     environment: production
     steps:
+      - name: Record previously-deployed SHA (for rollback)
+        run: |
+          cd /opt/stacks/app-taller
+          if [ -f .last-good-sha ]; then
+            echo "PREV_SHA=$(cat .last-good-sha)" >> "$GITHUB_ENV"
+          else
+            echo "PREV_SHA=" >> "$GITHUB_ENV"
+          fi
+
       - name: Pull and restart PROD
         run: |
           cd /opt/stacks/app-taller
@@ -68,14 +77,38 @@ jobs:
           docker image prune -f
 
       - name: Health check PROD
+        id: health
         run: |
           for i in $(seq 1 12); do
             echo "Attempt $i/12..."
             if curl -sf http://53.103.13.238:8002/api/v1/health; then
               echo "PROD healthy!"
+              echo "${{ github.sha }}" > /opt/stacks/app-taller/.last-good-sha
               exit 0
             fi
             sleep 5
           done
           echo "Health check failed after 60s"
+          exit 1
+
+      - name: Rollback to previous known-good version
+        if: failure() && steps.health.outcome == 'failure'
+        run: |
+          cd /opt/stacks/app-taller
+          if [ -z "$PREV_SHA" ]; then
+            echo "[ALERT] No previous known-good SHA recorded — cannot auto-rollback. PROD is on a failing deploy, manual intervention required NOW."
+            exit 1
+          fi
+          echo "Rolling back to $PREV_SHA..."
+          docker tag ${{ env.REGISTRY }}/${{ env.ORG }}/app-taller-api:prod-$PREV_SHA ${{ env.REGISTRY }}/${{ env.ORG }}/app-taller-api:prod
+          docker tag ${{ env.REGISTRY }}/${{ env.ORG }}/app-taller-web:prod-$PREV_SHA ${{ env.REGISTRY }}/${{ env.ORG }}/app-taller-web:prod
+          docker compose -f docker-compose.portainer.yml --project-name app-taller up -d --no-build
+          for i in $(seq 1 12); do
+            if curl -sf http://53.103.13.238:8002/api/v1/health; then
+              echo "Rollback successful — PROD healthy again on previous SHA $PREV_SHA"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "[ALERT] Rollback health check also failed — PROD may be down. Manual intervention required immediately."
           exit 1

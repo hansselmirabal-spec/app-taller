@@ -130,10 +130,6 @@ export class BodyshopService {
     }
 
     // Simular la agenda antes de guardar para obtener stayDays y estimatedFinishDate
-    let computedStayDays   = dto.stayDays ?? 1;
-    let estimatedFinishDate: string | null = null;
-    let simulationSlots: any[] = [];
-
     let sim: Awaited<ReturnType<typeof this.scheduleService.simulate>>;
     try {
       sim = await this.scheduleService.simulate({
@@ -162,10 +158,10 @@ export class BodyshopService {
       );
     }
 
-    simulationSlots    = sim.slots;
-    estimatedFinishDate = sim.estimatedFinishDate;
-    const uniqueDates   = new Set(sim.slots.map((s: any) => s.date));
-    computedStayDays    = dto.stayDays ?? Math.max(1, uniqueDates.size);
+    const simulationSlots     = sim.slots;
+    const estimatedFinishDate = sim.estimatedFinishDate;
+    const uniqueDates         = new Set(sim.slots.map((s: any) => s.date));
+    const computedStayDays    = dto.stayDays ?? Math.max(1, uniqueDates.size);
 
     const allProcesses: { code: string; name: string; hours: number }[] = [
       ...(Number(dto.bodyworkHours) > 0 ? [{ code: 'BODYWORK', name: 'Chapería',    hours: Number(dto.bodyworkHours) }] : []),

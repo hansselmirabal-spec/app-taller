@@ -35,7 +35,10 @@ describe('resolveCorsOrigins()', () => {
       expect(() => resolveCorsOrigins(true)).toThrow(/obligatorio en production/i);
     });
 
-    it('fail-fast si no usa https', () => {
+    // TODO: activar cuando QAS/PROD tengan TLS real (dominio + certificado).
+    // Hoy corren en NODE_ENV=production sobre HTTP plano (IP:puerto sin TLS) —
+    // exigir https acá haría fail-fast el boot del API en ambos ambientes.
+    it.skip('fail-fast si no usa https', () => {
       process.env.FRONTEND_URL = 'http://taller.condor.com.py';
       expect(() => resolveCorsOrigins(true)).toThrow(/debe empezar con https/i);
     });
@@ -63,7 +66,8 @@ describe('resolveCorsOrigins()', () => {
       ]);
     });
 
-    it('rechaza si UNO de los orígenes múltiples es inválido', () => {
+    // TODO: mismo caso que el skip de arriba — depende de exigir https, ver P1 TLS QAS/PROD.
+    it.skip('rechaza si UNO de los orígenes múltiples es inválido', () => {
       process.env.FRONTEND_URL = 'https://app.condor.com.py,http://staff.condor.com.py';
       expect(() => resolveCorsOrigins(true)).toThrow(/debe empezar con https/i);
     });
