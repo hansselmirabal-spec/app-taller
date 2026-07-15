@@ -8,7 +8,6 @@ import { resolve } from 'path';
 const seeds = [
   'src/database/seed.ts',
   'src/database/mechanic.seed.ts',
-  'src/database/bodyshop-catalog.seed.ts',
 ];
 
 for (const seed of seeds) {
