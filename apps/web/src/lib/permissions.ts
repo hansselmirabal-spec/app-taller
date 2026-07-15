@@ -17,6 +17,8 @@ export const ALL_MODULES: ModuleDef[] = [
   { id: 'settings',     label: 'Configuraciones',         description: 'Técnicos, servicios, talleres' },
   { id: 'presupuesto',  label: 'Presupuestos',            description: 'Agenda de presupuestos (perito)' },
   { id: 'documentation', label: 'Documentación',          description: 'Flujo de negocio y reglas del sistema' },
+  { id: 'recursos',      label: 'Recursos',                description: 'Vehículos bloqueados esperando repuestos' },
+  { id: 'seguimiento',   label: 'Seguimiento OTs',          description: 'Tracking y reportería de OTs del DMS' },
 ];
 
 export const FULL_PERMISSIONS: Permissions = Object.fromEntries(
@@ -32,6 +34,8 @@ export const RECEPTIONIST_PERMISSIONS: Permissions = {
   settings:     { view: false, edit: false },
   presupuesto:  { view: false, edit: false },
   documentation: { view: true, edit: false },
+  recursos:      { view: true, edit: false },
+  seguimiento:   { view: true, edit: false },
 };
 
 export function emptyPermissions(): Permissions {

@@ -3,6 +3,8 @@ import {
   Query, Param, Body, UseGuards, BadRequestException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import {
   OperationalBlocksService,
@@ -27,16 +29,19 @@ export class OperationalBlocksController {
   }
 
   @Post()
+  @UseGuards(RolesGuard) @Roles('admin')
   async create(@Body() dto: CreateOperationalBlockDto, @CurrentUser() user: any) {
     return wrap(await this.service.create(dto, user.id));
   }
 
   @Patch(':id')
+  @UseGuards(RolesGuard) @Roles('admin')
   async update(@Param('id') id: string, @Body() dto: UpdateOperationalBlockDto) {
     return wrap(await this.service.update(id, dto));
   }
 
   @Delete(':id')
+  @UseGuards(RolesGuard) @Roles('admin')
   async remove(@Param('id') id: string) {
     await this.service.remove(id);
     return wrap({ ok: true });

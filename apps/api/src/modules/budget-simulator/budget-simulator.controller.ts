@@ -4,6 +4,8 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 import {
   BudgetSimulatorService,
   EstimateRequestDto,
@@ -35,6 +37,7 @@ export class BudgetSimulatorController {
   }
 
   @Put('config')
+  @UseGuards(RolesGuard) @Roles('admin')
   async updateConfig(@Body() dto: { tarifaMdo?: number; moneda?: string; ivaIncluido?: boolean }) {
     return wrap(await this.service.updateConfig(dto));
   }
@@ -59,11 +62,13 @@ export class BudgetSimulatorController {
   }
 
   @Post('catalog')
+  @UseGuards(RolesGuard) @Roles('admin')
   async createCatalogItem(@Body() dto: CreateCatalogItemDto) {
     return wrap(await this.service.createCatalogItem(dto));
   }
 
   @Patch('catalog/:id')
+  @UseGuards(RolesGuard) @Roles('admin')
   async updateCatalogItem(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCatalogItemDto,
@@ -72,11 +77,13 @@ export class BudgetSimulatorController {
   }
 
   @Delete('catalog/:id')
+  @UseGuards(RolesGuard) @Roles('admin')
   async deleteCatalogItem(@Param('id', ParseUUIDPipe) id: string) {
     return wrap(await this.service.updateCatalogItem(id, { active: false }));
   }
 
   @Post('catalog/import')
+  @UseGuards(RolesGuard) @Roles('admin')
   @HttpCode(200)
   @UseInterceptors(FileInterceptor('file'))
   async importCatalog(@UploadedFile() file: Express.Multer.File) {

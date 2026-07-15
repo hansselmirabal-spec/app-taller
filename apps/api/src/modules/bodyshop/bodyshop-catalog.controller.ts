@@ -4,6 +4,8 @@ import {
 import { IsArray, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { BodyshopCatalogService } from './bodyshop-catalog.service';
 
 class WorkItemHoursDto {
@@ -60,11 +62,13 @@ export class BodyshopCatalogController {
   }
 
   @Post('seed')
+  @UseGuards(RolesGuard) @Roles('admin')
   seed(@Body('workshopId') workshopId?: string) {
     return this.catalogService.seedDefaults(workshopId);
   }
 
   @Post('seed-workshop/:workshopId')
+  @UseGuards(RolesGuard) @Roles('admin')
   seedWorkshop(@Param('workshopId') workshopId: string) {
     return this.catalogService.seedWorkshopMatrix(workshopId);
   }
@@ -72,16 +76,19 @@ export class BodyshopCatalogController {
   // ── Group CRUD ────────────────────────────────────────────────────────────────
 
   @Post('groups')
+  @UseGuards(RolesGuard) @Roles('admin')
   async createGroup(@Body() body: { name: string; code?: string; order?: number }) {
     return wrap(await this.catalogService.createGroup(body));
   }
 
   @Patch('groups/:id')
+  @UseGuards(RolesGuard) @Roles('admin')
   async updateGroup(@Param('id') id: string, @Body() body: { name?: string; code?: string; order?: number }) {
     return wrap(await this.catalogService.updateGroup(id, body));
   }
 
   @Delete('groups/:id')
+  @UseGuards(RolesGuard) @Roles('admin')
   @HttpCode(204)
   deleteGroup(@Param('id') id: string) {
     return this.catalogService.deleteGroup(id);
@@ -90,16 +97,19 @@ export class BodyshopCatalogController {
   // ── Piece CRUD ────────────────────────────────────────────────────────────────
 
   @Post('pieces-crud')
+  @UseGuards(RolesGuard) @Roles('admin')
   async createPiece(@Body() body: { name: string; code: string; groupId?: string | null; order?: number }) {
     return wrap(await this.catalogService.createPiece(body));
   }
 
   @Patch('pieces-crud/:id')
+  @UseGuards(RolesGuard) @Roles('admin')
   async updatePiece(@Param('id') id: string, @Body() body: { name?: string; code?: string; groupId?: string | null; order?: number }) {
     return wrap(await this.catalogService.updatePiece(id, body));
   }
 
   @Delete('pieces-crud/:id')
+  @UseGuards(RolesGuard) @Roles('admin')
   @HttpCode(204)
   deletePiece(@Param('id') id: string) {
     return this.catalogService.deletePiece(id);
@@ -108,16 +118,19 @@ export class BodyshopCatalogController {
   // ── Process CRUD ──────────────────────────────────────────────────────────────
 
   @Post('processes-crud')
+  @UseGuards(RolesGuard) @Roles('admin')
   async createProcess(@Body() body: { name: string; code: string; sequence?: number }) {
     return wrap(await this.catalogService.createProcess(body));
   }
 
   @Patch('processes-crud/:id')
+  @UseGuards(RolesGuard) @Roles('admin')
   async updateProcess(@Param('id') id: string, @Body() body: { name?: string; code?: string; sequence?: number }) {
     return wrap(await this.catalogService.updateProcess(id, body));
   }
 
   @Delete('processes-crud/:id')
+  @UseGuards(RolesGuard) @Roles('admin')
   @HttpCode(204)
   deleteProcess(@Param('id') id: string) {
     return this.catalogService.deleteProcess(id);
@@ -126,16 +139,19 @@ export class BodyshopCatalogController {
   // ── Grade CRUD ────────────────────────────────────────────────────────────────
 
   @Post('grades-crud')
+  @UseGuards(RolesGuard) @Roles('admin')
   async createGrade(@Body() body: { name: string; code: string; severity?: number }) {
     return wrap(await this.catalogService.createGrade(body));
   }
 
   @Patch('grades-crud/:id')
+  @UseGuards(RolesGuard) @Roles('admin')
   async updateGrade(@Param('id') id: string, @Body() body: { name?: string; code?: string; severity?: number }) {
     return wrap(await this.catalogService.updateGrade(id, body));
   }
 
   @Delete('grades-crud/:id')
+  @UseGuards(RolesGuard) @Roles('admin')
   @HttpCode(204)
   deleteGrade(@Param('id') id: string) {
     return this.catalogService.deleteGrade(id);

@@ -10,6 +10,7 @@ import type { SucursalReportRow, AsesorReportRow, SucursalDetail, AsesorDetail }
 import DashboardEjecutivo from './_components/dashboard';
 import type { OtDetail } from '@/app/api/ot-detail/[ot]/route';
 import { OtDetailPanel } from '@/components/ui/ot-detail-panel';
+import { useRequirePermission } from '@/hooks/use-require-permission';
 
 type ReportData = {
   sucursales: SucursalReportRow[];
@@ -29,6 +30,7 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleString('es-PY', { dateSty
 const SUCURSAL_COLORS = ['#4f46e5', '#0891b2', '#059669', '#d97706', '#dc2626', '#7c3aed', '#db2777', '#0284c7', '#16a34a', '#ea580c'];
 
 export default function ReportesPage() {
+  useRequirePermission('seguimiento');
   const [tab, setTab] = useState<Tab>('dashboard');
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);

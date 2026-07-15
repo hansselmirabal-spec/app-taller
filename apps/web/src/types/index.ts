@@ -53,7 +53,7 @@ export interface Workshop {
 
 // ─── Permissions / Roles ─────────────────────────────────────────────────────
 
-export type ModuleId = 'dashboard' | 'capacity' | 'appointments' | 'kanban' | 'reports' | 'settings' | 'presupuesto' | 'documentation';
+export type ModuleId = 'dashboard' | 'capacity' | 'appointments' | 'kanban' | 'reports' | 'settings' | 'presupuesto' | 'documentation' | 'recursos' | 'seguimiento';
 
 export interface ModulePermission {
   view: boolean;
