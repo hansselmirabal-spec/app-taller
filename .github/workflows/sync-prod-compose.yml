@@ -1,0 +1,25 @@
+name: Sync PROD compose into repo
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Copy docker-compose.portainer.yml from server into repo
+    runs-on: [self-hosted, app-taller-server]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Copy portainer compose into workspace
+        run: cp /opt/stacks/app-taller/docker-compose.portainer.yml docker-compose.portainer.yml
+
+      - name: Commit and push
+        run: |
+          git config user.name "app-taller-bot"
+          git config user.email "bot@grupocondor.com.py"
+          git checkout -b infra/prod-compose-snapshot
+          git add docker-compose.portainer.yml
+          git commit -m "chore(infra): snapshot current PROD compose from server" || echo "nothing to commit"
+          git push -f origin infra/prod-compose-snapshot
