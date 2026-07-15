@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: app_taller_qas
       POSTGRES_USER: taller_qas_user
-      POSTGRES_PASSWORD: T4ll3rQAS_2026!
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     expose:
       - "5432"
     volumes:
@@ -22,15 +22,15 @@ services:
     expose:
       - "3001"
     environment:
-      DATABASE_URL: postgresql://taller_qas_user:T4ll3rQAS_2026!@postgres:5432/app_taller_qas
-      JWT_SECRET: JVrN1Mm6P0dGQuEuQ8BrP9tgsqfklWWWjC0eO/g9Cg6K3NvIzcp6I5s9D7Q92jQv
+      DATABASE_URL: postgresql://taller_qas_user:${POSTGRES_PASSWORD}@postgres:5432/app_taller_qas
+      JWT_SECRET: ${JWT_SECRET}
       PORT: 3001
       NODE_ENV: production
       FRONTEND_URL: http://53.103.13.238:8090
       SMTP_HOST: "53.103.13.216"
       SMTP_PORT: 25
       SMTP_USER: "agenda@grupocondor.com.py"
-      SMTP_PASSWORD: ""
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
       SMTP_FROM: "agenda@grupocondor.com.py"
       APP_NAME: App Taller QAS
       COOKIE_SECURE: "false"
@@ -38,12 +38,12 @@ services:
       DMS_HOST: "53.103.13.200"
       DMS_PORT: "1433"
       DMS_USER: "ituser"
-      DMS_PASSWORD: "123456ituser"
+      DMS_PASSWORD: ${DMS_PASSWORD}
       DMS_DATABASE: "MYSQL_DW"
       CTT_HOST: "53.103.13.113"
       CTT_PORT: 3306
       CTT_USER: "claude"
-      CTT_PASSWORD: "claude123"
+      CTT_PASSWORD: ${CTT_PASSWORD}
       CTT_DATABASE: "controltiempo"
     depends_on:
       postgres:

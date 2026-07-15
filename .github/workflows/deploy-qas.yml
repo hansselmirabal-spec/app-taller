@@ -61,6 +61,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Pull and restart QAS
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.QAS_POSTGRES_PASSWORD }}
+          JWT_SECRET:         ${{ secrets.QAS_JWT_SECRET }}
+          SMTP_PASSWORD:      ${{ secrets.QAS_SMTP_PASSWORD }}
+          DMS_PASSWORD:       ${{ secrets.QAS_DMS_PASSWORD }}
+          CTT_PASSWORD:       ${{ secrets.QAS_CTT_PASSWORD }}
         run: |
           cp docker-compose.qas.yml /opt/stacks/app-taller/docker-compose.qas.yml
           cd /opt/stacks/app-taller
