@@ -8,6 +8,8 @@ import { CapacityService } from '../modules/capacity/capacity.service';
 import { ServiceTypesService } from '../modules/service-types/service-types.service';
 import { TechniciansService } from '../modules/technicians/technicians.service';
 import { WorkshopsService } from '../modules/workshops/workshops.service';
+import { DmsSyncService } from '../modules/dms-sync/dms-sync.service';
+import { TrackingService } from '../modules/tracking/tracking.service';
 
 const mockAppointment: Partial<Appointment> = {
   id: 'appt-1',
@@ -59,6 +61,8 @@ describe('AppointmentsService', () => {
         { provide: ServiceTypesService, useValue: {} },
         { provide: TechniciansService, useValue: { findOne: jest.fn(), findAll: jest.fn() } },
         { provide: WorkshopsService,   useValue: { findOne: jest.fn(), findByName: jest.fn() } },
+        { provide: DmsSyncService,  useValue: { pushToAgendamiento: jest.fn().mockResolvedValue(undefined) } },
+        { provide: TrackingService, useValue: { initForMechanic: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 

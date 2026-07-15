@@ -138,10 +138,10 @@ describe('DmsOtService.findOtSeguimiento', () => {
     expect(result.limit).toBe(50);
   });
 
-  it('caps limit at 500', async () => {
+  it('caps limit at 5000', async () => {
     await buildService([], 0);
     const result = await service.findOtSeguimiento({ limit: 9999 });
-    expect(result.limit).toBe(500);
+    expect(result.limit).toBe(5000);
   });
 });
 
@@ -227,13 +227,14 @@ describe('DmsOtService.getOperativo', () => {
   it('returns shaped KPI object with numeric fields', async () => {
     // getOperativo calls otRepo.query 5 times: kpi, vencidos, proximosVencer, distribucion, porAsesor
     const kpiRow = [{
-      totalOpen:     '10',
-      otsCriticas:   '2',
-      vencidos:      '3',
-      otsEnAtraso:   '5',
-      diasPromedio:  '18.5',
-      ingresadosHoy: '1',
-      cerradosHoy:   '0',
+      otsAbiertas:       '10',
+      otsCriticas:       '2',
+      totalVencidos:     '3',
+      otsEnAtraso:       '5',
+      diasPromedio:      '18.5',
+      ingresados:        '1',
+      cerradosEnPeriodo: '0',
+      tasaCierre:        '0',
     }];
     const vencidosRows      = [{ nroot: 1, nombrecliente: 'Ana', diasRetraso: '5' }];
     const proximosRows      = [];
@@ -244,10 +245,10 @@ describe('DmsOtService.getOperativo', () => {
 
     const result = await service.getOperativo('all');
 
-    expect(result.kpi.totalOpen).toBe(10);
-    expect(result.kpi.otsCriticas).toBe(2);
-    expect(result.kpi.vencidos).toBe(3);
-    expect(result.kpi.diasPromedio).toBe(18.5);
+    expect(result.otsAbiertas).toBe(10);
+    expect(result.otsCriticas).toBe(2);
+    expect(result.totalVencidos).toBe(3);
+    expect(result.diasPromedio).toBe(18.5);
     expect(result.vencidos).toHaveLength(1);
     expect(result.distribucion).toEqual([{ estado: 'En trabajo', count: 8 }]);
     expect(result.porAsesor[0].asesor).toBe('Pedro');
@@ -259,8 +260,8 @@ describe('DmsOtService.getOperativo', () => {
 
     const result = await service.getOperativo('all');
 
-    expect(result.kpi.totalOpen).toBe(0);
-    expect(result.kpi.vencidos).toBe(0);
+    expect(result.otsAbiertas).toBe(0);
+    expect(result.totalVencidos).toBe(0);
     expect(result.vencidos).toHaveLength(0);
     expect(result.distribucion).toHaveLength(0);
     expect(result.porAsesor).toHaveLength(0);

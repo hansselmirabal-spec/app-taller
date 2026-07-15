@@ -5,7 +5,9 @@ import { CapacityService } from '../modules/capacity/capacity.service';
 import { TechnicianAbsence } from '../modules/capacity/technician-absence.entity';
 import { WorkingDay } from '../modules/capacity/working-day.entity';
 import { Appointment } from '../modules/appointments/appointment.entity';
+import { BodyshopEntry } from '../modules/bodyshop/bodyshop-entry.entity';
 import { TechniciansService } from '../modules/technicians/technicians.service';
+import { WorkshopsService } from '../modules/workshops/workshops.service';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -24,7 +26,9 @@ describe('CapacityService', () => {
   let absenceRepo: { find: jest.Mock; findOne: jest.Mock; save: jest.Mock; create: jest.Mock; remove: jest.Mock };
   let workingDayRepo: { findOne: jest.Mock; save: jest.Mock; create: jest.Mock; remove: jest.Mock };
   let appointmentRepo: any;
+  let bsEntryRepo: any;
   let techniciansService: { findAll: jest.Mock; findOne: jest.Mock };
+  let workshopsService: { findAll: jest.Mock; findOne: jest.Mock };
 
   beforeEach(async () => {
     absenceRepo = {
@@ -54,9 +58,23 @@ describe('CapacityService', () => {
       })),
     } as any;
 
+    bsEntryRepo = {
+      createQueryBuilder: jest.fn(() => ({
+        select:    jest.fn().mockReturnThis(),
+        where:     jest.fn().mockReturnThis(),
+        andWhere:  jest.fn().mockReturnThis(),
+        getMany:   jest.fn().mockResolvedValue([]),
+      })),
+    } as any;
+
     techniciansService = {
       findAll: jest.fn().mockResolvedValue([T1, T2, T3]),
       findOne: jest.fn().mockResolvedValue(T1),
+    };
+
+    workshopsService = {
+      findAll: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue({ id: 'ws-1', name: 'Test Workshop', config: {} }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -65,7 +83,9 @@ describe('CapacityService', () => {
         { provide: getRepositoryToken(TechnicianAbsence), useValue: absenceRepo },
         { provide: getRepositoryToken(WorkingDay),        useValue: workingDayRepo },
         { provide: getRepositoryToken(Appointment),       useValue: appointmentRepo },
+        { provide: getRepositoryToken(BodyshopEntry),     useValue: bsEntryRepo },
         { provide: TechniciansService,                    useValue: techniciansService },
+        { provide: WorkshopsService,                      useValue: workshopsService },
       ],
     }).compile();
 
