@@ -2,7 +2,7 @@ import { Injectable, OnApplicationBootstrap, Logger, NotFoundException, BadReque
 import * as XLSX from 'xlsx';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, In, Repository } from 'typeorm';
-import { IsArray, IsEnum, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { BudgetSimulatorItem } from './budget-simulator-item.entity';
 import { BudgetConfig } from './budget-config.entity';
@@ -344,29 +344,29 @@ function round2(n: number): number {
 
 // ─── CATALOG CRUD ─────────────────────────────────────────────────────────────
 
-export interface CatalogListQuery {
-  pieza?:   string;
-  proceso?: string;
-  search?:  string;
-  page?:    number;
-  limit?:   number;
-  activeOnly?: boolean;
+export class CatalogListQuery {
+  @IsOptional() @IsString() pieza?:   string;
+  @IsOptional() @IsString() proceso?: string;
+  @IsOptional() @IsString() search?:  string;
+  @IsOptional() page?:    number;
+  @IsOptional() limit?:   number;
+  @IsOptional() activeOnly?: boolean;
 }
 
-export interface UpdateCatalogItemDto {
-  horas?:           number;
-  descripcionFinal?: string;
-  active?:          boolean;
+export class UpdateCatalogItemDto {
+  @IsOptional() @IsNumber() horas?:            number;
+  @IsOptional() @IsString() descripcionFinal?: string;
+  @IsOptional() @IsBoolean() active?:          boolean;
 }
 
-export interface CreateCatalogItemDto {
-  pieza:            string;
-  grupo:            number;
-  proceso:          string;
-  gradoOriginal?:   string | null;
-  tipoDano:         string;
-  nroTrabajo:       number;
-  codigoPosicion:   string;
-  descripcionFinal: string;
-  horas:            number;
+export class CreateCatalogItemDto {
+  @IsString()  pieza:            string;
+  @IsInt()     grupo:            number;
+  @IsString()  proceso:          string;
+  @IsOptional() @IsString() gradoOriginal?:   string | null;
+  @IsString()  tipoDano:         string;
+  @IsInt()     nroTrabajo:       number;
+  @IsString()  codigoPosicion:   string;
+  @IsString()  descripcionFinal: string;
+  @IsNumber()  horas:            number;
 }

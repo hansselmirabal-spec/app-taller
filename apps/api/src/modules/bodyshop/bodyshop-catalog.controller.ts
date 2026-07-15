@@ -1,7 +1,7 @@
 import {
   Controller, Get, Post, Patch, Delete, Param, Query, Body, UseGuards, HttpCode,
 } from '@nestjs/common';
-import { IsArray, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsInt, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -23,6 +23,56 @@ class CalculateHoursDto {
   @IsOptional()
   @IsString()
   workshopId?: string;
+}
+
+class CreateGroupDto {
+  @IsString() name: string;
+  @IsOptional() @IsString() code?: string;
+  @IsOptional() @IsInt() order?: number;
+}
+
+class UpdateGroupDto {
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() code?: string;
+  @IsOptional() @IsInt() order?: number;
+}
+
+class CreatePieceDto {
+  @IsString() name: string;
+  @IsString() code: string;
+  @IsOptional() @IsString() groupId?: string | null;
+  @IsOptional() @IsInt() order?: number;
+}
+
+class UpdatePieceDto {
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() code?: string;
+  @IsOptional() @IsString() groupId?: string | null;
+  @IsOptional() @IsInt() order?: number;
+}
+
+class CreateProcessDto {
+  @IsString() name: string;
+  @IsString() code: string;
+  @IsOptional() @IsInt() sequence?: number;
+}
+
+class UpdateProcessDto {
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() code?: string;
+  @IsOptional() @IsInt() sequence?: number;
+}
+
+class CreateGradeDto {
+  @IsString() name: string;
+  @IsString() code: string;
+  @IsOptional() @IsInt() severity?: number;
+}
+
+class UpdateGradeDto {
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() code?: string;
+  @IsOptional() @IsInt() severity?: number;
 }
 
 const wrap = (data: any) => ({ data, meta: { timestamp: new Date().toISOString() } });
@@ -77,13 +127,13 @@ export class BodyshopCatalogController {
 
   @Post('groups')
   @UseGuards(RolesGuard) @Roles('admin')
-  async createGroup(@Body() body: { name: string; code?: string; order?: number }) {
+  async createGroup(@Body() body: CreateGroupDto) {
     return wrap(await this.catalogService.createGroup(body));
   }
 
   @Patch('groups/:id')
   @UseGuards(RolesGuard) @Roles('admin')
-  async updateGroup(@Param('id') id: string, @Body() body: { name?: string; code?: string; order?: number }) {
+  async updateGroup(@Param('id') id: string, @Body() body: UpdateGroupDto) {
     return wrap(await this.catalogService.updateGroup(id, body));
   }
 
@@ -98,13 +148,13 @@ export class BodyshopCatalogController {
 
   @Post('pieces-crud')
   @UseGuards(RolesGuard) @Roles('admin')
-  async createPiece(@Body() body: { name: string; code: string; groupId?: string | null; order?: number }) {
+  async createPiece(@Body() body: CreatePieceDto) {
     return wrap(await this.catalogService.createPiece(body));
   }
 
   @Patch('pieces-crud/:id')
   @UseGuards(RolesGuard) @Roles('admin')
-  async updatePiece(@Param('id') id: string, @Body() body: { name?: string; code?: string; groupId?: string | null; order?: number }) {
+  async updatePiece(@Param('id') id: string, @Body() body: UpdatePieceDto) {
     return wrap(await this.catalogService.updatePiece(id, body));
   }
 
@@ -119,13 +169,13 @@ export class BodyshopCatalogController {
 
   @Post('processes-crud')
   @UseGuards(RolesGuard) @Roles('admin')
-  async createProcess(@Body() body: { name: string; code: string; sequence?: number }) {
+  async createProcess(@Body() body: CreateProcessDto) {
     return wrap(await this.catalogService.createProcess(body));
   }
 
   @Patch('processes-crud/:id')
   @UseGuards(RolesGuard) @Roles('admin')
-  async updateProcess(@Param('id') id: string, @Body() body: { name?: string; code?: string; sequence?: number }) {
+  async updateProcess(@Param('id') id: string, @Body() body: UpdateProcessDto) {
     return wrap(await this.catalogService.updateProcess(id, body));
   }
 
@@ -140,13 +190,13 @@ export class BodyshopCatalogController {
 
   @Post('grades-crud')
   @UseGuards(RolesGuard) @Roles('admin')
-  async createGrade(@Body() body: { name: string; code: string; severity?: number }) {
+  async createGrade(@Body() body: CreateGradeDto) {
     return wrap(await this.catalogService.createGrade(body));
   }
 
   @Patch('grades-crud/:id')
   @UseGuards(RolesGuard) @Roles('admin')
-  async updateGrade(@Param('id') id: string, @Body() body: { name?: string; code?: string; severity?: number }) {
+  async updateGrade(@Param('id') id: string, @Body() body: UpdateGradeDto) {
     return wrap(await this.catalogService.updateGrade(id, body));
   }
 
