@@ -14,7 +14,6 @@
     "db:seed": "ts-node src/database/seed.ts",
     "db:seed:mechanic": "ts-node -r tsconfig-paths/register src/database/mechanic.seed.ts",
     "db:seed:bodyshop-ws": "ts-node -r tsconfig-paths/register src/database/bodyshop-workshop.seed.ts",
-    "db:seed:bodyshop": "ts-node -r tsconfig-paths/register src/database/bodyshop-catalog.seed.ts",
     "db:seed:all": "ts-node -r tsconfig-paths/register src/database/index.ts",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
