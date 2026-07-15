@@ -129,7 +129,7 @@ export default function PresupuestoDetailPage() {
     setError('');
     try {
       const result = await approveMutation.mutateAsync({ id: appt!.id, repairStartDate });
-      router.push(`/appointments/bodyshop?entryId=${result.entryId}`);
+      router.push(`/appointments?openId=${result.entryId}`);
     } catch (err: any) {
       setError(err.message ?? 'Error al aprobar el presupuesto');
       setShowApproveModal(false);
@@ -183,7 +183,7 @@ export default function PresupuestoDetailPage() {
           {appt.linkedEntryId && (
             <button
               type="button"
-              onClick={() => router.push(`/appointments/bodyshop?entryId=${appt.linkedEntryId}`)}
+              onClick={() => router.push(`/appointments?openId=${appt.linkedEntryId}`)}
               className="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:underline"
             >
               <ExternalLink className="h-3.5 w-3.5" />

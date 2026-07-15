@@ -186,6 +186,19 @@ export class TrackingService {
     if (!log) throw new NotFoundException('Proceso no encontrado');
     if (log.status === 'completed') throw new BadRequestException('El proceso ya está completado');
 
+    // Un técnico no puede quedar "in_progress" en dos vehículos a la vez —
+    // corrompería horas reales y KPIs de productividad si no se valida acá.
+    if (technicianId) {
+      const conflict = await this.logRepo.findOne({
+        where: { technicianId, status: 'in_progress' },
+      });
+      if (conflict && conflict.id !== logId && conflict.sourceId !== log.sourceId) {
+        throw new BadRequestException(
+          `${technicianName ?? 'El técnico'} ya está trabajando en otro vehículo (proceso "${conflict.processName}"). Hay que pausarlo o completarlo antes de iniciar este.`,
+        );
+      }
+    }
+
     if (log.processType === 'PARALLEL') {
       // Paralelos corren simultáneamente: no resetear otros procesos
     } else {

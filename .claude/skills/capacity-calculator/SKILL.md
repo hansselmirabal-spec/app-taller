@@ -9,6 +9,15 @@ description: >
 
 # Motor de Capacidad — Lógica de Cálculo
 
+> ⚠️ **Diseño histórico de Fase 1, no coincide 1:1 con el código real.** El
+> motor de capacidad real vive en `apps/api/src/modules/capacity/capacity.service.ts`
+> (mecánica) y `apps/api/src/modules/bodyshop/bodyshop.service.ts` +
+> `bodyshop-schedule.service.ts` (bodyshop, con asignación secuencial por fase
+> chapería→prep→pintura). No existen `capacity_slots`, `CapacityException` ni
+> los métodos exactos descriptos abajo — es la lógica ORIGINAL propuesta, útil
+> como contexto de intención pero no como referencia de implementación. Antes
+> de tocar cálculo de capacidad, leer el servicio real correspondiente primero.
+
 ## Responsabilidad del módulo
 
 `CapacityModule` (NestJS) es el corazón del sistema.

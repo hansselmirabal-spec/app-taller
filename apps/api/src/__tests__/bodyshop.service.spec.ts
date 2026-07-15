@@ -3,11 +3,18 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { BodyshopService } from '../modules/bodyshop/bodyshop.service';
 import { BodyshopEntry } from '../modules/bodyshop/bodyshop-entry.entity';
+import { BodyshopProcess } from '../modules/bodyshop/bodyshop-process.entity';
 import { BodyshopProcessTech } from '../modules/bodyshop/bodyshop-process-tech.entity';
+import { BodyshopEntryProcessSlot } from '../modules/bodyshop/bodyshop-entry-process-slot.entity';
 import { TechnicianAbsence } from '../modules/capacity/technician-absence.entity';
 import { WorkingDay } from '../modules/capacity/working-day.entity';
+import { BudgetAppointment } from '../modules/budget-appointments/budget-appointment.entity';
+import { TrackingLog } from '../modules/tracking/tracking-log.entity';
 import { TechniciansService } from '../modules/technicians/technicians.service';
 import { WorkshopsService } from '../modules/workshops/workshops.service';
+import { DmsAgendamientoService } from '../modules/bodyshop/dms-agendamiento.service';
+import { BodyshopScheduleService } from '../modules/bodyshop/bodyshop-schedule.service';
+import { TrackingService } from '../modules/tracking/tracking.service';
 
 // ─── IDs ─────────────────────────────────────────────────────────────────────
 
@@ -104,6 +111,48 @@ function makeWorkshopsService(ws = MOCK_WORKSHOP) {
   return { findOne: jest.fn().mockResolvedValue(ws) };
 }
 
+// ── Dependencias agregadas cuando el constructor real creció a 13 args
+// (scheduling, tracking init y push a DMS) — el test se había quedado con 7.
+
+function makeProcessRepo() {
+  return { find: jest.fn().mockResolvedValue([]) };
+}
+
+function makeSlotRepo() {
+  return { create: jest.fn().mockImplementation((d: any) => d), save: jest.fn().mockResolvedValue({}), delete: jest.fn().mockResolvedValue({}) };
+}
+
+function makeBudgetApptRepo() {
+  return { find: jest.fn().mockResolvedValue([]), findOne: jest.fn().mockResolvedValue(null) };
+}
+
+function makeTrackingLogRepo() {
+  return { find: jest.fn().mockResolvedValue([]) };
+}
+
+function makeDmsAgendamiento() {
+  return {
+    getSucursales: jest.fn().mockResolvedValue([]),
+    getAsesores:   jest.fn().mockResolvedValue([]),
+    push:          jest.fn().mockResolvedValue({ success: true }),
+  };
+}
+
+function makeScheduleService(date = '2026-06-10') {
+  return {
+    simulate: jest.fn().mockResolvedValue({
+      canSchedule: true,
+      slots: [{ date, processName: 'Chapería' }],
+      estimatedFinishDate: date,
+      warnings: [],
+    }),
+  };
+}
+
+function makeTrackingService() {
+  return { initForBodyshop: jest.fn().mockResolvedValue(undefined) };
+}
+
 // ─── Suite ────────────────────────────────────────────────────────────────────
 
 describe('BodyshopService', () => {
@@ -118,6 +167,8 @@ describe('BodyshopService', () => {
   async function build(overrides: {
     entryRepo?: any; ptRepo?: any; absenceRepo?: any;
     workingDayRepo?: any; techsSvc?: any; wsSvc?: any;
+    processRepo?: any; slotRepo?: any; budgetApptRepo?: any; trackingLogRepo?: any;
+    dmsAgendamiento?: any; scheduleService?: any; trackingService?: any;
   } = {}) {
     entryRepo         = overrides.entryRepo      ?? makeEntryRepo();
     ptRepo            = overrides.ptRepo         ?? makePtRepo();
@@ -125,16 +176,30 @@ describe('BodyshopService', () => {
     workingDayRepo    = overrides.workingDayRepo ?? makeWorkingDayRepo();
     techniciansService= overrides.techsSvc       ?? makeTechniciansService();
     workshopsService  = overrides.wsSvc          ?? makeWorkshopsService();
+    const processRepo      = overrides.processRepo      ?? makeProcessRepo();
+    const slotRepo         = overrides.slotRepo         ?? makeSlotRepo();
+    const budgetApptRepo   = overrides.budgetApptRepo   ?? makeBudgetApptRepo();
+    const trackingLogRepo  = overrides.trackingLogRepo  ?? makeTrackingLogRepo();
+    const dmsAgendamiento  = overrides.dmsAgendamiento  ?? makeDmsAgendamiento();
+    const scheduleService  = overrides.scheduleService  ?? makeScheduleService();
+    const trackingService  = overrides.trackingService  ?? makeTrackingService();
 
     const mod = await Test.createTestingModule({
       providers: [
         BodyshopService,
-        { provide: getRepositoryToken(BodyshopEntry),       useValue: entryRepo },
-        { provide: getRepositoryToken(BodyshopProcessTech), useValue: ptRepo },
-        { provide: getRepositoryToken(TechnicianAbsence),   useValue: absenceRepo },
-        { provide: getRepositoryToken(WorkingDay),          useValue: workingDayRepo },
-        { provide: TechniciansService, useValue: techniciansService },
-        { provide: WorkshopsService,  useValue: workshopsService },
+        { provide: getRepositoryToken(BodyshopEntry),             useValue: entryRepo },
+        { provide: getRepositoryToken(BodyshopProcess),           useValue: processRepo },
+        { provide: getRepositoryToken(BodyshopProcessTech),       useValue: ptRepo },
+        { provide: getRepositoryToken(BodyshopEntryProcessSlot),  useValue: slotRepo },
+        { provide: getRepositoryToken(TechnicianAbsence),         useValue: absenceRepo },
+        { provide: getRepositoryToken(WorkingDay),                useValue: workingDayRepo },
+        { provide: getRepositoryToken(BudgetAppointment),         useValue: budgetApptRepo },
+        { provide: getRepositoryToken(TrackingLog),               useValue: trackingLogRepo },
+        { provide: TechniciansService,       useValue: techniciansService },
+        { provide: WorkshopsService,         useValue: workshopsService },
+        { provide: DmsAgendamientoService,   useValue: dmsAgendamiento },
+        { provide: BodyshopScheduleService,  useValue: scheduleService },
+        { provide: TrackingService,          useValue: trackingService },
       ],
     }).compile();
     service = mod.get(BodyshopService);
@@ -146,7 +211,13 @@ describe('BodyshopService', () => {
 
   describe('create', () => {
     it('crea entry y retorna objeto formateado', async () => {
-      const qb = makeQb([MOCK_ENTRY]);
+      // create() reusa el mismo createQueryBuilder para 2 cosas distintas:
+      // 1) chequeo de patente duplicada (debe dar null, si no rechaza)
+      // 2) recarga de la entry recién guardada al final (debe encontrarla)
+      const qb = makeQb([]);
+      qb.getOne = jest.fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(MOCK_ENTRY);
       entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
       await build({ entryRepo });
 
@@ -163,7 +234,11 @@ describe('BodyshopService', () => {
     });
 
     it('asigna status="scheduled" siempre', async () => {
-      const qb = makeQb([MOCK_ENTRY]);
+      // Mismo motivo que el test anterior: 2 llamadas a getOne (duplicado + recarga).
+      const qb = makeQb([]);
+      qb.getOne = jest.fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(MOCK_ENTRY);
       entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
       await build({ entryRepo });
 
@@ -330,7 +405,9 @@ describe('BodyshopService', () => {
       expect(result.byProcess.PREP.commercializableHours).toBe(4);
     });
 
-    it('entry activo ocupa horas del proceso', async () => {
+    it('entry activo ocupa horas del proceso — asignación secuencial por fase (chapería día 0, prep día 1, pintura día 2)', async () => {
+      // Con 1 técnico por proceso (8h/día cada uno): bwDays=ceil(8/8)=1,
+      // prepDays=ceil(4/8)=1, pntDays=ceil(6/8)=1 → 3 fases, un día cada una.
       const entryWithHours = {
         ...MOCK_ENTRY,
         bodyworkHours: 8, prepHours: 4, paintHours: 6,
@@ -340,10 +417,20 @@ describe('BodyshopService', () => {
       entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
       await build({ entryRepo });
 
-      const result = await service.getDayCapacity(WS_ID, '2026-06-10');
-      expect(result.byProcess.BODYWORK.occupiedHours).toBe(8);
-      expect(result.byProcess.PREP.occupiedHours).toBe(4);
-      expect(result.byProcess.PAINT.occupiedHours).toBe(6);
+      const dia0 = await service.getDayCapacity(WS_ID, '2026-06-10'); // fase chapería
+      expect(dia0.byProcess.BODYWORK.occupiedHours).toBe(8);
+      expect(dia0.byProcess.PREP.occupiedHours).toBe(0);
+      expect(dia0.byProcess.PAINT.occupiedHours).toBe(0);
+
+      const dia1 = await service.getDayCapacity(WS_ID, '2026-06-11'); // fase preparación
+      expect(dia1.byProcess.BODYWORK.occupiedHours).toBe(0);
+      expect(dia1.byProcess.PREP.occupiedHours).toBe(4);
+      expect(dia1.byProcess.PAINT.occupiedHours).toBe(0);
+
+      const dia2 = await service.getDayCapacity(WS_ID, '2026-06-12'); // fase pintura
+      expect(dia2.byProcess.BODYWORK.occupiedHours).toBe(0);
+      expect(dia2.byProcess.PREP.occupiedHours).toBe(0);
+      expect(dia2.byProcess.PAINT.occupiedHours).toBe(6);
     });
 
     it('status RISK cuando occupancyRate >= 0.8', async () => {
@@ -358,8 +445,13 @@ describe('BodyshopService', () => {
     });
 
     it('status OVERLOADED cuando occupancyRate >= 1', async () => {
-      const entryOver = { ...MOCK_ENTRY, bodyworkHours: 10, prepHours: 0, paintHours: 0, processTechsList: [] };
-      const qb = makeQb([entryOver]);
+      // La asignación reparte las horas de una sola entry en varios días
+      // (ver test de fases más arriba), así que una entry sola nunca supera
+      // su propia capacidad diaria. OVERLOADED requiere 2+ entries superpuestas
+      // el mismo día: acá 5h + 5h = 10h contra 8h de capacidad (1 técnico).
+      const entryA = { ...MOCK_ENTRY, id: 'e-a', bodyworkHours: 5, prepHours: 0, paintHours: 0, processTechsList: [] };
+      const entryB = { ...MOCK_ENTRY, id: 'e-b', bodyworkHours: 5, prepHours: 0, paintHours: 0, processTechsList: [] };
+      const qb = makeQb([entryA, entryB]);
       entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
       await build({ entryRepo });
 

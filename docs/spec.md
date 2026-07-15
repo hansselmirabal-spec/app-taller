@@ -1,6 +1,15 @@
-# spec.md — APP-TALLER MVP
-> Fuente de verdad. No modificar sin aprobación humana.
-> Stack: Next.js 14 (App Router) · NestJS · PostgreSQL · JWT · Docker
+# spec.md — APP-TALLER MVP (HISTÓRICO — NO ES LA FUENTE DE VERDAD ACTUAL)
+
+> ⚠️ **Este documento describe el diseño original de la Fase 1 (MVP) y quedó
+> desactualizado.** El sistema real ya incluye bodyshop (chapa y pintura),
+> integración con DMS, multi-sucursal, tracking/kanban y un modelo de permisos
+> por rol — nada de eso está descripto acá, y varias secciones (modelo de datos,
+> roles, endpoints) ya no reflejan el código actual. Se conserva como referencia
+> histórica del punto de partida del proyecto.
+>
+> **La fuente de verdad vigente es [`docs/flujo-negocio.md`](./flujo-negocio.md).**
+>
+> Stack real: Next.js (App Router) · NestJS · TypeORM · PostgreSQL · JWT · Docker.
 
 ---
 
