@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: taller_db
+      POSTGRES_USER: taller_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    expose:
+      - "5432"
+    volumes:
+      - postgres_taller_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taller_user -d taller_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: ghcr.io/hansselmirabal-spec/app-taller-api:prod
+    restart: always
+    expose:
+      - "3001"
+    environment:
+      DATABASE_URL: postgresql://taller_user:${POSTGRES_PASSWORD}@postgres:5432/taller_db
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 3001
+      NODE_ENV: production
+      FRONTEND_URL: http://53.103.13.238:8002
+      SMTP_HOST: ""
+      SMTP_PORT: 25
+      SMTP_USER: ""
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: agenda@grupocondor.com.py
+      APP_NAME: App Taller
+      COOKIE_SECURE: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    image: ghcr.io/hansselmirabal-spec/app-taller-web:prod
+    restart: always
+    expose:
+      - "3000"
+    environment:
+      NODE_ENV: production
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "8002:80"
+    volumes:
+      - /opt/stacks/app-taller/nginx/nginx.portainer.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - web
+      - api
+
+volumes:
+  postgres_taller_data:
+    external: true
+    name: app-taller_postgres_taller_data

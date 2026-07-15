@@ -60,6 +60,8 @@ jobs:
     runs-on: [self-hosted, app-taller-server]
     environment: production
     steps:
+      - uses: actions/checkout@v4
+
       - name: Record previously-deployed SHA (for rollback)
         run: |
           cd /opt/stacks/app-taller
@@ -70,7 +72,12 @@ jobs:
           fi
 
       - name: Pull and restart PROD
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.PROD_POSTGRES_PASSWORD }}
+          JWT_SECRET:        ${{ secrets.PROD_JWT_SECRET }}
+          SMTP_PASS:         ${{ secrets.PROD_SMTP_PASS }}
         run: |
+          cp docker-compose.portainer.yml /opt/stacks/app-taller/docker-compose.portainer.yml
           cd /opt/stacks/app-taller
           docker compose -f docker-compose.portainer.yml --project-name app-taller pull
           docker compose -f docker-compose.portainer.yml --project-name app-taller up -d
@@ -93,6 +100,10 @@ jobs:
 
       - name: Rollback to previous known-good version
         if: failure() && steps.health.outcome == 'failure'
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.PROD_POSTGRES_PASSWORD }}
+          JWT_SECRET:        ${{ secrets.PROD_JWT_SECRET }}
+          SMTP_PASS:         ${{ secrets.PROD_SMTP_PASS }}
         run: |
           cd /opt/stacks/app-taller
           if [ -z "$PREV_SHA" ]; then
