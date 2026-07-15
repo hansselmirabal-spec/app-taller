@@ -6,6 +6,7 @@ import { useWorkshopId } from '@/context/workshop-context';
 import { useResourceAgenda, useClearResource } from '@/hooks/use-tracking';
 import { InfoButton } from '@/components/ui/info-button';
 import { MotivationalLoader } from '@/components/ui/motivational-loader';
+import { useRequirePermission } from '@/hooks/use-require-permission';
 
 function timeAgo(isoStr: string | null): string {
   if (!isoStr) return '—';
@@ -19,6 +20,7 @@ function timeAgo(isoStr: string | null): string {
 }
 
 export default function RecursosPage() {
+  useRequirePermission('recursos');
   const router     = useRouter();
   const workshopId = useWorkshopId();
   const { data: items = [], isLoading, refetch } = useResourceAgenda(workshopId ?? undefined);

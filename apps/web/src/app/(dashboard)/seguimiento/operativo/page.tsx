@@ -11,6 +11,7 @@ import {
 import type { OperativoData, VencidoRow, ProximoVencerRow, AsesorOpRow, Periodo, DrillMetric, DrillResult, DrillRow } from '@/app/api/ot-seguimiento/operativo/route';
 import { OT_ESTADOS } from '@/lib/ot-estados';
 import { MotivationalLoader } from '@/components/ui/motivational-loader';
+import { useRequirePermission } from '@/hooks/use-require-permission';
 
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' });
@@ -398,6 +399,7 @@ function FilterSelect({
 
 /* ── Page principal ─────────────────────────────────────────────────────── */
 export default function OperativoPage() {
+  useRequirePermission('seguimiento');
   const [periodo,   setPeriodo]   = useState<Periodo>('hoy');
   const [sucursalF, setSucursalF] = useState('');
   const [asesorF,   setAsesorF]   = useState('');

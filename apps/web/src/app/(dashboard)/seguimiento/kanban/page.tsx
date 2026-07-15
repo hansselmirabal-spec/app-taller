@@ -13,6 +13,7 @@ import { createBodyshopEntry, releaseTechNoStart } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import type { TrackingCard, TrackingColumn, TrackingProcessSummary } from '@/lib/api';
 import { InfoButton } from '@/components/ui/info-button';
+import { useRequirePermission } from '@/hooks/use-require-permission';
 import {
   AlertTriangle, RefreshCw, Car, Clock, TrendingDown,
   TrendingUp, Minus, Play, CheckCircle2, ChevronLeft, ChevronRight,
@@ -1689,6 +1690,7 @@ function KanbanColumn({
 // ── Página principal ───────────────────────────────────────────────────────────
 
 export default function TrackingKanbanPage() {
+  useRequirePermission('seguimiento');
   const workshopId = useWorkshopId();
   const { data: workshops = [] } = useWorkshops();
   const [date, setDate]                     = useState(formatDate(new Date()));

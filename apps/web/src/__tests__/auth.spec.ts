@@ -30,6 +30,8 @@ const customPermissions: Permissions = {
   settings:     { view: false, edit: false },
   presupuesto:  { view: false, edit: false },
   documentation: { view: false, edit: false },
+  recursos:      { view: false, edit: false },
+  seguimiento:   { view: false, edit: false },
 };
 
 // jsdom provides localStorage — reset between tests

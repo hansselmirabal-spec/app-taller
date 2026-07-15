@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { Search, RefreshCw, ClipboardList, ChevronUp, ChevronDown, ChevronsUpDown, X, LayoutGrid, Table as TableIcon, User, Building2, CalendarClock, Clock, Calendar, Info, Database, BarChart3, CheckCircle2, Timer, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { OT_ESTADOS, getEstado, resolveEstado, isFacturada, type OtEstado } from '@/lib/ot-estados';
+import { useRequirePermission } from '@/hooks/use-require-permission';
 
 // Devuelve la definición de estado o un fallback gris para estados desconocidos del DMS.
 function estadoFromKey(key: string): OtEstado {
@@ -100,6 +101,7 @@ function daysSince(iso: string): number {
 
 
 export default function SeguimientoPage() {
+  useRequirePermission('seguimiento');
   const [data, setData]         = useState<OtRow[]>([]);
   const [summary, setSummary]   = useState<Record<string, number>>({});
   const [loading, setLoading]   = useState(true);
