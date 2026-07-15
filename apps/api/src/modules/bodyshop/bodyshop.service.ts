@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, Between } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { DataSource, Repository, In, Between } from 'typeorm';
 import { TrackingLog } from '../tracking/tracking-log.entity';
 import { IsString, IsNumber, IsEnum, IsOptional, Matches, Min, ValidateIf } from 'class-validator';
 import { BodyshopEntry } from './bodyshop-entry.entity';
@@ -117,6 +117,7 @@ export class BodyshopService {
     private dmsAgendamiento: DmsAgendamientoService,
     private scheduleService: BodyshopScheduleService,
     private trackingService: TrackingService,
+    @InjectDataSource() private dataSource: DataSource,
   ) {}
 
   // ── Entries CRUD ─────────────────────────────────────────────────────────────
@@ -183,32 +184,97 @@ export class BodyshopService {
       );
     }
 
-    const entry = this.entryRepo.create({
-      workshopId:          dto.workshopId,
-      date:                dto.date,
-      workTypeId:          dto.workTypeId ?? null,
-      customerName:        dto.customerName,
-      plate:               dto.plate,
-      status:              'scheduled',
-      bodyworkHours:       dto.bodyworkHours,
-      prepHours:           dto.prepHours,
-      paintHours:          dto.paintHours,
-      stayDays:            computedStayDays,
-      channel:             dto.channel,
-      timeStart:           dto.timeStart ?? null,
-      advisorCode:         dto.advisorCode ?? null,
-      advisorName:         dto.advisorName ?? null,
-      notes:               dto.notes ?? null,
-      technicianId:        dto.technicianId ?? null,
-      estimatedFinishDate,
-      budgetNumber:        dto.budgetNumber ?? null,
-      processes:           allProcesses.length > 0 ? allProcesses : null,
-      waitingForResource:  false,
-      resourceNote:        null,
-      resourceBlockedAt:   null,
-      createdBy:           userId,
+    // entry + slots + asignación de técnicos se escriben atómicamente: si cualquiera
+    // de los 3 falla, no debe quedar un ingreso a medio crear (sin slots o sin técnico).
+    // Tracking init y push a DMS quedan afuera, como side-effects post-commit.
+    const saved = await this.dataSource.transaction(async manager => {
+      const entry = manager.create(BodyshopEntry, {
+        workshopId:          dto.workshopId,
+        date:                dto.date,
+        workTypeId:          dto.workTypeId ?? null,
+        customerName:        dto.customerName,
+        plate:               dto.plate,
+        status:              'scheduled',
+        bodyworkHours:       dto.bodyworkHours,
+        prepHours:           dto.prepHours,
+        paintHours:          dto.paintHours,
+        stayDays:            computedStayDays,
+        channel:             dto.channel,
+        timeStart:           dto.timeStart ?? null,
+        advisorCode:         dto.advisorCode ?? null,
+        advisorName:         dto.advisorName ?? null,
+        notes:               dto.notes ?? null,
+        technicianId:        dto.technicianId ?? null,
+        estimatedFinishDate,
+        budgetNumber:        dto.budgetNumber ?? null,
+        processes:           allProcesses.length > 0 ? allProcesses : null,
+        waitingForResource:  false,
+        resourceNote:        null,
+        resourceBlockedAt:   null,
+        createdBy:           userId,
+      });
+      const savedEntry = await manager.save(entry);
+
+      // Guardar slots generados por el scheduler
+      if (simulationSlots.length > 0) {
+        const slotEntities = simulationSlots.map((s: any) => {
+          const slot = new BodyshopEntryProcessSlot();
+          slot.entryId   = savedEntry.id;
+          slot.process   = s.process as string;
+          slot.date      = s.date;
+          slot.timeStart = s.timeStart;
+          slot.timeEnd   = s.timeEnd;
+          slot.hours     = s.hours;
+          slot.sequence  = s.sequence;
+          slot.status    = 'pending';
+          return slot;
+        });
+        await manager.save(BodyshopEntryProcessSlot, slotEntities);
+      }
+
+      // Auto-asignación de técnico por proceso. Si el operador pasó IDs manuales
+      // se usan tal cual; si no, se elige el técnico con más horas libres en la fecha
+      // real del proceso (no siempre el día de entrada — PREP/PAINT pueden caer días después).
+      // Envuelto en try/catch para que un fallo de asignación nunca bloquee la creación.
+      try {
+        const slotDateFor = (proc: BalanceProcess) =>
+          simulationSlots.find((s: any) => s.process === proc)?.date ?? dto.date;
+
+        const processAssignments: { proc: BalanceProcess; hours: number; manualId?: string | null }[] = [
+          { proc: 'BODYWORK', hours: Number(dto.bodyworkHours), manualId: dto.bodyworkTechnicianId },
+          { proc: 'PREP',     hours: Number(dto.prepHours),     manualId: dto.prepTechnicianId     },
+          { proc: 'PAINT',    hours: Number(dto.paintHours),    manualId: dto.paintTechnicianId    },
+        ];
+
+        // Cache de disponibilidad por fecha para evitar N queries si varios procesos caen el mismo día.
+        const availabilityCache = new Map<string, Awaited<ReturnType<typeof this.getTechnicianAvailability>>>();
+        const getAvailability = async (date: string) => {
+          if (!availabilityCache.has(date)) {
+            availabilityCache.set(date, await this.getTechnicianAvailability(dto.workshopId, date));
+          }
+          return availabilityCache.get(date)!;
+        };
+
+        for (const { proc, hours, manualId } of processAssignments) {
+          if (hours <= 0) continue;
+          let techId = manualId ?? null;
+          if (!techId) {
+            const availability = await getAvailability(slotDateFor(proc));
+            const candidates = availability
+              .filter(t => t.process === proc)
+              .sort((a, b) => b.hoursFree - a.hoursFree);
+            techId = candidates[0]?.id ?? null;
+          }
+          if (techId) {
+            await manager.save(BodyshopProcessTech, manager.create(BodyshopProcessTech, { entryId: savedEntry.id, process: proc, technicianId: techId }));
+          }
+        }
+      } catch (autoErr) {
+        this.logger.error(`Auto-assign failed for entry ${savedEntry.id}: ${autoErr?.message ?? autoErr}`, autoErr?.stack);
+      }
+
+      return savedEntry;
     });
-    const saved = await this.entryRepo.save(entry);
 
     const hoursByCode: Record<string, number> = allProcesses.reduce<Record<string, number>>(
       (acc, p) => ({ ...acc, [p.code]: p.hours }), {},
@@ -226,64 +292,6 @@ export class BodyshopService {
         return this.trackingService.initForBodyshop(saved.id, [...catalogProcs, ...extraTracking]);
       })
       .catch(err => this.logger.warn(`tracking init failed: ${err.message}`));
-
-    // Guardar slots generados por el scheduler
-    if (simulationSlots.length > 0) {
-      const slotEntities = simulationSlots.map((s: any) => {
-        const slot = new BodyshopEntryProcessSlot();
-        slot.entryId   = saved.id;
-        slot.process   = s.process as string;
-        slot.date      = s.date;
-        slot.timeStart = s.timeStart;
-        slot.timeEnd   = s.timeEnd;
-        slot.hours     = s.hours;
-        slot.sequence  = s.sequence;
-        slot.status    = 'pending';
-        return slot;
-      });
-      await this.slotRepo.save(slotEntities);
-    }
-
-    // Auto-asignación de técnico por proceso. Si el operador pasó IDs manuales
-    // se usan tal cual; si no, se elige el técnico con más horas libres en la fecha
-    // real del proceso (no siempre el día de entrada — PREP/PAINT pueden caer días después).
-    // Envuelto en try/catch para que un fallo de asignación nunca bloquee la creación.
-    try {
-      const slotDateFor = (proc: BalanceProcess) =>
-        simulationSlots.find((s: any) => s.process === proc)?.date ?? dto.date;
-
-      const processAssignments: { proc: BalanceProcess; hours: number; manualId?: string | null }[] = [
-        { proc: 'BODYWORK', hours: Number(dto.bodyworkHours), manualId: dto.bodyworkTechnicianId },
-        { proc: 'PREP',     hours: Number(dto.prepHours),     manualId: dto.prepTechnicianId     },
-        { proc: 'PAINT',    hours: Number(dto.paintHours),    manualId: dto.paintTechnicianId    },
-      ];
-
-      // Cache de disponibilidad por fecha para evitar N queries si varios procesos caen el mismo día.
-      const availabilityCache = new Map<string, Awaited<ReturnType<typeof this.getTechnicianAvailability>>>();
-      const getAvailability = async (date: string) => {
-        if (!availabilityCache.has(date)) {
-          availabilityCache.set(date, await this.getTechnicianAvailability(dto.workshopId, date));
-        }
-        return availabilityCache.get(date)!;
-      };
-
-      for (const { proc, hours, manualId } of processAssignments) {
-        if (hours <= 0) continue;
-        let techId = manualId ?? null;
-        if (!techId) {
-          const availability = await getAvailability(slotDateFor(proc));
-          const candidates = availability
-            .filter(t => t.process === proc)
-            .sort((a, b) => b.hoursFree - a.hoursFree);
-          techId = candidates[0]?.id ?? null;
-        }
-        if (techId) {
-          await this.ptRepo.save(this.ptRepo.create({ entryId: saved.id, process: proc, technicianId: techId }));
-        }
-      }
-    } catch (autoErr) {
-      this.logger.error(`Auto-assign failed for entry ${saved.id}: ${autoErr?.message ?? autoErr}`, autoErr?.stack);
-    }
 
     const dmsSync = await this.pushToDms(saved, dto).catch(err => {
       this.logger.error(`DMS push inesperado para entry ${saved.id}: ${err.message}`);

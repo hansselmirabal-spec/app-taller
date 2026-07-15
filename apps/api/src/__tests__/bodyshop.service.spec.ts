@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { BodyshopService } from '../modules/bodyshop/bodyshop.service';
 import { BodyshopEntry } from '../modules/bodyshop/bodyshop-entry.entity';
@@ -118,8 +118,13 @@ function makeProcessRepo() {
   return { find: jest.fn().mockResolvedValue([]) };
 }
 
-function makeSlotRepo() {
-  return { create: jest.fn().mockImplementation((d: any) => d), save: jest.fn().mockResolvedValue({}), delete: jest.fn().mockResolvedValue({}) };
+function makeSlotRepo(overrides: any = {}) {
+  return {
+    create: jest.fn().mockImplementation((d: any) => d),
+    save:   jest.fn().mockResolvedValue({}),
+    delete: jest.fn().mockResolvedValue({}),
+    ...overrides,
+  };
 }
 
 function makeBudgetApptRepo() {
@@ -153,6 +158,40 @@ function makeTrackingService() {
   return { initForBodyshop: jest.fn().mockResolvedValue(undefined) };
 }
 
+// create() ahora escribe entry+slots+asignación de técnico dentro de
+// dataSource.transaction(manager => ...). El mock enruta manager.create/save
+// hacia el repo mock correspondiente según la entidad, para que los asserts
+// existentes sobre entryRepo/slotRepo/ptRepo sigan funcionando sin cambios.
+const ENTITY_TAG = Symbol('entityClass');
+
+function makeManager(entryRepo: any, slotRepo: any, ptRepo: any) {
+  const repoFor = (entity: any) => {
+    if (entity === BodyshopEntry) return entryRepo;
+    if (entity === BodyshopEntryProcessSlot) return slotRepo;
+    if (entity === BodyshopProcessTech) return ptRepo;
+    throw new Error(`makeManager: entidad sin mock: ${entity?.name}`);
+  };
+  return {
+    create: (entity: any, data: any) => {
+      const created = repoFor(entity).create(data);
+      if (created && typeof created === 'object') {
+        Object.defineProperty(created, ENTITY_TAG, { value: entity, enumerable: false, configurable: true });
+      }
+      return created;
+    },
+    save: (a: any, b?: any) => {
+      if (typeof a === 'function') return repoFor(a).save(b);
+      const tag = a?.[ENTITY_TAG];
+      if (tag) return repoFor(tag).save(a);
+      throw new Error('makeManager.save: no se pudo determinar la entidad target');
+    },
+  };
+}
+
+function makeDataSource(manager: ReturnType<typeof makeManager>) {
+  return { transaction: jest.fn().mockImplementation(async (cb: any) => cb(manager)) };
+}
+
 // ─── Suite ────────────────────────────────────────────────────────────────────
 
 describe('BodyshopService', () => {
@@ -183,6 +222,7 @@ describe('BodyshopService', () => {
     const dmsAgendamiento  = overrides.dmsAgendamiento  ?? makeDmsAgendamiento();
     const scheduleService  = overrides.scheduleService  ?? makeScheduleService();
     const trackingService  = overrides.trackingService  ?? makeTrackingService();
+    const dataSource        = makeDataSource(makeManager(entryRepo, slotRepo, ptRepo));
 
     const mod = await Test.createTestingModule({
       providers: [
@@ -200,6 +240,7 @@ describe('BodyshopService', () => {
         { provide: DmsAgendamientoService,   useValue: dmsAgendamiento },
         { provide: BodyshopScheduleService,  useValue: scheduleService },
         { provide: TrackingService,          useValue: trackingService },
+        { provide: getDataSourceToken(),     useValue: dataSource },
       ],
     }).compile();
     service = mod.get(BodyshopService);
@@ -251,6 +292,25 @@ describe('BodyshopService', () => {
       expect(entryRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'scheduled' }),
       );
+    });
+
+    it('si falla el guardado de slots, no inicializa tracking (entry+slots+técnico son atómicos)', async () => {
+      const qb = makeQb([]);
+      qb.getOne = jest.fn().mockResolvedValueOnce(null);
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
+      const slotRepo        = makeSlotRepo({ save: jest.fn().mockRejectedValue(new Error('DB down')) });
+      const trackingService = makeTrackingService();
+      await build({ entryRepo, slotRepo, trackingService });
+
+      const dto = {
+        workshopId: WS_ID, date: '2026-06-10', workTypeId: WT_ID,
+        customerName: 'Test', plate: 'TST 001',
+        bodyworkHours: 8, prepHours: 4, paintHours: 6,
+        stayDays: 2, channel: 'walk_in' as const,
+      };
+
+      await expect(service.create(dto, USER_ID)).rejects.toThrow('DB down');
+      expect(trackingService.initForBodyshop).not.toHaveBeenCalled();
     });
   });
 
