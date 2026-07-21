@@ -77,7 +77,11 @@ export class BodyshopScheduleService {
 
   async simulate(input: SimulateInput): Promise<ScheduleSimulation> {
     const { bodyworkHours, prepHours, paintHours, workshopId, startDate, entryIdExclude } = input;
-    const startTime = input.startTime ?? SHOP_OPEN;
+    // startTime puede llegar como "09:00:00" (columnas Postgres type:'time', p.ej.
+    // budget_appointments.time_start) — se trunca/valida a "HH:MM" acá, en la fuente,
+    // para que nunca se guarde un valor más largo en bodyshop_entry_process_slots.time_start
+    // (varchar(5)) sin importar quién llame a simulate().
+    const startTime = this.normalizeTime(input.startTime) ?? SHOP_OPEN;
 
     const hoursByCode: Record<string, number> = {
       BODYWORK: Number(bodyworkHours) || 0,
@@ -323,6 +327,12 @@ export class BodyshopScheduleService {
   private toMinutes(time: string): number {
     const [h, m] = time.split(':').map(Number);
     return h * 60 + (m || 0);
+  }
+
+  private normalizeTime(time?: string): string | null {
+    if (!time) return null;
+    const truncated = time.slice(0, 5);
+    return /^\d{2}:\d{2}$/.test(truncated) ? truncated : null;
   }
 
   private fromMinutes(minutes: number): string {
