@@ -19,7 +19,7 @@ import { format, subDays, parseISO, eachDayOfInterval } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useBodyshopWeekCapacity, useMonthlyLoadReport, type TechMonthlyRow } from '@/hooks/use-bodyshop';
 import { useWorkTypes } from '@/hooks/use-work-types';
-import { formatDate } from '@/lib/utils';
+import { formatDate, round1 } from '@/lib/utils';
 import type { BodyshopDayCapacity, BodyshopEntry } from '@/types';
 import { InfoButton } from '@/components/ui/info-button';
 
@@ -239,7 +239,7 @@ function useBodyshopReporteriaData(from: string, to: string) {
       if (!wt) return;
       if (!counts[wt.id]) counts[wt.id] = { name: wt.name, color: wt.color, count: 0, totalHours: 0 };
       counts[wt.id].count++;
-      counts[wt.id].totalHours += wt.bodyworkHours + wt.prepHours + wt.paintHours;
+      counts[wt.id].totalHours = round1(counts[wt.id].totalHours + wt.bodyworkHours + wt.prepHours + wt.paintHours);
     });
     return Object.values(counts).sort((a, b) => b.count - a.count);
   }, [activeEntries]);

@@ -5,7 +5,7 @@ import { es } from 'date-fns/locale';
 import { useBodyshopSchedule, useBodyshopWeekCapacity } from '@/hooks/use-bodyshop';
 import { useTechnicians } from '@/hooks/use-technicians';
 import { useWorkshopId } from '@/context/workshop-context';
-import { formatDate } from '@/lib/utils';
+import { formatDate, sumBodyshopHours } from '@/lib/utils';
 import { AlertTriangle, CheckCircle2, Clock, LayoutList, Users, X } from 'lucide-react';
 import type { BodyshopScheduleEntry, BodyshopProcessWindow, BodyshopScheduleKpis } from '@/hooks/use-bodyshop';
 import type { Technician } from '@/types';
@@ -61,7 +61,7 @@ type FilterKey = 'all' | 'onSchedule' | 'delayed' | 'exitToday';
 
 function EntryPopoverRow({ entry }: { entry: BodyshopScheduleEntry }) {
   const statusInfo = STATUS_LABELS[entry.status] ?? { label: entry.status, cls: 'bg-slate-50 text-slate-500 border border-slate-200' };
-  const totalH = entry.bodyworkHours + entry.prepHours + entry.paintHours;
+  const totalH = sumBodyshopHours(entry);
   return (
     <tr className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60 transition-colors">
       <td className="px-3 py-2.5">

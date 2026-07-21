@@ -12,7 +12,7 @@ import {
 } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useBodyshopWeekCapacity, useBodyshopEntriesKanban } from '@/hooks/use-bodyshop';
-import { formatDate } from '@/lib/utils';
+import { formatDate, sumBodyshopHours } from '@/lib/utils';
 import { MotivationalLoader } from '@/components/ui/motivational-loader';
 import type { BodyshopEntry, BodyshopWeekCapacity } from '@/types';
 
@@ -340,7 +340,7 @@ export default function BodyshopReport() {
 
                   <tbody className="divide-y divide-slate-50">
                     {entries.map((e, idx) => {
-                      const totalH = e.bodyworkHours + e.prepHours + e.paintHours;
+                      const totalH = sumBodyshopHours(e);
                       const globalCap = totals.BODYWORK.cap + totals.PREP.cap + totals.PAINT.cap;
                       const globalPct = pct(totalH, globalCap);
                       const gc = pctColor(globalPct);

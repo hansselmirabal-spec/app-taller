@@ -68,6 +68,17 @@ export function statusColor(status: string): string {
   return map[status] ?? 'bg-gray-100 text-gray-700';
 }
 
+// Redondea a 1 decimal — sumar horas tipo 17.5 + 17.2 + 7.7 en JS da
+// 42.400000000000006 por precisión de punto flotante, y eso se veía tal cual
+// en la UI (reportado en QA) si no se redondea antes de mostrarlo.
+export function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+export function sumBodyshopHours(entry: { bodyworkHours: number; prepHours: number; paintHours: number }): number {
+  return round1(entry.bodyworkHours + entry.prepHours + entry.paintHours);
+}
+
 export function statusLabel(status: string): string {
   const map: Record<string, string> = {
     scheduled: 'Agendado',
