@@ -136,3 +136,42 @@ describe('BodyshopScheduleService.simulate() — pool compartido PREP/BODYWORK',
     expect(firstDay?.hours).toBe(3); // solo lo que quedaba libre del pool compartido
   });
 });
+
+describe('BodyshopScheduleService.simulate() — normalización de startTime', () => {
+  // budget_appointments.time_start es columna Postgres type:'time' — TypeORM la
+  // devuelve como "HH:MM:SS". Sin truncar, ese valor terminaba guardado tal cual
+  // en bodyshop_entry_process_slots.time_start (varchar(5)) → "value too long
+  // for type character varying(5)" al aprobar un presupuesto (bug reportado en QA).
+  it('trunca un startTime con segundos ("HH:MM:SS") a "HH:MM"', async () => {
+    const service = await build();
+
+    const sim = await service.simulate({
+      bodyworkHours: 4,
+      prepHours:     0,
+      paintHours:    0,
+      workshopId:    WS_ID,
+      startDate:     '2026-06-10',
+      startTime:     '09:00:00',
+    });
+
+    const slot = sim.slots.find(s => s.process === 'BODYWORK');
+    expect(slot?.timeStart).toBe('09:00');
+    expect(slot?.timeStart.length).toBe(5);
+  });
+
+  it('cae al horario de apertura si startTime viene inválido', async () => {
+    const service = await build();
+
+    const sim = await service.simulate({
+      bodyworkHours: 4,
+      prepHours:     0,
+      paintHours:    0,
+      workshopId:    WS_ID,
+      startDate:     '2026-06-10',
+      startTime:     'no-es-una-hora',
+    });
+
+    const slot = sim.slots.find(s => s.process === 'BODYWORK');
+    expect(slot?.timeStart).toBe('08:00');
+  });
+});
