@@ -15,8 +15,11 @@ const TIME_RE = /^\d{2}:\d{2}$/;
 export class BudgetProcessDto {
   @IsString() code: string;
   @IsString() name: string;
+  // El catálogo real (Excel "Herramienta Presupuestador") tiene procesos con horas
+  // legítimas por debajo de 0.5 — ej. Empapelado 0.3h, Pulir 0.4h. Un mínimo de
+  // 0.5 rechazaba esos valores reales; solo se valida que sea positivo.
   @IsNumber({}, { message: 'Las horas deben ser un número.' })
-  @Min(0.5, { message: 'Las horas mínimas por proceso son 0.5' })
+  @Min(0.01, { message: 'Las horas deben ser mayores a 0.' })
   hours: number;
 }
 

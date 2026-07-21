@@ -15,15 +15,18 @@ export type DamageLevel = 'Leve' | 'Medio' | 'Grave' | 'Sustitucion';
 const ALWAYS_INCLUDED = new Set(['Desm/Mont', 'Parcial desarmar', 'Empapelado']);
 
 // Determines if a catalog row should be included for a given damage level.
-// Rules derived from BASE_SIMULADOR + SIMULADOR_PRESUPUESTO logic:
-//   Leve/Medio/Grave → repair route: Reparar+Preparacion matching grade, Pulir (Leve only), Pintar (Medio/Grave)
+// Rules derived from BASE_SIMULADOR + SIMULADOR_PRESUPUESTO logic (columna "Pintar"
+// del Excel de referencia: siempre busca categoría "Pintar reparación" salvo que el
+// tipo de daño sea "Sustitución" — no varía entre Leve/Medio/Grave):
+//   Leve/Medio/Grave → repair route: Reparar+Preparacion matching grade, Pulir (Leve only), Pintar (todas)
 //   Sustitución       → replacement route: Sustituir, Preparacion/Pintar with tipoDano='Sustitución'
 function matchesDamageLevel(proceso: string, tipoDano: string, damageLevel: DamageLevel): boolean {
   if (ALWAYS_INCLUDED.has(proceso)) return true;
   switch (damageLevel) {
     case 'Leve':
       return proceso === 'Pulir' ||
-             ((proceso === 'Reparar' || proceso === 'Preparacion') && tipoDano === 'Leve');
+             ((proceso === 'Reparar' || proceso === 'Preparacion') && tipoDano === 'Leve') ||
+             (proceso === 'Pintar' && (tipoDano === 'Pintar reparación' || tipoDano === 'Reparación'));
     case 'Medio':
       return ((proceso === 'Reparar' || proceso === 'Preparacion') && tipoDano === 'Medio') ||
              (proceso === 'Pintar' && (tipoDano === 'Pintar reparación' || tipoDano === 'Reparación'));
