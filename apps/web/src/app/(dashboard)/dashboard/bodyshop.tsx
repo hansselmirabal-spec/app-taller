@@ -18,7 +18,7 @@ import {
 } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useBodyshopDayCapacity, useBodyshopWeekCapacity, useBodyshopEntriesKanban } from '@/hooks/use-bodyshop';
-import { formatDate } from '@/lib/utils';
+import { formatDate, round1, sumBodyshopHours } from '@/lib/utils';
 import type { CapacityStatus, BodyshopWeekCapacity } from '@/types';
 
 import { InfoButton } from '@/components/ui/info-button';
@@ -390,7 +390,7 @@ function WidgetContent({
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {reportEntries.map((e, idx) => {
-                    const total   = e.bodyworkHours + e.prepHours + e.paintHours;
+                    const total   = sumBodyshopHours(e);
                     const capSum  = capTotals.BODYWORK.cap + capTotals.PREP.cap + capTotals.PAINT.cap;
                     const p       = pct(total, capSum);
                     const bwPct   = pct(e.bodyworkHours, capTotals.BODYWORK.cap);
@@ -469,19 +469,19 @@ function WidgetContent({
                   <tr className="bg-slate-100 border-t-2 border-slate-200 font-bold">
                     <td colSpan={3} className="px-3 py-2 text-[10px] text-slate-600 uppercase tracking-wide">Totales</td>
                     <td className="px-3 py-2 text-right text-blue-700">
-                      {reportEntries.reduce((s, e) => s + e.bodyworkHours, 0)}h
+                      {round1(reportEntries.reduce((s, e) => s + e.bodyworkHours, 0))}h
                       <span className="ml-1 text-[9px]">({pct(reportEntries.reduce((s,e)=>s+e.bodyworkHours,0), capTotals.BODYWORK.cap).toFixed(0)}%)</span>
                     </td>
                     <td className="px-3 py-2 text-right text-violet-700">
-                      {reportEntries.reduce((s, e) => s + e.prepHours, 0)}h
+                      {round1(reportEntries.reduce((s, e) => s + e.prepHours, 0))}h
                       <span className="ml-1 text-[9px]">({pct(reportEntries.reduce((s,e)=>s+e.prepHours,0), capTotals.PREP.cap).toFixed(0)}%)</span>
                     </td>
                     <td className="px-3 py-2 text-right text-orange-700">
-                      {reportEntries.reduce((s, e) => s + e.paintHours, 0)}h
+                      {round1(reportEntries.reduce((s, e) => s + e.paintHours, 0))}h
                       <span className="ml-1 text-[9px]">({pct(reportEntries.reduce((s,e)=>s+e.paintHours,0), capTotals.PAINT.cap).toFixed(0)}%)</span>
                     </td>
                     <td className="px-3 py-2 text-right text-slate-900">
-                      {reportEntries.reduce((s, e) => s + e.bodyworkHours + e.prepHours + e.paintHours, 0)}h
+                      {round1(reportEntries.reduce((s, e) => s + e.bodyworkHours + e.prepHours + e.paintHours, 0))}h
                     </td>
                     <td className="px-3 py-2 text-right">
                       {(() => {

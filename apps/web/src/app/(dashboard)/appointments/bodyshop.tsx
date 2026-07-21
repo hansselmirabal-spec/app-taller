@@ -12,7 +12,7 @@ import { useBodyshopDayCapacity, useCancelBodyshopEntry, useBodyshopEntriesKanba
 import { useModulePermission } from '@/hooks/use-module-permission';
 import { useTechnicians } from '@/hooks/use-technicians';
 import { useDailyCapacity } from '@/hooks/use-capacity';
-import { formatDate } from '@/lib/utils';
+import { formatDate, sumBodyshopHours } from '@/lib/utils';
 import { getWeekDays, entriesOnDay } from '@/lib/bodyshop-calendar';
 import { ActivitiesPanel } from '@/components/kanban/activities-panel';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
@@ -354,7 +354,7 @@ function EntryCard({
   cancelled?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const totalHours = entry.bodyworkHours + entry.prepHours + entry.paintHours;
+  const totalHours = sumBodyshopHours(entry);
   const isInShop = entry.date < selectedDate && entry.status === 'scheduled';
   const badgeLabel = isInShop ? 'En taller' : entryStatusLabel[entry.status];
   const badgeClass = isInShop ? 'bg-orange-100 text-orange-700' : entryStatusStyles[entry.status];
@@ -908,7 +908,7 @@ function EntryPopup({
 }) {
   const { data: technicians = [] } = useTechnicians();
   const patchHours = usePatchBodyshopEntryHours();
-  const totalHours = entry.bodyworkHours + entry.prepHours + entry.paintHours;
+  const totalHours = sumBodyshopHours(entry);
 
   // Estado del panel de ajuste de horas
   const [adjusting, setAdjusting]     = useState(false);
@@ -1437,7 +1437,7 @@ function BodyshopCalendar({
           ) : (
             <div className="space-y-3">
               {dayEntries.map(e => {
-                const totalHours = e.bodyworkHours + e.prepHours + e.paintHours;
+                const totalHours = sumBodyshopHours(e);
                 const startDate  = parseISO(e.date + 'T12:00:00');
                 const endDate    = addDays(startDate, e.stayDays - 1);
                 const processes  = [

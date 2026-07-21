@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { WorkSeverity, WorkType } from '@/types';
+import { sumBodyshopHours } from '@/lib/utils';
 
 const PRESET_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#64748b', '#14b8a6'];
 
@@ -142,8 +143,7 @@ export default function BodyshopWorkTypesPage() {
     setShowForm(false);
   }
 
-  const totalHours = (f: { bodyworkHours: number; prepHours: number; paintHours: number }) =>
-    f.bodyworkHours + f.prepHours + f.paintHours;
+  const totalHours = sumBodyshopHours;
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-8">

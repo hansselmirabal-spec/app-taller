@@ -11,7 +11,7 @@ import {
   type KanbanColConfig,
   type KanbanFieldConfig,
 } from '@/components/kanban/settings-modal';
-import { cn } from '@/lib/utils';
+import { cn, sumBodyshopHours } from '@/lib/utils';
 import type { BodyshopEntry } from '@/types';
 
 // ─── Config defaults ──────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ function getLastMonthRange(): { from: string; to: string } {
 
 function EntryDetailModal({ entry, onClose }: { entry: BodyshopEntry; onClose: () => void }) {
   const updateStatus = useUpdateBodyshopEntryStatus();
-  const totalHours   = entry.bodyworkHours + entry.prepHours + entry.paintHours;
+  const totalHours   = sumBodyshopHours(entry);
 
   async function handleStatus(status: BodyshopEntry['status']) {
     if (status === 'cancelled' && !confirm('¿Cancelar este ingreso?')) return;
@@ -237,7 +237,7 @@ function BodyshopCard({
   onDragEnd: () => void;
   onClick: () => void;
 }) {
-  const totalHours = entry.bodyworkHours + entry.prepHours + entry.paintHours;
+  const totalHours = sumBodyshopHours(entry);
   const late = overdueDays(entry, today);
 
   return (
