@@ -28,6 +28,13 @@ interface Item {
   qty: number;
 }
 
+// Chapas y chasis siempre incluyen letras. Un valor solo numérico suele ser
+// un número de OT o de cliente ingresado por error en este campo (mismo
+// criterio que en Agenda → Nuevo Ingreso).
+function looksLikePlateOrChassis(value: string): boolean {
+  return /[A-Z]/i.test(value);
+}
+
 const DAMAGE_LEVELS: { value: DamageLevel; label: string }[] = [
   { value: 'Leve',        label: 'Leve'         },
   { value: 'Medio',       label: 'Medio'        },
@@ -49,6 +56,7 @@ export default function SimuladorPresupuestoPage() {
   const [phone, setPhone]               = useState('');
   const [budgetNumber, setBudgetNumber] = useState('');
   const [notes, setNotes]               = useState('');
+  const [plateSearchError, setPlateSearchError] = useState('');
 
   // Items
   const [items, setItems]   = useState<Item[]>([newItem()]);
@@ -77,9 +85,18 @@ export default function SimuladorPresupuestoPage() {
   const updateProcesses      = useUpdateBudgetProcesses();
 
   async function handlePlateLookup() {
-    const data = await lookup(plate);
-    if (data && !customerName.trim()) {
-      setCustomerName(data.customerName);
+    const value = plate.trim().toUpperCase();
+    if (!value) return;
+    if (!looksLikePlateOrChassis(value)) {
+      setPlateSearchError('Eso no parece una chapa ni un chasis (¿será un número de OT o de cliente?). La chapa lleva letras, ej: AACA898.');
+      return;
+    }
+    setPlateSearchError('');
+    const data = await lookup(value);
+    if (data) {
+      if (!customerName.trim()) setCustomerName(data.customerName);
+    } else {
+      setPlateSearchError('Vehículo no encontrado en DMS');
     }
   }
 
@@ -263,24 +280,40 @@ export default function SimuladorPresupuestoPage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                Chapa / Patente *
+                Chapa o Chasis *
                 {vehicleData && (
                   <span className="ml-2 text-emerald-500 font-normal normal-case">{vehicleData.model}</span>
                 )}
               </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={plate}
-                  onChange={e => { setPlate(e.target.value.toUpperCase()); }}
-                  onBlur={handlePlateLookup}
-                  placeholder="ABC 123"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium uppercase outline-none focus:ring-2 focus:ring-blue-400 pr-8"
-                />
-                {isLooking && (
-                  <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-slate-400" />
-                )}
+              <p className="text-[11px] text-slate-400 mb-1.5">
+                Ingresá la chapa (ej: AACA898) o el número de chasis (ej: 9BD186DZ0LB035786)
+              </p>
+              <div className="flex gap-1.5">
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    value={plate}
+                    onChange={e => { setPlate(e.target.value.toUpperCase()); setPlateSearchError(''); }}
+                    onKeyDown={e => e.key === 'Enter' && handlePlateLookup()}
+                    placeholder="AACA898 · 9BD186DZ0LB035786"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium uppercase outline-none focus:ring-2 focus:ring-blue-400 pr-8"
+                  />
+                  {isLooking && (
+                    <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-slate-400" />
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handlePlateLookup()}
+                  disabled={isLooking || !plate.trim()}
+                  className="px-3 py-2 text-xs font-semibold bg-blue-600 text-white rounded-lg disabled:opacity-60 flex-shrink-0 hover:bg-blue-700 transition-colors"
+                >
+                  {isLooking ? '...' : 'Buscar'}
+                </button>
               </div>
+              {plateSearchError && (
+                <p className="text-[11px] text-red-600 mt-1">{plateSearchError}</p>
+              )}
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">N° Presupuesto</label>
