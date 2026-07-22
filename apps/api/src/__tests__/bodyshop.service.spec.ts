@@ -155,7 +155,10 @@ function makeScheduleService(date = '2026-06-10') {
 }
 
 function makeTrackingService() {
-  return { initForBodyshop: jest.fn().mockResolvedValue(undefined) };
+  return {
+    initForBodyshop: jest.fn().mockResolvedValue(undefined),
+    syncBodyshopPlannedHours: jest.fn().mockResolvedValue(undefined),
+  };
 }
 
 // create() ahora escribe entry+slots+asignación de técnico dentro de
@@ -341,6 +344,38 @@ describe('BodyshopService', () => {
       entryRepo.findOne.mockResolvedValue(null);
       await expect(service.cancel('bad', { id: USER_ID, role: 'admin' }))
         .rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── updateHours ──────────────────────────────────────────────────────────
+  // QA reportó una inconsistencia: ajustar horas desde Agenda no se reflejaba
+  // en el Kanban/Seguimiento del mismo vehículo, que seguía mostrando el plan
+  // viejo — porque updateHours() nunca sincronizaba tracking_logs.planned_hours.
+
+  describe('updateHours', () => {
+    it('sincroniza tracking_logs.planned_hours cuando cambian las horas', async () => {
+      const trackingService = makeTrackingService();
+      const freshEntry = { ...MOCK_ENTRY, bodyworkHours: 8, prepHours: 4, paintHours: 6 };
+      const entryRepo = makeEntryRepo({ findOne: jest.fn().mockResolvedValue(freshEntry) });
+      await build({ trackingService, entryRepo });
+
+      await service.updateHours(ENTRY_ID, { bodyworkHours: 18.2, prepHours: 11.5, paintHours: 6 });
+
+      expect(trackingService.syncBodyshopPlannedHours).toHaveBeenCalledWith(
+        ENTRY_ID,
+        { BODYWORK: 18.2, PREP: 11.5, PAINT: 6 },
+      );
+    });
+
+    it('no sincroniza tracking_logs si las horas no cambiaron', async () => {
+      const trackingService = makeTrackingService();
+      const freshEntry = { ...MOCK_ENTRY, bodyworkHours: 8, prepHours: 4, paintHours: 6 };
+      const entryRepo = makeEntryRepo({ findOne: jest.fn().mockResolvedValue(freshEntry) });
+      await build({ trackingService, entryRepo });
+
+      await service.updateHours(ENTRY_ID, { bodyworkHours: 8, prepHours: 4, paintHours: 6 });
+
+      expect(trackingService.syncBodyshopPlannedHours).not.toHaveBeenCalled();
     });
   });
 

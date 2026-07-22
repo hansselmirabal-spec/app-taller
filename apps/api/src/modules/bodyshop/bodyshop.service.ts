@@ -486,9 +486,17 @@ export class BodyshopService {
     if (dto.stayDays      !== undefined) entry.stayDays      = dto.stayDays;
     await this.entryRepo.save(entry);
 
-    // Si cambiaron las horas del presupuesto, recalcular agenda
+    // Si cambiaron las horas del presupuesto, recalcular agenda y sincronizar
+    // tracking_logs.planned_hours — si no, el Kanban/Seguimiento sigue
+    // mostrando el plan viejo (bug reportado en QA: Agenda mostraba 34.8h
+    // ajustadas, Kanban seguía en 32.9h del plan original).
     if (hoursChanged) {
       await this.recalculateSchedule(id);
+      await this.trackingService.syncBodyshopPlannedHours(id, {
+        BODYWORK: Number(entry.bodyworkHours),
+        PREP:     Number(entry.prepHours),
+        PAINT:    Number(entry.paintHours),
+      });
     }
 
     return this.loadEntry(id);

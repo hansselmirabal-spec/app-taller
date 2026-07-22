@@ -4,6 +4,7 @@ import { Repository, In } from 'typeorm';
 import { TrackingLog } from './tracking-log.entity';
 import { Appointment } from '../appointments/appointment.entity';
 import { BodyshopEntry } from '../bodyshop/bodyshop-entry.entity';
+import { BodyshopProcessTech } from '../bodyshop/bodyshop-process-tech.entity';
 import { Workshop } from '../workshops/workshop.entity';
 
 const DEVIATION_ORANGE_THRESHOLD = 2;
@@ -117,9 +118,34 @@ export class TrackingService {
     private readonly apptRepo: Repository<Appointment>,
     @InjectRepository(BodyshopEntry)
     private readonly entryRepo: Repository<BodyshopEntry>,
+    @InjectRepository(BodyshopProcessTech)
+    private readonly processTechRepo: Repository<BodyshopProcessTech>,
     @InjectRepository(Workshop)
     private readonly workshopRepo: Repository<Workshop>,
   ) {}
+
+  // El técnico real de un log vive afuera de tracking_logs: en
+  // bodyshop_process_techs (por proceso) para bodyshop, o en
+  // appointments.technician_id para mecánica. tracking_logs.technician_id
+  // solo se llena cuando alguien pasa el parámetro explícito a startProcess
+  // — que la UI nunca hace — así que sin esto la validación de concurrencia
+  // nunca tiene a quién comparar.
+  private async resolveAssignedTechnician(log: TrackingLog): Promise<{ id: string; name: string } | null> {
+    if (log.sourceType === 'bodyshop') {
+      const pt = await this.processTechRepo.findOne({
+        where: { entryId: log.sourceId, process: log.processCode },
+        relations: ['technician'],
+      });
+      if (!pt) return null;
+      return { id: pt.technicianId, name: pt.technician?.name ?? '' };
+    }
+    if (log.sourceType === 'mechanic') {
+      const appt = await this.apptRepo.findOne({ where: { id: log.sourceId }, relations: ['technician'] });
+      if (!appt?.technicianId) return null;
+      return { id: appt.technicianId, name: appt.technician?.name ?? '' };
+    }
+    return null;
+  }
 
   // ── Inicialización ──────────────────────────────────────────────────────────
 
@@ -179,6 +205,28 @@ export class TrackingService {
     ]);
   }
 
+  // Cuando se ajustan las horas de un ingreso desde Agenda ("Ajustar horas
+  // reales"), eso solo tocaba bodyshop_entries y regeneraba los slots de
+  // agenda (recalculateSchedule) — nunca sincronizaba tracking_logs.planned_hours,
+  // que es lo que lee el Kanban/Seguimiento para "Duración plan". Las dos
+  // vistas quedaban desincronizadas (bug reportado en QA). No toca procesos ya
+  // 'completed': cambiar el plan de un trabajo ya cerrado corrompería el
+  // desvío real-vs-plan ya calculado para ese proceso.
+  async syncBodyshopPlannedHours(entryId: string, hoursByCode: Record<string, number>): Promise<void> {
+    const codes = Object.keys(hoursByCode);
+    if (codes.length === 0) return;
+    const logs = await this.logRepo.find({
+      where: { sourceType: 'bodyshop', sourceId: entryId, processCode: In(codes) },
+    });
+    for (const log of logs) {
+      if (log.status === 'completed') continue;
+      const newHours = hoursByCode[log.processCode];
+      if (newHours === undefined || Number(log.plannedHours) === Number(newHours)) continue;
+      log.plannedHours = newHours;
+      await this.logRepo.save(log);
+    }
+  }
+
   // ── Acciones ────────────────────────────────────────────────────────────────
 
   async startProcess(logId: string, technicianId?: string, technicianName?: string): Promise<TrackingLog> {
@@ -189,17 +237,29 @@ export class TrackingService {
     // Un técnico no puede quedar "in_progress" en dos vehículos a la vez —
     // corrompería horas reales y KPIs de productividad si no se valida acá.
     // El botón "Iniciar" del kanban llama startProcess(logId) sin pasar
-    // technicianId — el técnico real es el que ya quedó asignado al log
-    // (auto-asignación al crear el ingreso, o asignación manual posterior),
-    // no un parámetro que la UI nunca envía.
-    const effectiveTechnicianId = technicianId ?? log.technicianId ?? undefined;
+    // technicianId, y tracking_logs.technician_id NUNCA se llena solo (no hay
+    // ningún otro lugar del código que lo escriba) — el técnico real vive en
+    // bodyshop_process_techs (por proceso) o en appointments.technician_id.
+    // Sin resolverlo desde ahí, effectiveTechnicianId queda siempre undefined
+    // y la validación nunca se ejecuta (bug reportado en QA: 6 vehículos
+    // simultáneos al mismo técnico, ninguno rechazado).
+    let effectiveTechnicianId   = technicianId ?? log.technicianId ?? undefined;
+    let effectiveTechnicianName = technicianName ?? log.technicianName ?? undefined;
+    if (!effectiveTechnicianId) {
+      const assigned = await this.resolveAssignedTechnician(log);
+      if (assigned) {
+        effectiveTechnicianId   = assigned.id;
+        effectiveTechnicianName = assigned.name || undefined;
+      }
+    }
+
     if (effectiveTechnicianId) {
       const conflict = await this.logRepo.findOne({
         where: { technicianId: effectiveTechnicianId, status: 'in_progress' },
       });
       if (conflict && conflict.id !== logId && conflict.sourceId !== log.sourceId) {
         throw new BadRequestException(
-          `${conflict.technicianName ?? technicianName ?? log.technicianName ?? 'El técnico'} ya está trabajando en otro vehículo (proceso "${conflict.processName}"). Hay que pausarlo o completarlo antes de iniciar este.`,
+          `${conflict.technicianName || effectiveTechnicianName || 'El técnico'} ya está trabajando en otro vehículo (proceso "${conflict.processName}"). Hay que pausarlo o completarlo antes de iniciar este.`,
         );
       }
     }
@@ -223,8 +283,11 @@ export class TrackingService {
     log.status = 'in_progress';
     log.startedAt = new Date();
     log.completedAt = null;
-    if (technicianId)   log.technicianId   = technicianId;
-    if (technicianName) log.technicianName = technicianName;
+    // Persistir el técnico resuelto (aunque haya venido del fallback, no de un
+    // parámetro explícito) para que quede consistente de acá en más: futuros
+    // chequeos de conflicto, reportes de productividad y la tarjeta del kanban.
+    if (effectiveTechnicianId)   log.technicianId   = effectiveTechnicianId;
+    if (effectiveTechnicianName) log.technicianName = effectiveTechnicianName;
     return this.logRepo.save(log);
   }
 

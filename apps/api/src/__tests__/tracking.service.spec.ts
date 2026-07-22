@@ -5,6 +5,7 @@ import { TrackingService } from '../modules/tracking/tracking.service';
 import { TrackingLog } from '../modules/tracking/tracking-log.entity';
 import { Appointment } from '../modules/appointments/appointment.entity';
 import { BodyshopEntry } from '../modules/bodyshop/bodyshop-entry.entity';
+import { BodyshopProcessTech } from '../modules/bodyshop/bodyshop-process-tech.entity';
 import { Workshop } from '../modules/workshops/workshop.entity';
 
 // ─── IDs ─────────────────────────────────────────────────────────────────────
@@ -126,23 +127,32 @@ function makeWorkshopRepo(overrides: any = {}) {
   };
 }
 
+function makeProcessTechRepo(overrides: any = {}) {
+  return {
+    findOne: jest.fn().mockResolvedValue(null),
+    ...overrides,
+  };
+}
+
 // ─── Module builder ───────────────────────────────────────────────────────────
 
 async function build(repos: {
-  logRepo?: any; apptRepo?: any; entryRepo?: any; workshopRepo?: any;
+  logRepo?: any; apptRepo?: any; entryRepo?: any; workshopRepo?: any; processTechRepo?: any;
 } = {}) {
-  const logRepo      = repos.logRepo      ?? makeLogRepo();
-  const apptRepo     = repos.apptRepo     ?? makeApptRepo();
-  const entryRepo    = repos.entryRepo    ?? makeEntryRepo();
-  const workshopRepo = repos.workshopRepo ?? makeWorkshopRepo();
+  const logRepo         = repos.logRepo         ?? makeLogRepo();
+  const apptRepo        = repos.apptRepo        ?? makeApptRepo();
+  const entryRepo       = repos.entryRepo       ?? makeEntryRepo();
+  const workshopRepo    = repos.workshopRepo    ?? makeWorkshopRepo();
+  const processTechRepo = repos.processTechRepo ?? makeProcessTechRepo();
 
   const mod = await Test.createTestingModule({
     providers: [
       TrackingService,
-      { provide: getRepositoryToken(TrackingLog),    useValue: logRepo },
-      { provide: getRepositoryToken(Appointment),    useValue: apptRepo },
-      { provide: getRepositoryToken(BodyshopEntry),  useValue: entryRepo },
-      { provide: getRepositoryToken(Workshop),       useValue: workshopRepo },
+      { provide: getRepositoryToken(TrackingLog),         useValue: logRepo },
+      { provide: getRepositoryToken(Appointment),         useValue: apptRepo },
+      { provide: getRepositoryToken(BodyshopEntry),       useValue: entryRepo },
+      { provide: getRepositoryToken(BodyshopProcessTech), useValue: processTechRepo },
+      { provide: getRepositoryToken(Workshop),            useValue: workshopRepo },
     ],
   }).compile();
 
@@ -460,6 +470,49 @@ describe('TrackingService', () => {
       const { service } = await build({ logRepo });
       await expect(service.startProcess(LOG_ID)).rejects.toThrow(/Luis Benitez.*Chapería/);
       expect(logRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects starting a bodyshop process when NEITHER the log NOR the param has technicianId — resolves from bodyshop_process_techs (the actual real-world QA scenario: fresh entries never get technicianId written onto the log at all)', async () => {
+      const log = makeLog({
+        status: 'pending', sourceType: 'bodyshop', sourceId: 'entry-002',
+        processCode: 'BODYWORK', technicianId: null,
+      });
+      const conflict = makeLog({
+        id: 'log-other', sourceType: 'bodyshop', sourceId: 'entry-001', status: 'in_progress',
+        technicianId: TECH_ID, technicianName: 'Luis Benitez', processName: 'Chapería',
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(log)      // the log being started
+          .mockResolvedValueOnce(conflict), // conflict search, once resolved
+      });
+      const processTechRepo = makeProcessTechRepo({
+        findOne: jest.fn().mockResolvedValue({
+          entryId: 'entry-002', process: 'BODYWORK', technicianId: TECH_ID,
+          technician: { name: 'Luis Benitez' },
+        }),
+      });
+
+      const { service } = await build({ logRepo, processTechRepo });
+      await expect(service.startProcess(LOG_ID)).rejects.toThrow(/Luis Benitez.*Chapería/);
+      expect(processTechRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { entryId: 'entry-002', process: 'BODYWORK' } }),
+      );
+      expect(logRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('allows starting a bodyshop process when bodyshop_process_techs has no assignment yet (no false positive)', async () => {
+      const log = makeLog({
+        status: 'pending', sourceType: 'bodyshop', sourceId: 'entry-003',
+        processCode: 'BODYWORK', technicianId: null,
+      });
+      const logRepo = makeLogRepo({ findOne: jest.fn().mockResolvedValue(log) });
+      const processTechRepo = makeProcessTechRepo({ findOne: jest.fn().mockResolvedValue(null) });
+
+      const { service } = await build({ logRepo, processTechRepo });
+      await service.startProcess(LOG_ID);
+
+      expect(logRepo.save).toHaveBeenCalledWith(expect.objectContaining({ status: 'in_progress' }));
     });
 
     it('allows starting when the technician\'s other in_progress log is on the same vehicle', async () => {
