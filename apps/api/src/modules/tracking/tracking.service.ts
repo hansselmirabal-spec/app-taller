@@ -188,13 +188,18 @@ export class TrackingService {
 
     // Un técnico no puede quedar "in_progress" en dos vehículos a la vez —
     // corrompería horas reales y KPIs de productividad si no se valida acá.
-    if (technicianId) {
+    // El botón "Iniciar" del kanban llama startProcess(logId) sin pasar
+    // technicianId — el técnico real es el que ya quedó asignado al log
+    // (auto-asignación al crear el ingreso, o asignación manual posterior),
+    // no un parámetro que la UI nunca envía.
+    const effectiveTechnicianId = technicianId ?? log.technicianId ?? undefined;
+    if (effectiveTechnicianId) {
       const conflict = await this.logRepo.findOne({
-        where: { technicianId, status: 'in_progress' },
+        where: { technicianId: effectiveTechnicianId, status: 'in_progress' },
       });
       if (conflict && conflict.id !== logId && conflict.sourceId !== log.sourceId) {
         throw new BadRequestException(
-          `${technicianName ?? 'El técnico'} ya está trabajando en otro vehículo (proceso "${conflict.processName}"). Hay que pausarlo o completarlo antes de iniciar este.`,
+          `${conflict.technicianName ?? technicianName ?? log.technicianName ?? 'El técnico'} ya está trabajando en otro vehículo (proceso "${conflict.processName}"). Hay que pausarlo o completarlo antes de iniciar este.`,
         );
       }
     }

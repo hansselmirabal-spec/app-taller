@@ -79,6 +79,23 @@ export function sumBodyshopHours(entry: { bodyworkHours: number; prepHours: numb
   return round1(entry.bodyworkHours + entry.prepHours + entry.paintHours);
 }
 
+// Igual que sumBodyshopHours pero sumando también los procesos extra (Pulido,
+// Mecánica, etc. — guardados en entry.processes) que no viven en las columnas
+// bodyworkHours/prepHours/paintHours. Sin esto el "Total" del detalle de un
+// vehículo queda por debajo de lo real y no coincide con "Duración plan" del
+// kanban (QA reportó exactamente esta inconsistencia).
+const CORE_PROCESS_CODES = new Set(['BODYWORK', 'PREP', 'PAINT']);
+
+export function sumBodyshopHoursWithExtras(entry: {
+  bodyworkHours: number; prepHours: number; paintHours: number;
+  processes?: { code: string; hours: number }[] | null;
+}): number {
+  const extras = (entry.processes ?? [])
+    .filter(p => !CORE_PROCESS_CODES.has(p.code))
+    .reduce((sum, p) => sum + Number(p.hours), 0);
+  return round1(entry.bodyworkHours + entry.prepHours + entry.paintHours + extras);
+}
+
 export function statusLabel(status: string): string {
   const map: Record<string, string> = {
     scheduled: 'Agendado',

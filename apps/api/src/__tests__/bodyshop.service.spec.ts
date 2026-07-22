@@ -618,4 +618,35 @@ describe('BodyshopService', () => {
       expect(ranks[0]).toBe(1);
     });
   });
+
+  // ── getSchedule ──────────────────────────────────────────────────────────
+  // QA reportó una inconsistencia: el kanban mostraba "Duración plan: 32.9h"
+  // (incluyendo procesos extra como Pulido/Mecánica) pero el detalle del
+  // vehículo en Agenda mostraba "32.2h" — solo Chapería+Prep+Pintura.
+  // totalPlannedHours acá debe incluir los procesos extra igual que el kanban.
+  describe('getSchedule', () => {
+    it('totalPlannedHours suma también los procesos extra (Pulido, Mecánica) desde tracking_logs', async () => {
+      const scheduleEntry = {
+        ...MOCK_ENTRY, id: 'e-sched', date: '2026-06-10', stayDays: 5,
+        bodyworkHours: 17.5, prepHours: 17.2, paintHours: 7.7,
+        processTechsList: [],
+      };
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(makeQb([scheduleEntry])) });
+
+      const trackingLogRepo = makeTrackingLogRepo();
+      trackingLogRepo.find = jest.fn().mockResolvedValue([
+        { sourceId: 'e-sched', processCode: 'BODYWORK', plannedHours: 17.5, status: 'pending', processType: 'MOTHER' },
+        { sourceId: 'e-sched', processCode: 'PREP',     plannedHours: 17.2, status: 'pending', processType: 'MOTHER' },
+        { sourceId: 'e-sched', processCode: 'PAINT',    plannedHours: 7.7,  status: 'pending', processType: 'MOTHER' },
+        { sourceId: 'e-sched', processCode: 'POLISH',   plannedHours: 0.3,  status: 'pending', processType: 'PARALLEL' },
+        { sourceId: 'e-sched', processCode: 'MECHANIC', plannedHours: 0.4,  status: 'pending', processType: 'PARALLEL' },
+      ]);
+
+      await build({ entryRepo, trackingLogRepo });
+      const result = await service.getSchedule(WS_ID, '2026-06-01', '2026-06-30');
+
+      const entry = result.entries.find((e: any) => e.id === 'e-sched');
+      expect(entry?.totalPlannedHours).toBe(43.1); // 17.5 + 17.2 + 7.7 + 0.3 + 0.4
+    });
+  });
 });

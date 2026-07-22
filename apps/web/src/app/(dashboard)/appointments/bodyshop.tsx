@@ -12,7 +12,7 @@ import { useBodyshopDayCapacity, useCancelBodyshopEntry, useBodyshopEntriesKanba
 import { useModulePermission } from '@/hooks/use-module-permission';
 import { useTechnicians } from '@/hooks/use-technicians';
 import { useDailyCapacity } from '@/hooks/use-capacity';
-import { formatDate, sumBodyshopHours } from '@/lib/utils';
+import { formatDate, sumBodyshopHours, sumBodyshopHoursWithExtras } from '@/lib/utils';
 import { getWeekDays, entriesOnDay } from '@/lib/bodyshop-calendar';
 import { ActivitiesPanel } from '@/components/kanban/activities-panel';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
@@ -354,7 +354,7 @@ function EntryCard({
   cancelled?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const totalHours = sumBodyshopHours(entry);
+  const totalHours = sumBodyshopHoursWithExtras(entry);
   const isInShop = entry.date < selectedDate && entry.status === 'scheduled';
   const badgeLabel = isInShop ? 'En taller' : entryStatusLabel[entry.status];
   const badgeClass = isInShop ? 'bg-orange-100 text-orange-700' : entryStatusStyles[entry.status];
@@ -908,22 +908,26 @@ function EntryPopup({
 }) {
   const { data: technicians = [] } = useTechnicians();
   const patchHours = usePatchBodyshopEntryHours();
-  const totalHours = sumBodyshopHours(entry);
+  const totalHours = sumBodyshopHoursWithExtras(entry);
 
-  // Estado del panel de ajuste de horas
+  // Estado del panel de ajuste de horas. Se guarda como STRING mientras se tipea
+  // (no como número parseado en cada tecla) — guardar el número ya parseado de
+  // vuelta en un input controlado le hace perder al usuario el punto/coma decimal
+  // recién tipeado (18.2 → se ve "18", la próxima tecla da "182"). Se convierte a
+  // número recién al guardar.
   const [adjusting, setAdjusting]     = useState(false);
-  const [adjBW, setAdjBW]             = useState(entry.bodyworkHours);
-  const [adjPrep, setAdjPrep]         = useState(entry.prepHours);
-  const [adjPaint, setAdjPaint]       = useState(entry.paintHours);
+  const [adjBW, setAdjBW]             = useState(String(entry.bodyworkHours));
+  const [adjPrep, setAdjPrep]         = useState(String(entry.prepHours));
+  const [adjPaint, setAdjPaint]       = useState(String(entry.paintHours));
   const [adjStay, setAdjStay]         = useState(entry.stayDays);
   const [adjErr, setAdjErr]           = useState('');
 
   // Sync adjust state when entry prop updates (cache refetch post-save)
   useEffect(() => {
     if (!adjusting) {
-      setAdjBW(entry.bodyworkHours);
-      setAdjPrep(entry.prepHours);
-      setAdjPaint(entry.paintHours);
+      setAdjBW(String(entry.bodyworkHours));
+      setAdjPrep(String(entry.prepHours));
+      setAdjPaint(String(entry.paintHours));
       setAdjStay(entry.stayDays);
     }
   }, [entry.bodyworkHours, entry.prepHours, entry.paintHours, entry.stayDays, adjusting]);
@@ -933,9 +937,9 @@ function EntryPopup({
     try {
       await patchHours.mutateAsync({
         id: entry.id,
-        bodyworkHours: Number(adjBW),
-        prepHours:     Number(adjPrep),
-        paintHours:    Number(adjPaint),
+        bodyworkHours: Number(adjBW.replace(',', '.')) || 0,
+        prepHours:     Number(adjPrep.replace(',', '.')) || 0,
+        paintHours:    Number(adjPaint.replace(',', '.')) || 0,
         stayDays:      Number(adjStay),
       });
       setAdjusting(false);
@@ -1052,7 +1056,7 @@ function EntryPopup({
                 {/* Botón ajustar horas */}
                 {!adjusting && (
                   <button
-                    onClick={() => { setAdjBW(entry.bodyworkHours); setAdjPrep(entry.prepHours); setAdjPaint(entry.paintHours); setAdjStay(entry.stayDays); setAdjErr(''); setAdjusting(true); }}
+                    onClick={() => { setAdjBW(String(entry.bodyworkHours)); setAdjPrep(String(entry.prepHours)); setAdjPaint(String(entry.paintHours)); setAdjStay(entry.stayDays); setAdjErr(''); setAdjusting(true); }}
                     className="w-full mt-1 flex items-center justify-center gap-1.5 text-xs font-semibold text-amber-700 border border-amber-200 bg-amber-50 hover:bg-amber-100 rounded-lg px-3 py-1.5 transition-colors"
                   >
                     <Clock className="h-3.5 w-3.5" /> Ajustar horas
@@ -1072,7 +1076,7 @@ function EntryPopup({
                         <span className="text-xs text-slate-600 w-16 flex-shrink-0">{label}</span>
                         <input
                           type="text" inputMode="decimal" value={val}
-                          onChange={e => set(parseFloat(e.target.value.replace(',', '.')) || 0)}
+                          onChange={e => { if (/^[0-9]*[.,]?[0-9]*$/.test(e.target.value)) set(e.target.value); }}
                           className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-amber-400"
                         />
                         <span className="text-xs text-slate-400">h</span>
