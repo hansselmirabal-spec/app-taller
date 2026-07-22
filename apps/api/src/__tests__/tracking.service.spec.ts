@@ -445,6 +445,23 @@ describe('TrackingService', () => {
       expect(logRepo.save).not.toHaveBeenCalled();
     });
 
+    it('rejects starting via the real UI call shape — startProcess(logId) with NO technicianId param, relying on the log\'s already-assigned technician (QA-reported bug: the kanban "Iniciar" button never sends technicianId)', async () => {
+      const log = makeLog({ status: 'pending', sourceId: 'appt-002', technicianId: TECH_ID });
+      const conflict = makeLog({
+        id: 'log-other', sourceId: APPT_ID, status: 'in_progress',
+        technicianId: TECH_ID, technicianName: 'Luis Benitez', processName: 'Chapería',
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(log)
+          .mockResolvedValueOnce(conflict),
+      });
+
+      const { service } = await build({ logRepo });
+      await expect(service.startProcess(LOG_ID)).rejects.toThrow(/Luis Benitez.*Chapería/);
+      expect(logRepo.save).not.toHaveBeenCalled();
+    });
+
     it('allows starting when the technician\'s other in_progress log is on the same vehicle', async () => {
       const log = makeLog({ status: 'pending', processType: 'PARALLEL' });
       const sameVehicleLog = makeLog({

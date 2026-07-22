@@ -1166,8 +1166,17 @@ export class BodyshopService {
       const noTrackingStarted = currentTrackingCode === null && plannedProcessToday !== null && e.status !== 'done';
       const isDelayed = delayDays > 0 || noTrackingStarted || (plannedProcessToday !== null && actualOrder < plannedOrder && e.status !== 'done');
 
-      // Horas totales acumuladas (para resumen semanal)
-      const totalPlannedHours = round2(bwH + prepH + pntH);
+      // Horas totales acumuladas (para resumen semanal). Suma también los procesos
+      // extra (Pulido, Mecánica, etc.) desde tracking_logs — esos no pasan por el
+      // motor de capacidad (no tienen processWindow ni afectan plannedExitDate a
+      // propósito, ver auditoría #72), pero sí deben contar en el total de horas
+      // o queda inconsistente contra "Duración plan" del kanban (QA reportó esto:
+      // 32.9h en el kanban vs 32.2h acá, la diferencia exacta de los extras).
+      const allEntryLogs = logsByEntry.get(e.id) ?? [];
+      const extraHours = allEntryLogs
+        .filter(l => !['BODYWORK', 'PREP', 'PAINT', 'AGENDA'].includes(l.processCode))
+        .reduce((sum, l) => sum + Number(l.plannedHours), 0);
+      const totalPlannedHours = round2(bwH + prepH + pntH + extraHours);
 
       return {
         id:                  e.id,

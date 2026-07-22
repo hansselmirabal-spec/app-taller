@@ -11,7 +11,7 @@ import {
   type KanbanColConfig,
   type KanbanFieldConfig,
 } from '@/components/kanban/settings-modal';
-import { cn, sumBodyshopHours } from '@/lib/utils';
+import { cn, sumBodyshopHours, sumBodyshopHoursWithExtras } from '@/lib/utils';
 import type { BodyshopEntry } from '@/types';
 
 // ─── Config defaults ──────────────────────────────────────────────────────────
@@ -237,7 +237,7 @@ function BodyshopCard({
   onDragEnd: () => void;
   onClick: () => void;
 }) {
-  const totalHours = sumBodyshopHours(entry);
+  const totalHours = sumBodyshopHoursWithExtras(entry);
   const late = overdueDays(entry, today);
 
   return (
