@@ -217,7 +217,7 @@ export default function SimuladorPresupuestoPage() {
         budgetNumber:  budgetNumber.trim() || undefined,
         status:        'scheduled',
       } as any);
-      router.push(`/appointments/bodyshop?entryId=${entry.id}`);
+      router.push(`/appointments?openId=${entry.id}`);
     } catch (err: any) {
       setEnterError(err.message ?? 'Error al ingresar al taller');
     } finally {

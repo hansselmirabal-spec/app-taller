@@ -9,6 +9,19 @@ export interface VehicleData {
   customerName: string;
 }
 
+// La respuesta real de /api/vehicle-lookup viene anidada como
+// { found, vehicle: {...}, customer: {...} } — este hook la aplana acá,
+// en el único punto donde entra el dato externo, con default '' para
+// que nunca se filtre un campo undefined al estado del formulario.
+export function toVehicleData(raw: any): VehicleData {
+  return {
+    plate:        raw?.vehicle?.plate ?? '',
+    chassis:      raw?.vehicle?.chassis ?? '',
+    model:        raw?.vehicle?.vehicleType ?? '',
+    customerName: raw?.customer?.customerName ?? '',
+  };
+}
+
 export function useVehicleLookup() {
   const [isLooking, setIsLooking]     = useState(false);
   const [vehicleData, setVehicleData] = useState<VehicleData | null>(null);
@@ -22,10 +35,11 @@ export function useVehicleLookup() {
     try {
       const res = await fetch(`/api/vehicle-lookup?plate=${encodeURIComponent(normalized)}`);
       if (!res.ok) return null;
-      const data = await res.json();
-      if (!data.found) return null;
-      setVehicleData(data as VehicleData);
-      return data as VehicleData;
+      const raw = await res.json();
+      if (!raw.found) return null;
+      const data = toVehicleData(raw);
+      setVehicleData(data);
+      return data;
     } catch {
       return null;
     } finally {
