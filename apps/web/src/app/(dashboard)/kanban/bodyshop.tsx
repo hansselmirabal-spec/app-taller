@@ -25,11 +25,11 @@ const DEFAULT_COLS: KanbanColConfig[] = [
 
 const DEFAULT_FIELDS: KanbanFieldConfig[] = [
   { id: 'work_type', label: 'Tipo de trabajo', visible: true },
-  { id: 'severity',  label: 'Severidad',       visible: true },
-  { id: 'channel',   label: 'Canal',           visible: true },
-  { id: 'hours',     label: 'Horas totales',   visible: true },
-  { id: 'stay_days', label: 'Permanencia',     visible: true },
-  { id: 'date',      label: 'Fecha ingreso',   visible: true },
+  { id: 'severity',  label: 'Severidad',       visible: false },
+  { id: 'channel',   label: 'Canal',           visible: false },
+  { id: 'hours',     label: 'Horas totales',   visible: false },
+  { id: 'stay_days', label: 'Permanencia',     visible: false },
+  { id: 'date',      label: 'Fecha ingreso',   visible: false },
 ];
 
 const STORAGE_KEY = 'bodyshop_kanban_config_v1';
@@ -239,6 +239,13 @@ function BodyshopCard({
 }) {
   const totalHours = sumBodyshopHoursWithExtras(entry);
   const late = overdueDays(entry, today);
+  const [expanded, setExpanded] = useState(false);
+  const showSeverity = fields.severity || expanded;
+  const showChannel  = fields.channel  || expanded;
+  const showHours    = fields.hours    || expanded;
+  const showStayDays = fields.stay_days || expanded;
+  const showDate     = fields.date     || expanded;
+  const hasExtraDetail = !fields.severity || !fields.channel || !fields.hours || !fields.stay_days || !fields.date;
 
   return (
     <div
@@ -279,14 +286,14 @@ function BodyshopCard({
         )}
       </div>
 
-      {(fields.severity || fields.channel) && (
+      {(showSeverity || showChannel) && (
         <div className="flex items-center gap-2 flex-wrap mb-1.5">
-          {fields.severity && (
+          {showSeverity && (
             <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${SEVERITY_STYLE[entry.workType?.severity ?? 'medium']}`}>
               {SEVERITY_LABEL[entry.workType?.severity ?? 'medium']}
             </span>
           )}
-          {fields.channel && (
+          {showChannel && (
             <span className="flex items-center gap-1 text-xs text-slate-500">
               {CHANNEL_ICON[entry.channel]}
               {CHANNEL_LABEL[entry.channel]}
@@ -295,12 +302,22 @@ function BodyshopCard({
         </div>
       )}
 
-      {(fields.hours || fields.stay_days || fields.date) && (
+      {(showHours || showStayDays || showDate) && (
         <div className="flex items-center gap-2.5 text-xs text-slate-400 flex-wrap mt-1.5">
-          {fields.hours && <span>{totalHours}h</span>}
-          {fields.stay_days && <span>{entry.stayDays}d</span>}
-          {fields.date && <span className="ml-auto font-mono">{fmtDate(entry.date)}</span>}
+          {showHours && <span>{totalHours}h</span>}
+          {showStayDays && <span>{entry.stayDays}d</span>}
+          {showDate && <span className="ml-auto font-mono">{fmtDate(entry.date)}</span>}
         </div>
+      )}
+
+      {hasExtraDetail && (
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
+          className="mt-1.5 text-[11px] font-medium text-slate-400 hover:text-slate-600"
+        >
+          {expanded ? 'Ver menos' : 'Ver más'}
+        </button>
       )}
     </div>
   );

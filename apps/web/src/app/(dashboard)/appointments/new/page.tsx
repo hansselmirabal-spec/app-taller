@@ -3,10 +3,11 @@ import { useState, Suspense, useMemo, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, AlertTriangle, Clock, User, Car, Wrench,
-  CalendarDays, CheckCircle2, Layers, UserCheck, Hash,
+  CalendarDays, CheckCircle2, Layers, UserCheck, Hash, Plus,
 } from 'lucide-react';
 import { useTechnicians } from '@/hooks/use-technicians';
-import { useServiceTypes } from '@/hooks/use-service-types';
+import { useServiceTypes, useCreateServiceType } from '@/hooks/use-service-types';
+import { Button } from '@/components/ui/button';
 import { useDailyCapacity } from '@/hooks/use-capacity';
 import { useCreateAppointment, useAppointmentsByDate } from '@/hooks/use-appointments';
 import { useWorkTypes } from '@/hooks/use-work-types';
@@ -36,6 +37,7 @@ import { es } from 'date-fns/locale';
 const SLOT_INTERVAL = 30;
 const HOUR_START = 8;
 const HOUR_END = 18;
+const QUICK_SERVICE_TYPE_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899'];
 
 // Chapas y chasis siempre incluyen letras. Un valor solo numérico suele ser
 // un número de OT o de cliente ingresado por error en este campo.
@@ -120,6 +122,22 @@ function MechanicNewForm() {
   const [telPrincipal,   setTelPrincipal]   = useState('');
   const [celular,        setCelular]        = useState('');
   const [email,          setEmail]          = useState('');
+  const [showMoreClientFields, setShowMoreClientFields] = useState(false);
+  const [showQuickServiceType, setShowQuickServiceType] = useState(false);
+  const [quickServiceType, setQuickServiceType] = useState({ name: '', durationHours: '1.5', color: QUICK_SERVICE_TYPE_COLORS[1] });
+  const createServiceType = useCreateServiceType();
+
+  async function handleCreateQuickServiceType(e: React.FormEvent) {
+    e.preventDefault();
+    const created = await createServiceType.mutateAsync({
+      name: quickServiceType.name,
+      durationHours: parseFloat(quickServiceType.durationHours),
+      color: quickServiceType.color,
+    });
+    setServiceTypeId(created.id);
+    setQuickServiceType({ name: '', durationHours: '1.5', color: QUICK_SERVICE_TYPE_COLORS[1] });
+    setShowQuickServiceType(false);
+  }
 
   async function handleVehicleLookup() {
     const value = searchValue.trim().toUpperCase();
@@ -302,7 +320,7 @@ function MechanicNewForm() {
         advisorCode:        advisorCode        || undefined,
         advisorName:        advisorName        || undefined,
         advisorSucursalId:  advisorSucursalId  || undefined,
-        phone:              (telPrincipal || celular || '').trim() || undefined,
+        phone:              (telPrincipal || celular || telOficina || '').trim() || undefined,
         vehicleDescription: (vehicleType || modelYear || '').trim() || undefined,
         chasis:             chassis || undefined,
       });
@@ -444,37 +462,56 @@ function MechanicNewForm() {
                 </span>
               </div>
               <div className="px-5 py-4 space-y-4">
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   <Field label="Nombre" error={submitted && missingFields.customerName} required>
                     <Input value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Juan Perez" className={errCls(submitted && missingFields.customerName)} />
                   </Field>
-                  <Field label="N° Cliente">
-                    <Input value={customerNumber} onChange={e => setCustomerNumber(e.target.value)} placeholder="68110" />
-                  </Field>
-                  <Field label="Cédula/Ident.">
-                    <Input value={cedula} onChange={e => setCedula(e.target.value)} placeholder="5548838" />
-                  </Field>
-                  <Field label="RUC">
-                    <Input value={ruc} onChange={e => setRuc(e.target.value)} placeholder="5548838-1" />
-                  </Field>
-                </div>
-                <div className="grid grid-cols-5 gap-4">
-                  <Field label="Dirección">
-                    <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Washington 793" />
-                  </Field>
-                  <Field label="Tel. Oficina">
-                    <Input value={telOficina} onChange={e => setTelOficina(e.target.value)} placeholder="+595 21..." />
-                  </Field>
-                  <Field label="Tel. Principal">
-                    <Input value={telPrincipal} onChange={e => setTelPrincipal(e.target.value)} placeholder="+595 21..." />
-                  </Field>
-                  <Field label="Celular">
-                    <Input value={celular} onChange={e => setCelular(e.target.value)} placeholder="+595 981..." />
+                  <Field label="Teléfono">
+                    <Input
+                      value={telPrincipal || celular || telOficina}
+                      onChange={e => setTelPrincipal(e.target.value)}
+                      placeholder="+595 981..."
+                    />
                   </Field>
                   <Field label="Email">
                     <Input value={email} onChange={e => setEmail(e.target.value)} placeholder="cliente@email.com" type="email" />
                   </Field>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowMoreClientFields(v => !v)}
+                  className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                >
+                  {showMoreClientFields ? 'Ocultar datos adicionales' : 'Mostrar más datos'}
+                </button>
+
+                {showMoreClientFields && (
+                  <>
+                    <div className="grid grid-cols-4 gap-4">
+                      <Field label="N° Cliente">
+                        <Input value={customerNumber} onChange={e => setCustomerNumber(e.target.value)} placeholder="68110" />
+                      </Field>
+                      <Field label="Cédula/Ident.">
+                        <Input value={cedula} onChange={e => setCedula(e.target.value)} placeholder="5548838" />
+                      </Field>
+                      <Field label="RUC">
+                        <Input value={ruc} onChange={e => setRuc(e.target.value)} placeholder="5548838-1" />
+                      </Field>
+                      <Field label="Dirección">
+                        <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Washington 793" />
+                      </Field>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <Field label="Tel. Oficina">
+                        <Input value={telOficina} onChange={e => setTelOficina(e.target.value)} placeholder="+595 21..." />
+                      </Field>
+                      <Field label="Celular">
+                        <Input value={celular} onChange={e => setCelular(e.target.value)} placeholder="+595 981..." />
+                      </Field>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -502,6 +539,15 @@ function MechanicNewForm() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {serviceTypes.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowQuickServiceType(true)}
+                        className="mt-1.5 flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700"
+                      >
+                        <Plus className="h-3 w-3" /> Crear tipo de servicio
+                      </button>
+                    )}
                   </Field>
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold uppercase tracking-wide text-slate-600">Fecha</label>
@@ -838,6 +884,53 @@ function MechanicNewForm() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Dialog modal: alta rápida de tipo de servicio */}
+      <Dialog open={showQuickServiceType} onOpenChange={setShowQuickServiceType}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Crear tipo de servicio</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreateQuickServiceType} className="space-y-3">
+            <div className="flex gap-3">
+              <div className="flex-1 space-y-1.5">
+                <label className="text-xs font-medium text-slate-700">Nombre</label>
+                <Input
+                  value={quickServiceType.name}
+                  onChange={e => setQuickServiceType({ ...quickServiceType, name: e.target.value })}
+                  placeholder="Ej: Service completo"
+                  required
+                  autoFocus
+                />
+              </div>
+              <div className="w-28 space-y-1.5">
+                <label className="text-xs font-medium text-slate-700">Duración (hs)</label>
+                <Input
+                  type="number"
+                  value={quickServiceType.durationHours}
+                  onChange={e => setQuickServiceType({ ...quickServiceType, durationHours: e.target.value })}
+                  min="0.5" max="8" step="0.5"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-700">Color</label>
+              <div className="flex gap-2 flex-wrap">
+                {QUICK_SERVICE_TYPE_COLORS.map(c => (
+                  <button key={c} type="button" onClick={() => setQuickServiceType({ ...quickServiceType, color: c })}
+                    className={`h-6 w-6 rounded-full transition-all ${quickServiceType.color === c ? 'ring-2 ring-offset-2 ring-slate-400 scale-110' : 'hover:scale-105'}`}
+                    style={{ background: c }}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button type="submit" size="sm" disabled={createServiceType.isPending}>Guardar</Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => setShowQuickServiceType(false)}>Cancelar</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
     </>
   );
@@ -902,6 +995,7 @@ function BodyshopNewForm() {
   const [telPrincipal,   setTelPrincipal]   = useState('');
   const [celular,        setCelular]        = useState('');
   const [email,          setEmail]          = useState('');
+  const [showMoreClientFields, setShowMoreClientFields] = useState(false);
 
   // ── Step 2: horas del presupuesto (input directo) ───────────────────────────
   const [directBodyworkHours, setDirectBodyworkHours] = useState('');
@@ -976,6 +1070,15 @@ function BodyshopNewForm() {
       setSimulating(false);
     }
   }
+
+  // Auto-simular disponibilidad apenas hay horas + fecha, para que el usuario
+  // se entere de la capacidad ANTES de llegar al paso de confirmación.
+  useEffect(() => {
+    if (totalH === 0 || !date) return;
+    const t = setTimeout(() => { handleSimulate(); }, 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalH, date]);
 
   async function handleConfirm() {
     if (isSubmitting) return;
@@ -1123,7 +1226,7 @@ function BodyshopNewForm() {
   }
 
   const step1Valid = !!(customerName.trim() && plate.trim());
-  const step2Valid = totalH > 0;
+  const step2Valid = totalH > 0 && !!date;
 
   return (
     <>
@@ -1258,37 +1361,50 @@ function BodyshopNewForm() {
                     <Field label="Nombre del cliente" required>
                       <Input value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Juan Pérez" />
                     </Field>
-                    <Field label="Nro. cliente">
-                      <Input value={customerNumber} onChange={e => setCustomerNumber(e.target.value)} placeholder="C-00123" />
-                    </Field>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Field label="Cédula">
-                      <Input value={cedula} onChange={e => setCedula(e.target.value)} placeholder="1234567" />
-                    </Field>
-                    <Field label="RUC">
-                      <Input value={ruc} onChange={e => setRuc(e.target.value)} placeholder="80012345-8" />
-                    </Field>
-                  </div>
-                  <div className="grid grid-cols-3 gap-4">
                     <Field label="Tel. principal">
-                      <PhoneInput value={telPrincipal} onChange={setTelPrincipal} />
-                    </Field>
-                    <Field label="Celular">
-                      <PhoneInput value={celular} onChange={setCelular} />
-                    </Field>
-                    <Field label="Tel. oficina">
-                      <PhoneInput value={telOficina} onChange={setTelOficina} />
+                      <PhoneInput value={telPrincipal || celular || telOficina} onChange={setTelPrincipal} />
                     </Field>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Field label="Email">
-                      <Input value={email} onChange={e => setEmail(e.target.value)} type="email" placeholder="juan@mail.com" />
-                    </Field>
-                    <Field label="Dirección">
-                      <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Av. República 123" />
-                    </Field>
-                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowMoreClientFields(v => !v)}
+                    className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    {showMoreClientFields ? 'Ocultar datos adicionales' : 'Mostrar más datos'}
+                  </button>
+
+                  {showMoreClientFields && (
+                    <>
+                      <div className="grid grid-cols-2 gap-4">
+                        <Field label="Nro. cliente">
+                          <Input value={customerNumber} onChange={e => setCustomerNumber(e.target.value)} placeholder="C-00123" />
+                        </Field>
+                        <Field label="Cédula">
+                          <Input value={cedula} onChange={e => setCedula(e.target.value)} placeholder="1234567" />
+                        </Field>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <Field label="RUC">
+                          <Input value={ruc} onChange={e => setRuc(e.target.value)} placeholder="80012345-8" />
+                        </Field>
+                        <Field label="Dirección">
+                          <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Av. República 123" />
+                        </Field>
+                      </div>
+                      <div className="grid grid-cols-3 gap-4">
+                        <Field label="Celular">
+                          <PhoneInput value={celular} onChange={setCelular} />
+                        </Field>
+                        <Field label="Tel. oficina">
+                          <PhoneInput value={telOficina} onChange={setTelOficina} />
+                        </Field>
+                        <Field label="Email">
+                          <Input value={email} onChange={e => setEmail(e.target.value)} type="email" placeholder="juan@mail.com" />
+                        </Field>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1398,6 +1514,38 @@ function BodyshopNewForm() {
                 )}
               </div>
 
+              {/* Fecha de ingreso — se pide acá para poder chequear disponibilidad antes de avanzar */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="bg-slate-900 px-5 py-3 flex items-center gap-2">
+                  <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Fecha de ingreso</span>
+                </div>
+                <div className="px-5 py-4">
+                  <Field label="Fecha de ingreso" required>
+                    <Input type="date" value={date} onChange={e => { setDate(e.target.value); setSimulation(null); }} />
+                  </Field>
+                </div>
+                {totalH > 0 && date && (
+                  <div className="px-5 pb-4">
+                    {simulating ? (
+                      <p className="text-xs text-slate-400 italic flex items-center gap-1.5">
+                        <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        Chequeando disponibilidad...
+                      </p>
+                    ) : simulation && (!simulation.slots || simulation.slots.length === 0) ? (
+                      <Alert variant="danger"><p>Sin disponibilidad en los próximos 90 días para estas horas. Podés ajustar la fecha o las horas antes de seguir.</p></Alert>
+                    ) : simulation && simulation.estimatedFinishDate ? (
+                      <Alert variant="success">
+                        <p className="text-xs">Hay capacidad — entrega estimada {format(parseISO(simulation.estimatedFinishDate + 'T12:00:00'), "EEE d 'de' MMMM", { locale: es })}.</p>
+                      </Alert>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+
               {/* Notes */}
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="bg-slate-900 px-5 py-3">
@@ -1432,16 +1580,13 @@ function BodyshopNewForm() {
           {/* ──────────────── STEP 3: Date + Schedule + Confirm ───────────── */}
           {step === 3 && (
             <div className="max-w-2xl mx-auto space-y-5">
-              {/* Date + channel */}
+              {/* Channel */}
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="bg-slate-900 px-5 py-3 flex items-center gap-2">
                   <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
-                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Fecha y Canal</span>
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Canal de ingreso</span>
                 </div>
                 <div className="px-5 py-4 grid grid-cols-2 gap-4">
-                  <Field label="Fecha de ingreso" required>
-                    <Input type="date" value={date} onChange={e => { setDate(e.target.value); setSimulation(null); }} />
-                  </Field>
                   <Field label="Canal de ingreso">
                     <Select value={channel} onValueChange={v => setChannel(v as BodyshopChannel)}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1847,20 +1992,23 @@ function errCls(active: boolean) {
   return active ? 'border-red-400 bg-red-50 focus-visible:ring-red-400' : '';
 }
 
-type AlertVariant = 'warning' | 'danger' | 'orange';
+type AlertVariant = 'warning' | 'danger' | 'orange' | 'success';
 
 function Alert({ variant, children }: { variant: AlertVariant; children: React.ReactNode }) {
   const styles: Record<AlertVariant, string> = {
     warning: 'border-amber-300 bg-amber-50 text-amber-800',
     danger:  'border-red-300 bg-red-50 text-red-800',
     orange:  'border-orange-300 bg-orange-50 text-orange-900',
+    success: 'border-emerald-300 bg-emerald-50 text-emerald-800',
   };
   const iconColor: Record<AlertVariant, string> = {
-    warning: 'text-amber-500', danger: 'text-red-500', orange: 'text-orange-500',
+    warning: 'text-amber-500', danger: 'text-red-500', orange: 'text-orange-500', success: 'text-emerald-500',
   };
   return (
     <div className={`flex items-start gap-2.5 rounded-lg border px-4 py-3 ${styles[variant]}`}>
-      <AlertTriangle className={`h-4 w-4 mt-0.5 flex-shrink-0 ${iconColor[variant]}`} />
+      {variant === 'success'
+        ? <CheckCircle2 className={`h-4 w-4 mt-0.5 flex-shrink-0 ${iconColor[variant]}`} />
+        : <AlertTriangle className={`h-4 w-4 mt-0.5 flex-shrink-0 ${iconColor[variant]}`} />}
       <div className="text-xs flex-1">{children}</div>
     </div>
   );

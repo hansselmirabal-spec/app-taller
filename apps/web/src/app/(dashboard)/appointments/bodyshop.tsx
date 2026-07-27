@@ -16,6 +16,7 @@ import { formatDate, sumBodyshopHours, sumBodyshopHoursWithExtras } from '@/lib/
 import { getWeekDays, entriesOnDay } from '@/lib/bodyshop-calendar';
 import { ActivitiesPanel } from '@/components/kanban/activities-panel';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { TechnicianCreateDialog } from '@/components/appointments/technician-create-dialog';
 import type { BodyshopEntry, CapacityStatus, Technician } from '@/types';
 import { InfoButton } from '@/components/ui/info-button';
 import { MotivationalLoader } from '@/components/ui/motivational-loader';
@@ -485,6 +486,7 @@ function TechnicianAssigner({
   compact?: boolean;
 }) {
   const [editing, setEditing]     = useState(false);
+  const [showCreateTech, setShowCreateTech] = useState(false);
   const assign                    = useAssignBodyshopTechnician();
   const { data: technicians = [] } = useTechnicians();
   const { data: capacity = [] }   = useDailyCapacity(entry.date);
@@ -649,19 +651,31 @@ function TechnicianAssigner({
             })}
           </div>
 
-          {/* Unassign option */}
-          {current && (
-            <div className="border-t border-slate-100 px-3 py-2">
+          {/* Unassign + create new technician */}
+          <div className="border-t border-slate-100 px-3 py-2 flex items-center justify-between">
+            {current ? (
               <button
                 onClick={unassign}
                 className="text-xs text-red-500 hover:text-red-600 font-medium transition-colors"
               >
                 Quitar técnico asignado
               </button>
-            </div>
-          )}
+            ) : <span />}
+            <button
+              onClick={() => setShowCreateTech(true)}
+              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium transition-colors"
+            >
+              <Plus className="h-3 w-3" /> Nuevo técnico
+            </button>
+          </div>
         </div>
       )}
+
+      <TechnicianCreateDialog
+        open={showCreateTech}
+        onOpenChange={setShowCreateTech}
+        onCreated={tech => pick(tech.id)}
+      />
     </div>
   );
 }
@@ -689,6 +703,7 @@ function ProcessTechRow({
   compact?: boolean;
 }) {
   const [open, setOpen]             = useState(false);
+  const [showCreateTech, setShowCreateTech] = useState(false);
   const assign                      = useAssignBodyshopProcessTechnician();
   const { data: allTechs = [] }     = useTechnicians();
   const { data: capacityList = [] } = useDailyCapacity(entry.date);
@@ -735,6 +750,7 @@ function ProcessTechRow({
   if (compact) {
     const avail = current ? availHours(current.id) : 0;
     return (
+      <>
       <div className="relative flex items-center gap-1.5 min-w-0">
         {current ? (
           <>
@@ -791,16 +807,28 @@ function ProcessTechRow({
                 Quitar asignación
               </button>
             )}
+            <button onClick={e => { e.stopPropagation(); setShowCreateTech(true); }}
+              className="w-full text-left px-3 py-2 text-[10px] text-blue-600 hover:bg-blue-50 border-t border-slate-100 font-medium flex items-center gap-1">
+              <Plus className="h-2.5 w-2.5" /> Nuevo técnico
+            </button>
           </div>
         )}
       </div>
-    );
+
+      <TechnicianCreateDialog
+        open={showCreateTech}
+        onOpenChange={setShowCreateTech}
+        onCreated={tech => pick(tech)}
+      />
+    </>
+  );
   }
 
   // ── Vista full (popup) ──────────────────────────────────────────────────────
   const avail = current ? availHours(current.id) : 0;
 
   return (
+    <>
     <div className="relative">
       <div className="flex items-center gap-2.5">
         {current ? (
@@ -893,9 +921,20 @@ function ProcessTechRow({
               Quitar asignación
             </button>
           )}
+          <button onClick={() => setShowCreateTech(true)}
+            className="w-full text-left px-3 py-2 text-xs text-blue-600 hover:bg-blue-50 border-t border-slate-200 font-medium flex items-center gap-1">
+            <Plus className="h-3 w-3" /> Nuevo técnico
+          </button>
         </div>
       )}
     </div>
+
+    <TechnicianCreateDialog
+      open={showCreateTech}
+      onOpenChange={setShowCreateTech}
+      onCreated={tech => pick(tech)}
+    />
+    </>
   );
 }
 

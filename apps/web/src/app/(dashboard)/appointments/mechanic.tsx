@@ -218,7 +218,7 @@ export default function MechanicAppointmentsPage() {
                 onClick={() => router.push(`/appointments/new?date=${date}`)}
                 className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors shadow-sm"
               >
-                <Plus className="h-4 w-4" /> Nuevo Turno
+                <Plus className="h-4 w-4" /> Nuevo Ingreso
               </button>
             )}
           </div>
