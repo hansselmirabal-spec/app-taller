@@ -18,7 +18,7 @@ import type { ModuleId } from '@/types';
 const NAV_MAIN: Array<{ href: string; label: string; icon: any; module: ModuleId | null; requireEdit?: boolean; bodyshopOnly?: boolean; mechanicOnly?: boolean }> = [
   { href: '/dashboard',    label: 'Panel de Control',        icon: LayoutDashboard, module: 'dashboard'    },
   { href: '/capacity',     label: 'Calendario de Capacidad', icon: CalendarDays,    module: 'capacity'     },
-  { href: '/calendario',   label: 'Calendario',              icon: CalendarDays,    module: 'appointments', mechanicOnly: true },
+  { href: '/calendario',   label: 'Agenda',                  icon: CalendarDays,    module: 'appointments', mechanicOnly: true },
   { href: '/appointments', label: 'Agenda',                  icon: ClipboardList,   module: 'appointments', bodyshopOnly: true },
   { href: '/presupuesto',  label: 'Presupuestos',            icon: FileText,        module: 'presupuesto',  bodyshopOnly: true },
   { href: '/recursos',     label: 'Recursos',                icon: Package,         module: 'recursos',     bodyshopOnly: true },
