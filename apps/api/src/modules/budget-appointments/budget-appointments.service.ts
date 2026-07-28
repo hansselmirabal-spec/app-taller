@@ -57,11 +57,39 @@ export class RejectBudgetAppointmentDto {
   reason: string;
 }
 
+export class BudgetPieceBreakdownDto {
+  @IsString() proceso: string;
+  @IsNumber() horas: number;
+  @IsString() descripcion: string;
+}
+
+export class BudgetPieceDto {
+  @IsString() pieza: string;
+  @IsString() damageLevel: string;
+  @IsNumber() qty: number;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BudgetPieceBreakdownDto)
+  breakdown: BudgetPieceBreakdownDto[];
+
+  @IsNumber() totalHoras: number;
+}
+
 export class UpdateBudgetProcessesDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => BudgetProcessDto)
   processes: BudgetProcessDto[];
+
+  // Detalle por pieza del Simulador — informativo, no lo usa approve(). Opcional
+  // para que una edición posterior de horas agregadas (que no manda pieces) no
+  // borre el detalle ya guardado.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BudgetPieceDto)
+  pieces?: BudgetPieceDto[];
 }
 
 @Injectable()
@@ -114,6 +142,7 @@ export class BudgetAppointmentsService {
       throw new BadRequestException('Solo se pueden editar procesos de presupuestos pendientes');
     }
     appt.processes = dto.processes;
+    if (dto.pieces !== undefined) appt.pieces = dto.pieces;
     return this.repo.save(appt);
   }
 

@@ -200,8 +200,15 @@ export default function SimuladorPresupuestoPage() {
           ...(estimate.prepHours    > 0 ? [{ code: 'PREP',     name: 'Preparación', hours: estimate.prepHours    }] : []),
           ...(estimate.paintHours   > 0 ? [{ code: 'PAINT',    name: 'Pintura',     hours: estimate.paintHours   }] : []),
         ];
+        const pieces = estimate.lines.map(l => ({
+          pieza:       l.pieza,
+          damageLevel: l.damageLevel,
+          qty:         l.qty,
+          breakdown:   l.breakdown,
+          totalHoras:  l.totalHoras,
+        }));
         if (processes.length > 0) {
-          await updateProcesses.mutateAsync({ id: result.id, processes });
+          await updateProcesses.mutateAsync({ id: result.id, processes, pieces });
         }
       }
 

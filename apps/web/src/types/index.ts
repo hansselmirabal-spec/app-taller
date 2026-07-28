@@ -78,6 +78,20 @@ export interface BudgetProcess {
   hours: number;
 }
 
+export interface BudgetPieceBreakdownItem {
+  proceso: string;
+  horas: number;
+  descripcion: string;
+}
+
+export interface BudgetPiece {
+  pieza: string;
+  damageLevel: string;
+  qty: number;
+  breakdown: BudgetPieceBreakdownItem[];
+  totalHoras: number;
+}
+
 export interface BudgetAppointment {
   id: string;
   workshopId: string;
@@ -91,6 +105,7 @@ export interface BudgetAppointment {
   phone: string | null;
   status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   processes: BudgetProcess[] | null;
+  pieces: BudgetPiece[] | null;
   notes: string | null;
   budgetNumber: string | null;
   linkedEntryId: string | null;
