@@ -242,6 +242,42 @@ export default function PresupuestoDetailPage() {
             </div>
           </div>
 
+          {/* Detalle por pieza (informativo, viene del Simulador) */}
+          {appt.pieces && appt.pieces.length > 0 && (
+            <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Detalle por pieza
+              </h2>
+              <div className="space-y-3">
+                {appt.pieces.map((piece, idx) => (
+                  <div key={`${piece.pieza}-${idx}`} className="border-b border-slate-50 last:border-0 pb-3 last:pb-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-slate-700">
+                        {piece.pieza}{piece.qty > 1 ? ` ×${piece.qty}` : ''}
+                      </span>
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                        {piece.damageLevel}
+                      </span>
+                      <span className="ml-auto text-xs font-semibold text-slate-600">
+                        {piece.totalHoras}h
+                      </span>
+                    </div>
+                    {piece.breakdown.length > 0 && (
+                      <div className="mt-1.5 pl-0.5 space-y-0.5">
+                        {piece.breakdown.map((b, bIdx) => (
+                          <div key={bIdx} className="flex items-center gap-2 text-xs text-slate-500">
+                            <span className="flex-1">{b.descripcion || b.proceso}</span>
+                            <span className="font-mono">{b.horas}h</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Procesos */}
           <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
             <div className="flex items-center justify-between">

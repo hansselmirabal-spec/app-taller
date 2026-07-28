@@ -10,6 +10,20 @@ export interface BudgetProcess {
   hours: number;
 }
 
+export interface BudgetPieceBreakdownItem {
+  proceso: string;
+  horas: number;
+  descripcion: string;
+}
+
+export interface BudgetPiece {
+  pieza: string;
+  damageLevel: string;
+  qty: number;
+  breakdown: BudgetPieceBreakdownItem[];
+  totalHoras: number;
+}
+
 @Entity('budget_appointments')
 export class BudgetAppointment {
   @PrimaryGeneratedColumn('uuid')
@@ -48,6 +62,9 @@ export class BudgetAppointment {
 
   @Column({ type: 'jsonb', nullable: true })
   processes: BudgetProcess[] | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  pieces: BudgetPiece[] | null;
 
   @Column({ type: 'text', nullable: true })
   notes: string | null;

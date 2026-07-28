@@ -5,7 +5,7 @@ import {
   cancelBudgetAppointment, approveBudgetAppointment,
   rejectBudgetAppointment,
 } from '@/lib/api';
-import type { BudgetProcess } from '@/types';
+import type { BudgetProcess, BudgetPiece } from '@/types';
 
 const KEY = 'budget-appointments';
 
@@ -38,8 +38,8 @@ export function useCreateBudgetAppointment() {
 export function useUpdateBudgetProcesses() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, processes }: { id: string; processes: BudgetProcess[] }) =>
-      updateBudgetProcesses(id, processes),
+    mutationFn: ({ id, processes, pieces }: { id: string; processes: BudgetProcess[]; pieces?: BudgetPiece[] }) =>
+      updateBudgetProcesses(id, processes, pieces),
     onSuccess: () => qc.invalidateQueries({ queryKey: [KEY] }),
   });
 }

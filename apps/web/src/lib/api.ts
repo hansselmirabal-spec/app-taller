@@ -1556,7 +1556,7 @@ export async function getTrackingProductivity(
 
 // ── Budget Appointments ────────────────────────────────────────────────────────
 
-import type { BudgetAppointment, BudgetProcess } from '@/types';
+import type { BudgetAppointment, BudgetProcess, BudgetPiece } from '@/types';
 
 export async function getBudgetAppointments(workshopId: string, date: string): Promise<BudgetAppointment[]> {
   if (MOCK) return delay([]);
@@ -1587,11 +1587,11 @@ export async function createBudgetAppointment(dto: {
   });
 }
 
-export async function updateBudgetProcesses(id: string, processes: BudgetProcess[]): Promise<BudgetAppointment> {
-  if (MOCK) return delay({ id, processes } as unknown as BudgetAppointment);
+export async function updateBudgetProcesses(id: string, processes: BudgetProcess[], pieces?: BudgetPiece[]): Promise<BudgetAppointment> {
+  if (MOCK) return delay({ id, processes, pieces } as unknown as BudgetAppointment);
   return http<BudgetAppointment>(`/budget-appointments/${id}/processes`, {
     method: 'PATCH',
-    body: JSON.stringify({ processes }),
+    body: JSON.stringify({ processes, ...(pieces !== undefined ? { pieces } : {}) }),
   });
 }
 
