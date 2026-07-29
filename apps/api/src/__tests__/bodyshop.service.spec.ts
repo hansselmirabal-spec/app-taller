@@ -26,6 +26,8 @@ const WT_ID     = 'wt-001';
 const TECH_BW   = 'tech-bw-001';   // CHAPERIA
 const TECH_PREP = 'tech-prep-001'; // PREPARACION
 const TECH_PAINT= 'tech-paint-001';// PINTURA
+const TECH_POLISH = 'tech-polish-001'; // PULIDO
+const TECH_FINAL  = 'tech-final-001';  // CONTROL_FINAL
 const USER_ID   = 'user-001';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -40,6 +42,12 @@ const MOCK_TECHS = [
   { id: TECH_PREP,  name: 'Preparador 1',specialty: 'PREPARACION', dailyHours: 8, active: true  },
   { id: TECH_PAINT, name: 'Pintor 1',    specialty: 'PINTURA',     dailyHours: 8, active: true  },
 ];
+
+// PR2 — técnicos dedicados a Pulida/Control Final (BalanceProcess 3→5).
+// No incluidos en MOCK_TECHS por defecto para no romper los asserts de
+// "3 techs × 8h" preexistentes de getDayCapacity/getMonthlyReport.
+const MOCK_TECH_POLISH = { id: TECH_POLISH, name: 'Pulidor 1', specialty: 'PULIDO',         dailyHours: 8, active: true };
+const MOCK_TECH_FINAL  = { id: TECH_FINAL,  name: 'Control 1', specialty: 'CONTROL_FINAL',  dailyHours: 8, active: true };
 
 const MOCK_ENTRY: any = {
   id: ENTRY_ID, workshopId: WS_ID, date: '2026-06-10',
@@ -102,7 +110,10 @@ function makeAbsenceRepo(absences: any[] = []) {
 }
 
 function makeWorkingDayRepo() {
-  return { findOne: jest.fn().mockResolvedValue(null) };
+  return {
+    findOne: jest.fn().mockResolvedValue(null),
+    find:    jest.fn().mockResolvedValue([]),
+  };
 }
 
 function makeTechniciansService(techs = MOCK_TECHS) {
@@ -717,6 +728,115 @@ describe('BodyshopService', () => {
       expect(result.entries).toHaveLength(1);
       expect(result.entries[0].id).toBe('e-prev');
     });
+
+    // ── PR2: BalanceProcess 3→5 (POLISH + FINAL_CONTROL) ────────────────────
+
+    it('incluye POLISH y FINAL_CONTROL en byProcess cuando hay técnicos dedicados', async () => {
+      const qb = makeQb([]);
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
+      const techsSvc = makeTechniciansService([...MOCK_TECHS, MOCK_TECH_POLISH, MOCK_TECH_FINAL]);
+      await build({ entryRepo, techsSvc });
+
+      const result = await service.getDayCapacity(WS_ID, '2026-06-10');
+      expect(result.byProcess.POLISH.commercializableHours).toBe(8);
+      expect(result.byProcess.POLISH.label).toBe('Pulida');
+      expect(result.byProcess.FINAL_CONTROL.commercializableHours).toBe(8);
+      expect(result.byProcess.FINAL_CONTROL.label).toBe('Control Final');
+      // 3 techs legacy (24h) + Pulidor (8h) + Control (8h) = 40h
+      expect(result.commercializableTotal).toBe(40);
+    });
+
+    it('deriva horas ocupadas de POLISH/FINAL_CONTROL desde entry.processes jsonb (5ta/6ta fase secuencial)', async () => {
+      // 2026-06-08 lunes: BW=día0, PREP=día1, PAINT=día2, POLISH=día3, FINAL_CONTROL=día4
+      // (1 técnico por proceso × 8h/día; bwH=8→1día, prepH=4→1día, pntH=6→1día, polishH=2→1día, fcH=0.5→1día)
+      const entryWithAllProcesses = {
+        ...MOCK_ENTRY, date: '2026-06-08',
+        bodyworkHours: 8, prepHours: 4, paintHours: 6,
+        processes: [
+          { code: 'BODYWORK',      name: 'Chapería',      hours: 8   },
+          { code: 'PREP',          name: 'Preparación',   hours: 4   },
+          { code: 'PAINT',         name: 'Pintura',       hours: 6   },
+          { code: 'POLISH',        name: 'Pulida',        hours: 2   },
+          { code: 'FINAL_CONTROL', name: 'Control Final', hours: 0.5 },
+        ],
+        processTechsList: [],
+      };
+      const qb = makeQb([entryWithAllProcesses]);
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
+      const techsSvc = makeTechniciansService([...MOCK_TECHS, MOCK_TECH_POLISH, MOCK_TECH_FINAL]);
+      await build({ entryRepo, techsSvc });
+
+      const diaPulida = await service.getDayCapacity(WS_ID, '2026-06-11'); // jueves, día3
+      expect(diaPulida.byProcess.POLISH.occupiedHours).toBe(2);
+      expect(diaPulida.byProcess.FINAL_CONTROL.occupiedHours).toBe(0);
+
+      const diaControlFinal = await service.getDayCapacity(WS_ID, '2026-06-12'); // viernes, día4
+      expect(diaControlFinal.byProcess.FINAL_CONTROL.occupiedHours).toBe(0.5);
+      expect(diaControlFinal.byProcess.POLISH.occupiedHours).toBe(0);
+    });
+
+    it('entry legacy sin processes jsonb: POLISH/FINAL_CONTROL quedan en 0 (fallback por columnas)', async () => {
+      const legacyEntry = { ...MOCK_ENTRY, bodyworkHours: 8, prepHours: 4, paintHours: 6, processTechsList: [] };
+      const qb = makeQb([legacyEntry]);
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
+      const techsSvc = makeTechniciansService([...MOCK_TECHS, MOCK_TECH_POLISH, MOCK_TECH_FINAL]);
+      await build({ entryRepo, techsSvc });
+
+      const result = await service.getDayCapacity(WS_ID, '2026-06-10');
+      expect(result.byProcess.POLISH.occupiedHours).toBe(0);
+      expect(result.byProcess.FINAL_CONTROL.occupiedHours).toBe(0);
+      // BODYWORK sigue derivándose de la columna legacy (fallback), sin romper el comportamiento anterior
+      expect(result.byProcess.BODYWORK.occupiedHours).toBe(8);
+    });
+  });
+
+  // ── getWeekCapacity ───────────────────────────────────────────────────────
+
+  describe('getWeekCapacity', () => {
+    it('incluye POLISH y FINAL_CONTROL en byProcess de cada día del rango', async () => {
+      const qb = makeQb([]);
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
+      const techsSvc = makeTechniciansService([...MOCK_TECHS, MOCK_TECH_POLISH, MOCK_TECH_FINAL]);
+      await build({ entryRepo, techsSvc });
+
+      const result = await service.getWeekCapacity(WS_ID, '2026-06-08', '2026-06-08');
+      expect(result['2026-06-08'].byProcess.POLISH.commercializableHours).toBe(8);
+      expect(result['2026-06-08'].byProcess.FINAL_CONTROL.commercializableHours).toBe(8);
+    });
+  });
+
+  // ── getTechnicianAvailability ─────────────────────────────────────────────
+
+  describe('getTechnicianAvailability', () => {
+    it('hoursAssigned/hoursFree cubren POLISH y FINAL_CONTROL', async () => {
+      const entryWithAllProcesses = {
+        ...MOCK_ENTRY, stayDays: 1,
+        bodyworkHours: 8, prepHours: 4, paintHours: 6,
+        processes: [
+          { code: 'POLISH',        name: 'Pulida',        hours: 2   },
+          { code: 'FINAL_CONTROL', name: 'Control Final', hours: 0.5 },
+        ],
+        processTechsList: [
+          { process: 'POLISH',        technicianId: TECH_POLISH },
+          { process: 'FINAL_CONTROL', technicianId: TECH_FINAL  },
+        ],
+      };
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(makeQb([entryWithAllProcesses])) });
+      const techsSvc = makeTechniciansService([...MOCK_TECHS, MOCK_TECH_POLISH, MOCK_TECH_FINAL]);
+      await build({ entryRepo, techsSvc });
+
+      const result = await service.getTechnicianAvailability(WS_ID, '2026-06-10');
+      const polishTech = result.find((t: any) => t.id === TECH_POLISH);
+      const finalTech  = result.find((t: any) => t.id === TECH_FINAL);
+
+      expect(polishTech?.process).toBe('POLISH');
+      expect(polishTech?.hoursAssigned).toBe(2);
+      expect(polishTech?.hoursFree).toBe(6);
+
+      expect(finalTech?.process).toBe('FINAL_CONTROL');
+      expect(finalTech?.hoursAssigned).toBe(0.5);
+      expect(finalTech?.hoursFree).toBe(7.5);
+    });
   });
 
   // ── getMonthlyReport ──────────────────────────────────────────────────────
@@ -762,6 +882,38 @@ describe('BodyshopService', () => {
       const ranks = rows.map(r => r.rankLoadAsc).sort((a, b) => a - b);
       expect(ranks[0]).toBe(1);
     });
+
+    it('incluye técnicos de POLISH y FINAL_CONTROL con horas derivadas de processes jsonb', async () => {
+      const juneEntry = {
+        ...MOCK_ENTRY, date: '2026-06-10', status: 'done',
+        bodyworkHours: 8, prepHours: 4, paintHours: 6,
+        processes: [
+          { code: 'POLISH',        name: 'Pulida',        hours: 2   },
+          { code: 'FINAL_CONTROL', name: 'Control Final', hours: 0.5 },
+        ],
+        processTechsList: [
+          { process: 'BODYWORK',      technicianId: TECH_BW },
+          { process: 'PREP',          technicianId: TECH_PREP },
+          { process: 'PAINT',         technicianId: TECH_PAINT },
+          { process: 'POLISH',        technicianId: TECH_POLISH },
+          { process: 'FINAL_CONTROL', technicianId: TECH_FINAL },
+        ],
+      };
+      entryRepo = makeEntryRepo();
+      entryRepo.find.mockResolvedValue([juneEntry]);
+      const techsSvc = makeTechniciansService([...MOCK_TECHS, MOCK_TECH_POLISH, MOCK_TECH_FINAL]);
+      await build({ entryRepo, techsSvc });
+
+      const rows = await service.getMonthlyReport(WS_ID, 2026, 6);
+      expect(rows).toHaveLength(5);
+
+      const polishRow = rows.find(r => r.process === 'POLISH');
+      const finalRow  = rows.find(r => r.process === 'FINAL_CONTROL');
+      expect(polishRow?.assignedHours).toBe(2);
+      expect(polishRow?.processLabel).toBe('Pulida');
+      expect(finalRow?.assignedHours).toBe(0.5);
+      expect(finalRow?.processLabel).toBe('Control Final');
+    });
   });
 
   // ── getSchedule ──────────────────────────────────────────────────────────
@@ -792,6 +944,112 @@ describe('BodyshopService', () => {
 
       const entry = result.entries.find((e: any) => e.id === 'e-sched');
       expect(entry?.totalPlannedHours).toBe(43.1); // 17.5 + 17.2 + 7.7 + 0.3 + 0.4
+    });
+
+    it('processWindows incluye POLISH y FINAL_CONTROL cuando el entry tiene esas horas en processes jsonb', async () => {
+      const scheduleEntry = {
+        ...MOCK_ENTRY, id: 'e-sched2', date: '2026-06-08', stayDays: 5,
+        bodyworkHours: 8, prepHours: 4, paintHours: 6,
+        processes: [
+          { code: 'BODYWORK',      name: 'Chapería',      hours: 8   },
+          { code: 'PREP',          name: 'Preparación',   hours: 4   },
+          { code: 'PAINT',         name: 'Pintura',       hours: 6   },
+          { code: 'POLISH',        name: 'Pulida',        hours: 2   },
+          { code: 'FINAL_CONTROL', name: 'Control Final', hours: 0.5 },
+        ],
+        processTechsList: [],
+      };
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(makeQb([scheduleEntry])) });
+      const techsSvc = makeTechniciansService([...MOCK_TECHS, MOCK_TECH_POLISH, MOCK_TECH_FINAL]);
+      await build({ entryRepo, techsSvc });
+
+      const result = await service.getSchedule(WS_ID, '2026-06-01', '2026-06-30');
+      const entry: any = result.entries.find((e: any) => e.id === 'e-sched2');
+      expect(entry).toBeDefined();
+      const processes = entry.processWindows.map((w: any) => w.process);
+
+      expect(processes).toEqual(['BODYWORK', 'PREP', 'PAINT', 'POLISH', 'FINAL_CONTROL']);
+      const polishWindow = entry.processWindows.find((w: any) => w.process === 'POLISH');
+      expect(polishWindow.startDay).toBe(3);
+      expect(polishWindow.hours).toBe(2);
+      const finalWindow = entry.processWindows.find((w: any) => w.process === 'FINAL_CONTROL');
+      expect(finalWindow.startDay).toBe(4);
+      expect(finalWindow.hours).toBe(0.5);
+    });
+  });
+
+  // ── create — PR2: auto-assign POLISH/FINAL_CONTROL + warnings ────────────
+
+  describe('create — auto-assign POLISH/FINAL_CONTROL technicians', () => {
+    it('asigna automáticamente el técnico con más horas libres para Pulida y Control Final', async () => {
+      const qb = makeQb([]);
+      qb.getOne = jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(MOCK_ENTRY);
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
+      const ptRepo = makePtRepo();
+      const techsSvc = makeTechniciansService([...MOCK_TECHS, MOCK_TECH_POLISH, MOCK_TECH_FINAL]);
+      const scheduleService = makeScheduleService();
+      await build({ entryRepo, ptRepo, techsSvc, scheduleService });
+
+      await service.create({
+        workshopId: WS_ID, date: '2026-06-10', workTypeId: WT_ID,
+        customerName: 'Test', plate: 'TST 004',
+        bodyworkHours: 8, prepHours: 4, paintHours: 6,
+        pieceCount: 4,
+        stayDays: 2, channel: 'walk_in' as const,
+      } as any, USER_ID);
+
+      expect(ptRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ process: 'POLISH', technicianId: TECH_POLISH }),
+      );
+      expect(ptRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ process: 'FINAL_CONTROL', technicianId: TECH_FINAL }),
+      );
+    });
+  });
+
+  describe('create — warnings surfaced without blocking', () => {
+    it('sin técnico dedicado a Pulida: el entry se crea igual y warnings incluye el aviso de simulate()', async () => {
+      const qb = makeQb([]);
+      qb.getOne = jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(MOCK_ENTRY);
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
+      const scheduleService = {
+        simulate: jest.fn().mockResolvedValue({
+          canSchedule: true,
+          slots: [{ date: '2026-06-10', processName: 'Chapería', process: 'BODYWORK', sequence: 0 }],
+          estimatedFinishDate: '2026-06-10',
+          warnings: ['Sin técnicos disponibles para Pulida'],
+        }),
+      };
+      await build({ entryRepo, scheduleService });
+
+      const result: any = await service.create({
+        workshopId: WS_ID, date: '2026-06-10', workTypeId: WT_ID,
+        customerName: 'Test', plate: 'TST 005',
+        bodyworkHours: 8, prepHours: 0, paintHours: 0,
+        pieceCount: 4,
+        stayDays: 1, channel: 'walk_in' as const,
+      } as any, USER_ID);
+
+      expect(result).toHaveProperty('id');
+      expect(result.warnings).toEqual(['Sin técnicos disponibles para Pulida']);
+    });
+
+    it('sin ningún warning: warnings queda como array vacío (no undefined)', async () => {
+      const qb = makeQb([]);
+      qb.getOne = jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(MOCK_ENTRY);
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
+      const scheduleService = makeScheduleService();
+      await build({ entryRepo, scheduleService });
+
+      const result: any = await service.create({
+        workshopId: WS_ID, date: '2026-06-10', workTypeId: WT_ID,
+        customerName: 'Test', plate: 'TST 006',
+        bodyworkHours: 8, prepHours: 0, paintHours: 0,
+        pieceCount: 4,
+        stayDays: 1, channel: 'walk_in' as const,
+      } as any, USER_ID);
+
+      expect(result.warnings).toEqual([]);
     });
   });
 });

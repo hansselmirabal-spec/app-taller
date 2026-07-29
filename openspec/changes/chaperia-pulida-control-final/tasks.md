@@ -42,19 +42,19 @@ Note: split and chain order were already resolved in design's "Chained PR plan" 
 
 ## PR2: Capacity Dashboards (BalanceProcess 3→5)
 
-- [ ] 2.1 RED `bodyshop.service.spec.ts`: `computeDayCapacity`/`getWeekCapacity` include POLISH+FINAL_CONTROL in `byProcess`
-- [ ] 2.2 GREEN widen `type BalanceProcess` to 5 values; update `PROCESS_LABEL`, `SPECIALTY_TO_PROCESS` (+PULIDO/POLISH, +FINAL_CONTROL/CONTROL_FINAL), all `Record<BalanceProcess>` initializers in `computeDayCapacity()`
-- [ ] 2.3 GREEN add private `entryHoursByProcess(e)` reading `entry.processes` jsonb (5 codes), fallback to legacy hour columns; wire into `computeDayCapacity()`
-- [ ] 2.4 RED `getTechnicianAvailability()` spec: `hoursAssigned`/`hoursFree` cover 5 processes
-- [ ] 2.5 GREEN extend `getTechnicianAvailability()` via `entryHoursByProcess()`
-- [ ] 2.6 RED `getMonthlyReport()` spec: rows include POLISH/FINAL_CONTROL technicians
-- [ ] 2.7 GREEN extend `getMonthlyReport()` `techProcess()`/`entryHours()` to 5 processes
-- [ ] 2.8 RED `getSchedule()` spec: `processWindows` include POLISH/FINAL_CONTROL windows
-- [ ] 2.9 GREEN extend `getSchedule()` `baseDailyCap`/`processWindows`/`procOrder` to 5 processes
-- [ ] 2.10 GREEN extend `create()` auto-assign `processAssignments` loop with POLISH/FINAL_CONTROL techs (best-effort try/catch, non-blocking)
-- [ ] 2.11 RED spec: no dedicated POLISH tech → entry created + warning surfaced, not blocked
-- [ ] 2.12 GREEN confirm `simulate()`/`create()` warning propagates when POLISH/FINAL_CONTROL `dailyCap=0`
-- [ ] 2.13 Verify: `pnpm --filter api test`, `pnpm --filter api typecheck`
+- [x] 2.1 RED `bodyshop.service.spec.ts`: `computeDayCapacity`/`getWeekCapacity` include POLISH+FINAL_CONTROL in `byProcess`
+- [x] 2.2 GREEN widen `type BalanceProcess` to 5 values; update `PROCESS_LABEL`, `SPECIALTY_TO_PROCESS` (+PULIDO/POLISH, +FINAL_CONTROL/CONTROL_FINAL), all `Record<BalanceProcess>` initializers in `computeDayCapacity()`
+- [x] 2.3 GREEN add private `entryHoursByProcess(e)` reading `entry.processes` jsonb (5 codes), fallback to legacy hour columns; wire into `computeDayCapacity()`
+- [x] 2.4 RED `getTechnicianAvailability()` spec: `hoursAssigned`/`hoursFree` cover 5 processes
+- [x] 2.5 GREEN extend `getTechnicianAvailability()` via `entryHoursByProcess()`
+- [x] 2.6 RED `getMonthlyReport()` spec: rows include POLISH/FINAL_CONTROL technicians
+- [x] 2.7 GREEN extend `getMonthlyReport()` `techProcess()`/`entryHours()` to 5 processes
+- [x] 2.8 RED `getSchedule()` spec: `processWindows` include POLISH/FINAL_CONTROL windows
+- [x] 2.9 GREEN extend `getSchedule()` `baseDailyCap`/`processWindows`/`procOrder` to 5 processes
+- [x] 2.10 GREEN extend `create()` auto-assign `processAssignments` loop with POLISH/FINAL_CONTROL techs (best-effort try/catch, non-blocking)
+- [x] 2.11 RED spec: no dedicated POLISH tech → entry created + warning surfaced, not blocked
+- [x] 2.12 GREEN confirm `simulate()`/`create()` warning propagates when POLISH/FINAL_CONTROL `dailyCap=0`
+- [x] 2.13 Verify: `pnpm --filter api test`, `pnpm --filter api typecheck`
 
 ## PR3: Frontend
 

@@ -88,18 +88,28 @@ export class AdjustProcessSlotDto {
 }
 
 type CapacityStatus = 'OK' | 'RISK' | 'OVERLOADED';
-type BalanceProcess = 'BODYWORK' | 'PREP' | 'PAINT';
+// PR2: 3→5 procesos reales de capacidad (Pulida + Control Final se suman a
+// Chapería/Preparación/Pintura). Ver design decisión 3: sin columnas nuevas,
+// las horas de POLISH/FINAL_CONTROL se derivan de entry.processes jsonb
+// (entryHoursByProcess()), con fallback a las columnas legacy para entries
+// creadas antes de esta feature.
+type BalanceProcess = 'BODYWORK' | 'PREP' | 'PAINT' | 'POLISH' | 'FINAL_CONTROL';
+const BALANCE_PROCESSES: BalanceProcess[] = ['BODYWORK', 'PREP', 'PAINT', 'POLISH', 'FINAL_CONTROL'];
 
 const PROCESS_LABEL: Record<BalanceProcess, string> = {
   BODYWORK: 'Chapería',
   PREP: 'Preparación',
   PAINT: 'Pintura',
+  POLISH: 'Pulida',
+  FINAL_CONTROL: 'Control Final',
 };
 
 const SPECIALTY_TO_PROCESS: Record<string, BalanceProcess> = {
   CHAPERIA: 'BODYWORK', CARROCERIA: 'BODYWORK', BODYWORK: 'BODYWORK',
   PREPARACION: 'PREP', PREP: 'PREP',
   PINTURA: 'PAINT', PAINT: 'PAINT',
+  PULIDO: 'POLISH', PULIDOR: 'POLISH', POLISH: 'POLISH',
+  CONTROL_FINAL: 'FINAL_CONTROL', FINAL_CONTROL: 'FINAL_CONTROL',
 };
 
 function capacityStatus(rate: number): CapacityStatus {
@@ -268,10 +278,15 @@ export class BodyshopService {
         const slotDateFor = (proc: BalanceProcess) =>
           simulationSlots.find((s: any) => s.process === proc)?.date ?? dto.date;
 
+        // POLISH/FINAL_CONTROL no tienen selector manual en el DTO (todavía) —
+        // siempre se auto-asignan por horas libres, igual que PREP/PAINT
+        // cuando no viene manualId.
         const processAssignments: { proc: BalanceProcess; hours: number; manualId?: string | null }[] = [
-          { proc: 'BODYWORK', hours: Number(dto.bodyworkHours), manualId: dto.bodyworkTechnicianId },
-          { proc: 'PREP',     hours: Number(dto.prepHours),     manualId: dto.prepTechnicianId     },
-          { proc: 'PAINT',    hours: Number(dto.paintHours),    manualId: dto.paintTechnicianId    },
+          { proc: 'BODYWORK',      hours: Number(dto.bodyworkHours), manualId: dto.bodyworkTechnicianId },
+          { proc: 'PREP',          hours: Number(dto.prepHours),     manualId: dto.prepTechnicianId     },
+          { proc: 'PAINT',         hours: Number(dto.paintHours),    manualId: dto.paintTechnicianId    },
+          { proc: 'POLISH',        hours: polishHours,               manualId: null                     },
+          { proc: 'FINAL_CONTROL', hours: finalControlHours,         manualId: null                     },
         ];
 
         // Cache de disponibilidad por fecha para evitar N queries si varios procesos caen el mismo día.
@@ -327,7 +342,11 @@ export class BodyshopService {
     });
 
     const loaded = await this.loadEntry(saved.id);
-    return { ...loaded, dmsSync } as any;
+    // sim.warnings sobrevive aunque canSchedule=true (ej. "Sin técnicos
+    // disponibles para Pulida" cuando no hay técnico dedicado a un proceso
+    // pero el resto sí pudo agendarse) — no bloquea la creación, solo se
+    // informa para que el operador lo vea (graceful-degrade, ver design).
+    return { ...loaded, dmsSync, warnings: sim.warnings } as any;
   }
 
   // ── Schedule (slots por vehículo) ────────────────────────────────────────────
@@ -593,6 +612,28 @@ export class BodyshopService {
 
   // ── Bodyshop Day Capacity ────────────────────────────────────────────────────
 
+  // Fuente única de horas planificadas por proceso (5 etapas reales) para las
+  // pantallas de capacidad/balance. Lee entry.processes jsonb (escrito por
+  // create() — ver decisión de diseño 3: NO se agregan columnas nuevas a la
+  // entidad). Para entries legacy sin processes jsonb (creadas antes de esta
+  // feature), cae a las columnas bodyworkHours/prepHours/paintHours;
+  // POLISH/FINAL_CONTROL quedan en 0 para esos entries (nunca existieron).
+  private entryHoursByProcess(e: BodyshopEntry): Record<BalanceProcess, number> {
+    const fromJson: Partial<Record<BalanceProcess, number>> = {};
+    for (const p of (e.processes ?? []) as { code: string; hours: number }[]) {
+      if ((BALANCE_PROCESSES as string[]).includes(p.code)) {
+        fromJson[p.code as BalanceProcess] = Number(p.hours);
+      }
+    }
+    return {
+      BODYWORK:      fromJson.BODYWORK      ?? Number(e.bodyworkHours),
+      PREP:          fromJson.PREP          ?? Number(e.prepHours),
+      PAINT:         fromJson.PAINT         ?? Number(e.paintHours),
+      POLISH:        fromJson.POLISH        ?? 0,
+      FINAL_CONTROL: fromJson.FINAL_CONTROL ?? 0,
+    };
+  }
+
   async getDayCapacity(workshopId: string, date: string) {
     const ws = await this.workshopsService.findOne(workshopId);
     const technicians = await this.techniciansService.findAll(ws.name);
@@ -709,7 +750,7 @@ export class BodyshopService {
       return SPECIALTY_TO_PROCESS[sp] ?? null;
     };
 
-    const availableByProcess: Record<BalanceProcess, number> = { BODYWORK: 0, PREP: 0, PAINT: 0 };
+    const availableByProcess: Record<BalanceProcess, number> = { BODYWORK: 0, PREP: 0, PAINT: 0, POLISH: 0, FINAL_CONTROL: 0 };
 
     for (const tech of activeTechs) {
       const proc = techProcess(tech.specialty);
@@ -724,31 +765,31 @@ export class BodyshopService {
       availableByProcess[proc] += avail;
     }
 
-    const baseDailyCapByProcess: Record<BalanceProcess, number> = { BODYWORK: 0, PREP: 0, PAINT: 0 };
+    const baseDailyCapByProcess: Record<BalanceProcess, number> = { BODYWORK: 0, PREP: 0, PAINT: 0, POLISH: 0, FINAL_CONTROL: 0 };
     for (const tech of activeTechs) {
       const proc = techProcess(tech.specialty);
       if (!proc) continue;
       baseDailyCapByProcess[proc] += Number(tech.dailyHours);
     }
 
-    const occupiedByProcess: Record<BalanceProcess, number> = { BODYWORK: 0, PREP: 0, PAINT: 0 };
+    const occupiedByProcess: Record<BalanceProcess, number> = { BODYWORK: 0, PREP: 0, PAINT: 0, POLISH: 0, FINAL_CONTROL: 0 };
 
+    // Modelo secuencial de 5 fases: Chapería→Prep→Pintura→Pulida→Control Final.
+    // Las horas por proceso vienen de entryHoursByProcess() (jsonb con fallback
+    // legacy — ver decisión de diseño 3), NO de columnas nuevas.
     for (const e of entriesInShop) {
-      const bwH   = Number(e.bodyworkHours);
-      const prepH = Number(e.prepHours);
-      const pntH  = Number(e.paintHours);
+      const hoursByProc = this.entryHoursByProcess(e);
 
-      const bwC   = baseDailyCapByProcess.BODYWORK;
-      const prepC = baseDailyCapByProcess.PREP;
-      const pntC  = baseDailyCapByProcess.PAINT;
-
-      const bwDays   = bwH   > 0 ? (bwC   > 0 ? Math.ceil(bwH   / bwC)   : 1) : 0;
-      const prepDays = prepH > 0 ? (prepC > 0 ? Math.ceil(prepH / prepC) : 1) : 0;
-      const pntDays  = pntH  > 0 ? (pntC  > 0 ? Math.ceil(pntH  / pntC)  : 1) : 0;
-
-      const prepStart = bwDays;
-      const pntStart  = bwDays + prepDays;
-      const totalDays = bwDays + prepDays + pntDays;
+      let cursor = 0;
+      const windows: Array<{ proc: BalanceProcess; start: number; days: number }> = [];
+      for (const proc of BALANCE_PROCESSES) {
+        const h   = hoursByProc[proc];
+        const cap = baseDailyCapByProcess[proc];
+        const days = h > 0 ? (cap > 0 ? Math.ceil(h / cap) : 1) : 0;
+        if (days > 0) windows.push({ proc, start: cursor, days });
+        cursor += days;
+      }
+      const totalDays = cursor;
 
       const entryMs  = new Date(e.date + 'T12:00:00').getTime();
       const dateMs   = new Date(date   + 'T12:00:00').getTime();
@@ -756,21 +797,18 @@ export class BodyshopService {
 
       if (dayIndex < 0 || dayIndex >= totalDays) continue;
 
-      if (dayIndex < prepStart) {
-        occupiedByProcess.BODYWORK += bwDays   > 0 ? bwH   / bwDays   : 0;
-      } else if (dayIndex < pntStart) {
-        occupiedByProcess.PREP     += prepDays > 0 ? prepH / prepDays : 0;
-      } else {
-        occupiedByProcess.PAINT    += pntDays  > 0 ? pntH  / pntDays  : 0;
+      const win = windows.find(w => dayIndex >= w.start && dayIndex < w.start + w.days);
+      if (win) {
+        occupiedByProcess[win.proc] += win.days > 0 ? hoursByProc[win.proc] / win.days : 0;
       }
     }
 
     for (const budget of pendingBudgets) {
       const procs: BudgetProcess[] = budget.processes ?? [];
       for (const p of procs) {
-        if (p.code === 'BODYWORK')      occupiedByProcess.BODYWORK += Number(p.hours);
-        else if (p.code === 'PREP')     occupiedByProcess.PREP     += Number(p.hours);
-        else if (p.code === 'PAINT')    occupiedByProcess.PAINT    += Number(p.hours);
+        if ((BALANCE_PROCESSES as string[]).includes(p.code)) {
+          occupiedByProcess[p.code as BalanceProcess] += Number(p.hours);
+        }
       }
     }
 
@@ -778,11 +816,10 @@ export class BodyshopService {
     for (const e of entriesInShop) {
       const stayDays = Math.max(Number((e as any).stayDays) || 1, 1);
 
-      const processDefs: Array<{ code: BalanceProcess; hours: number }> = [
-        { code: 'BODYWORK', hours: Number(e.bodyworkHours) },
-        { code: 'PREP',     hours: Number(e.prepHours)     },
-        { code: 'PAINT',    hours: Number(e.paintHours)    },
-      ];
+      const hoursByProc = this.entryHoursByProcess(e);
+      const processDefs: Array<{ code: BalanceProcess; hours: number }> = BALANCE_PROCESSES.map(code => ({
+        code, hours: hoursByProc[code],
+      }));
 
       for (const { code, hours } of processDefs) {
         if (hours <= 0) continue;
@@ -828,7 +865,7 @@ export class BodyshopService {
     let totalCommercializable = 0;
     let totalOccupied = 0;
 
-    for (const proc of (['BODYWORK', 'PREP', 'PAINT'] as BalanceProcess[])) {
+    for (const proc of BALANCE_PROCESSES) {
       const comm  = round2(availableByProcess[proc]);
       const occ   = round2(occupiedByProcess[proc]);
       const avail = round2(comm - occ);
@@ -902,21 +939,19 @@ export class BodyshopService {
       .getMany();
 
     // Para cada técnico, sumar horas de los procesos que tiene asignados.
-    const hoursAssigned = new Map<string, { BODYWORK: number; PREP: number; PAINT: number }>();
+    const hoursAssigned = new Map<string, Record<BalanceProcess, number>>();
     const ensure = (techId: string) => {
-      if (!hoursAssigned.has(techId)) hoursAssigned.set(techId, { BODYWORK: 0, PREP: 0, PAINT: 0 });
+      if (!hoursAssigned.has(techId)) hoursAssigned.set(techId, { BODYWORK: 0, PREP: 0, PAINT: 0, POLISH: 0, FINAL_CONTROL: 0 });
       return hoursAssigned.get(techId)!;
     };
     for (const e of entriesInShop) {
       const stayDays = Math.max(Number((e as any).stayDays) || 1, 1);
+      const hoursByProc = this.entryHoursByProcess(e);
       for (const pt of e.processTechsList ?? []) {
         if (!pt.technicianId) continue;
         const proc = pt.process as BalanceProcess;
-        const totalHours =
-          proc === 'BODYWORK' ? Number(e.bodyworkHours) :
-          proc === 'PREP'     ? Number(e.prepHours)     :
-                                 Number(e.paintHours);
-        ensure(pt.technicianId)[proc] += totalHours / stayDays;
+        if (!(BALANCE_PROCESSES as string[]).includes(proc)) continue;
+        ensure(pt.technicianId)[proc] += hoursByProc[proc] / stayDays;
       }
     }
 
@@ -930,15 +965,15 @@ export class BodyshopService {
       else if (absType === 'half')     { dailyAvail = dailyAvail / 2; absenceLabel = 'Media jornada'; }
       else if (absType === 'holiday')  { dailyAvail = dailyAvail / 2; absenceLabel = 'Asueto media'; }
 
-      const occ = hoursAssigned.get(t.id) ?? { BODYWORK: 0, PREP: 0, PAINT: 0 };
-      const occAll = occ.BODYWORK + occ.PREP + occ.PAINT;
+      const occ = hoursAssigned.get(t.id) ?? { BODYWORK: 0, PREP: 0, PAINT: 0, POLISH: 0, FINAL_CONTROL: 0 };
+      const occAll = BALANCE_PROCESSES.reduce((sum, proc) => sum + occ[proc], 0);
       const free   = round2(dailyAvail - occAll);
 
       return {
         id:          t.id,
         name:        t.name,
         specialty:   t.specialty,
-        process:     proc,                // BODYWORK | PREP | PAINT | null
+        process:     proc,                // BODYWORK | PREP | PAINT | POLISH | FINAL_CONTROL | null
         dailyHours:  round2(dailyAvail),
         hoursAssigned: round2(occAll),
         hoursFree:   free,
@@ -986,11 +1021,8 @@ export class BodyshopService {
       return SPECIALTY_TO_PROCESS[sp] ?? null;
     };
 
-    const entryHours = (e: BodyshopEntry, proc: BalanceProcess): number => {
-      if (proc === 'BODYWORK') return Number(e.bodyworkHours);
-      if (proc === 'PREP')     return Number(e.prepHours);
-      return Number(e.paintHours);
-    };
+    const entryHours = (e: BodyshopEntry, proc: BalanceProcess): number =>
+      this.entryHoursByProcess(e)[proc];
 
     const rows: any[] = activeTechs.flatMap(t => {
       const process = techProcess(t.specialty);
@@ -1079,7 +1111,7 @@ export class BodyshopService {
     };
 
     // Capacidad base diaria por proceso (sin ajuste de ausencias)
-    const baseDailyCap: Record<BalanceProcess, number> = { BODYWORK: 0, PREP: 0, PAINT: 0 };
+    const baseDailyCap: Record<BalanceProcess, number> = { BODYWORK: 0, PREP: 0, PAINT: 0, POLISH: 0, FINAL_CONTROL: 0 };
     for (const tech of activeTechs) {
       const proc = techProcess(tech.specialty);
       if (!proc) continue;
@@ -1129,21 +1161,13 @@ export class BodyshopService {
     const todayStr = new Date().toISOString().slice(0, 10);
 
     const result = entries.map(e => {
-      const bwH   = Number(e.bodyworkHours);
-      const prepH = Number(e.prepHours);
-      const pntH  = Number(e.paintHours);
-
-      const bwC   = baseDailyCap.BODYWORK;
-      const prepC = baseDailyCap.PREP;
-      const pntC  = baseDailyCap.PAINT;
-
-      const bwDays   = bwH   > 0 ? (bwC   > 0 ? Math.ceil(bwH   / bwC)   : 1) : 0;
-      const prepDays = prepH > 0 ? (prepC > 0 ? Math.ceil(prepH / prepC) : 1) : 0;
-      const pntDays  = pntH  > 0 ? (pntC  > 0 ? Math.ceil(pntH  / pntC)  : 1) : 0;
-
-      const prepStart  = bwDays;
-      const pntStart   = bwDays + prepDays;
-      const totalDays  = bwDays + prepDays + pntDays;
+      // Modelo secuencial de 5 fases (BODYWORK→PREP→PAINT→POLISH→FINAL_CONTROL),
+      // horas derivadas de entryHoursByProcess() (jsonb con fallback legacy —
+      // misma fuente que computeDayCapacity, ver decisión de diseño 3).
+      const hoursByProc = this.entryHoursByProcess(e);
+      const bwH   = hoursByProc.BODYWORK;
+      const prepH = hoursByProc.PREP;
+      const pntH  = hoursByProc.PAINT;
 
       const processWindows: Array<{
         process: BalanceProcess;
@@ -1153,9 +1177,17 @@ export class BodyshopService {
         days: number;
       }> = [];
 
-      if (bwDays > 0) processWindows.push({ process: 'BODYWORK', startDay: 0, endDay: bwDays - 1, hours: round2(bwH), days: bwDays });
-      if (prepDays > 0) processWindows.push({ process: 'PREP', startDay: prepStart, endDay: prepStart + prepDays - 1, hours: round2(prepH), days: prepDays });
-      if (pntDays > 0) processWindows.push({ process: 'PAINT', startDay: pntStart, endDay: pntStart + pntDays - 1, hours: round2(pntH), days: pntDays });
+      let cursor = 0;
+      for (const proc of BALANCE_PROCESSES) {
+        const h   = hoursByProc[proc];
+        const cap = baseDailyCap[proc];
+        const days = h > 0 ? (cap > 0 ? Math.ceil(h / cap) : 1) : 0;
+        if (days > 0) {
+          processWindows.push({ process: proc, startDay: cursor, endDay: cursor + days - 1, hours: round2(h), days });
+        }
+        cursor += days;
+      }
+      const totalDays = cursor;
 
       const processTechs: Record<string, { technicianId: string; technicianName: string }> = {};
       for (const pt of (e.processTechsList ?? [])) {
@@ -1183,7 +1215,7 @@ export class BodyshopService {
       }
 
       // Orden de proceso para comparar
-      const procOrder: Record<string, number> = { AGENDA: -1, BODYWORK: 0, PREP: 1, PAINT: 2 };
+      const procOrder: Record<string, number> = { AGENDA: -1, BODYWORK: 0, PREP: 1, PAINT: 2, POLISH: 3, FINAL_CONTROL: 4 };
       const plannedOrder = plannedProcessToday !== null ? (procOrder[plannedProcessToday] ?? 99) : 99;
       const actualOrder  = currentTrackingCode  !== null ? (procOrder[currentTrackingCode]  ?? 99) : 99;
 
