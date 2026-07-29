@@ -626,9 +626,9 @@ export class BodyshopService {
       }
     }
     return {
-      BODYWORK:      fromJson.BODYWORK      ?? Number(e.bodyworkHours) ?? 0,
-      PREP:          fromJson.PREP          ?? Number(e.prepHours)     ?? 0,
-      PAINT:         fromJson.PAINT         ?? Number(e.paintHours)    ?? 0,
+      BODYWORK:      fromJson.BODYWORK      ?? Number(e.bodyworkHours),
+      PREP:          fromJson.PREP          ?? Number(e.prepHours),
+      PAINT:         fromJson.PAINT         ?? Number(e.paintHours),
       POLISH:        fromJson.POLISH        ?? 0,
       FINAL_CONTROL: fromJson.FINAL_CONTROL ?? 0,
     };
