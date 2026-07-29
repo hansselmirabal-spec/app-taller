@@ -15,6 +15,7 @@ import { BudgetAppointment, BudgetProcess } from '../budget-appointments/budget-
 import { DmsAgendamientoService } from './dms-agendamiento.service';
 import { BodyshopScheduleService } from './bodyshop-schedule.service';
 import { TrackingService } from '../tracking/tracking.service';
+import { computePolishHours, computeFinalControlHours } from './bodyshop-hours.util';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -32,6 +33,17 @@ export class CreateBodyshopEntryDto {
   @Min(0, { message: 'Las horas de preparación no pueden ser negativas.' })                                    prepHours: number;
   @IsNumber({}, { message: 'Completá las horas de pintura con un valor numérico (no puede quedar vacío).' })
   @Min(0, { message: 'Las horas de pintura no pueden ser negativas.' })                                        paintHours: number;
+  // Cantidad de piezas — alimenta computePolishHours() (0.5h × pieza) para Pulida.
+  // Solo obligatoria cuando hay horas de chapería (bodyworkHours > 0): un ingreso
+  // sin chapería (ej. solo pintura) no la necesita. @ValidateIf sin @IsOptional
+  // a propósito — si llevara @IsOptional, un valor undefined saltearía siempre
+  // la validación sin importar el estado de bodyworkHours (comportamiento de
+  // class-validator: IsOptional se salta con valor vacío independientemente
+  // de ValidateIf), lo que dejaría pasar chapería sin pieceCount.
+  @ValidateIf(o => o.bodyworkHours > 0)
+  @IsNumber({}, { message: 'La cantidad de piezas es obligatoria para chapería.' })
+  @Min(0.01, { message: 'La cantidad de piezas debe ser mayor a 0.' })
+  pieceCount?: number;
   // stayDays es calculado automáticamente por el scheduler; se puede sobreescribir manualmente.
   @IsOptional()
   @IsNumber({}, { message: 'Los días de estadía deben ser un número.' })
@@ -130,6 +142,13 @@ export class BodyshopService {
       throw new BadRequestException('Ingresá las horas en al menos un proceso.');
     }
 
+    // Pulida (POLISH) y Control Final (FINAL_CONTROL): único punto de cómputo
+    // (bodyshop-hours.util) para que la regla nunca se duplique. FINAL_CONTROL
+    // se inyecta siempre (0.5h fijo); POLISH solo cuando hay pieceCount > 0
+    // (0.5h × pieza).
+    const polishHours      = dto.pieceCount && dto.pieceCount > 0 ? computePolishHours(dto.pieceCount) : 0;
+    const finalControlHours = computeFinalControlHours();
+
     // Simular la agenda antes de guardar para obtener stayDays y estimatedFinishDate
     let sim: Awaited<ReturnType<typeof this.scheduleService.simulate>>;
     try {
@@ -137,6 +156,8 @@ export class BodyshopService {
         bodyworkHours: dto.bodyworkHours,
         prepHours:     dto.prepHours,
         paintHours:    dto.paintHours,
+        polishHours,
+        finalControlHours,
         workshopId:    dto.workshopId,
         startDate:     dto.date,
         startTime:     dto.timeStart ?? '08:00',
@@ -164,10 +185,17 @@ export class BodyshopService {
     const uniqueDates         = new Set(sim.slots.map((s: any) => s.date));
     const computedStayDays    = dto.stayDays ?? Math.max(1, uniqueDates.size);
 
+    // entry.processes jsonb es la fuente de horas planificadas por proceso que
+    // consumen tracking init y (en PR2) las pantallas de capacidad — incluye
+    // las 5 etapas reales (BODYWORK..FINAL_CONTROL). NO confundir con
+    // budget_appointments.processes (dto.extraProcesses ya viene filtrado sin
+    // POLISH/FINAL_CONTROL desde approve() — ver Requirement "No Leakage").
     const allProcesses: { code: string; name: string; hours: number }[] = [
       ...(Number(dto.bodyworkHours) > 0 ? [{ code: 'BODYWORK', name: 'Chapería',    hours: Number(dto.bodyworkHours) }] : []),
       ...(Number(dto.prepHours)     > 0 ? [{ code: 'PREP',     name: 'Preparación', hours: Number(dto.prepHours)     }] : []),
       ...(Number(dto.paintHours)    > 0 ? [{ code: 'PAINT',    name: 'Pintura',     hours: Number(dto.paintHours)    }] : []),
+      ...(polishHours               > 0 ? [{ code: 'POLISH',        name: 'Pulida',        hours: polishHours        }] : []),
+      ...(finalControlHours         > 0 ? [{ code: 'FINAL_CONTROL', name: 'Control Final', hours: finalControlHours  }] : []),
       ...(dto.extraProcesses ?? []).filter(p => p.hours > 0),
     ];
 

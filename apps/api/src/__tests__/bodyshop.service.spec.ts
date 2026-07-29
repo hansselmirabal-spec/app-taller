@@ -1,7 +1,9 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { NotFoundException, ForbiddenException } from '@nestjs/common';
-import { BodyshopService } from '../modules/bodyshop/bodyshop.service';
+import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
+import { BodyshopService, CreateBodyshopEntryDto } from '../modules/bodyshop/bodyshop.service';
 import { BodyshopEntry } from '../modules/bodyshop/bodyshop-entry.entity';
 import { BodyshopProcess } from '../modules/bodyshop/bodyshop-process.entity';
 import { BodyshopProcessTech } from '../modules/bodyshop/bodyshop-process-tech.entity';
@@ -314,6 +316,114 @@ describe('BodyshopService', () => {
 
       await expect(service.create(dto, USER_ID)).rejects.toThrow('DB down');
       expect(trackingService.initForBodyshop).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── CreateBodyshopEntryDto — pieceCount ──────────────────────────────────
+  // pieceCount alimenta computePolishHours() (0.5h × piezas). Solo es
+  // obligatorio cuando hay horas de chapería (bodyworkHours > 0) — un ingreso
+  // sin chapería (ej. solo pintura) no lo necesita.
+
+  describe('CreateBodyshopEntryDto — pieceCount', () => {
+    const base = {
+      workshopId: WS_ID, date: '2026-06-10', customerName: 'Test', plate: 'TST 001',
+      prepHours: 0, paintHours: 0, channel: 'walk_in',
+    };
+
+    it('rechaza pieceCount ausente cuando hay chapería (bodyworkHours > 0)', async () => {
+      const dto = plainToInstance(CreateBodyshopEntryDto, { ...base, bodyworkHours: 8 });
+      const errors = await validate(dto);
+      expect(errors.some(e => e.property === 'pieceCount')).toBe(true);
+    });
+
+    it('rechaza pieceCount = 0 cuando hay chapería', async () => {
+      const dto = plainToInstance(CreateBodyshopEntryDto, { ...base, bodyworkHours: 8, pieceCount: 0 });
+      const errors = await validate(dto);
+      expect(errors.some(e => e.property === 'pieceCount')).toBe(true);
+    });
+
+    it('acepta pieceCount válido (> 0) cuando hay chapería', async () => {
+      const dto = plainToInstance(CreateBodyshopEntryDto, { ...base, bodyworkHours: 8, pieceCount: 4 });
+      const errors = await validate(dto);
+      expect(errors.some(e => e.property === 'pieceCount')).toBe(false);
+    });
+
+    it('no exige pieceCount cuando no hay chapería (bodyworkHours = 0)', async () => {
+      const dto = plainToInstance(CreateBodyshopEntryDto, { ...base, bodyworkHours: 0, paintHours: 6 });
+      const errors = await validate(dto);
+      expect(errors.some(e => e.property === 'pieceCount')).toBe(false);
+    });
+  });
+
+  // ── create — pieceCount → POLISH/FINAL_CONTROL hours ─────────────────────
+  // Único punto de cómputo: BodyshopService.create() deriva polishHours vía
+  // bodyshop-hours.util (0.5h × pieceCount) e inyecta finalControlHours=0.5h
+  // fijo SIEMPRE, sin importar el origen (presupuesto aprobado o Agenda
+  // directa) — ver design "Single shared pure helper".
+
+  describe('create — pieceCount → polish/finalControl hours', () => {
+    function makeQbForCreate() {
+      const qb = makeQb([]);
+      qb.getOne = jest.fn()
+        .mockResolvedValueOnce(null)        // chequeo de patente duplicada
+        .mockResolvedValueOnce(MOCK_ENTRY); // recarga final
+      return qb;
+    }
+
+    it('escenario presupuesto-aprobado: pieceCount=4 → polishHours=2.0, finalControlHours=0.5', async () => {
+      const qb = makeQbForCreate();
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
+      const scheduleService = makeScheduleService();
+      await build({ entryRepo, scheduleService });
+
+      await service.create({
+        workshopId: WS_ID, date: '2026-06-10', workTypeId: WT_ID,
+        customerName: 'Test', plate: 'TST 001',
+        bodyworkHours: 8, prepHours: 4, paintHours: 6,
+        pieceCount: 4,
+        stayDays: 2, channel: 'walk_in' as const,
+      } as any, USER_ID);
+
+      expect(scheduleService.simulate).toHaveBeenCalledWith(
+        expect.objectContaining({ polishHours: 2.0, finalControlHours: 0.5 }),
+      );
+    });
+
+    it('escenario Agenda directa: pieceCount=3 → polishHours=1.5, finalControlHours=0.5', async () => {
+      const qb = makeQbForCreate();
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
+      const scheduleService = makeScheduleService();
+      await build({ entryRepo, scheduleService });
+
+      await service.create({
+        workshopId: WS_ID, date: '2026-06-10', workTypeId: WT_ID,
+        customerName: 'Test', plate: 'TST 002',
+        bodyworkHours: 5, prepHours: 0, paintHours: 0,
+        pieceCount: 3,
+        stayDays: 1, channel: 'phone' as const,
+      } as any, USER_ID);
+
+      expect(scheduleService.simulate).toHaveBeenCalledWith(
+        expect.objectContaining({ polishHours: 1.5, finalControlHours: 0.5 }),
+      );
+    });
+
+    it('sin chapería (bodyworkHours=0, sin pieceCount): finalControlHours sigue siendo 0.5, polishHours=0', async () => {
+      const qb = makeQbForCreate();
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
+      const scheduleService = makeScheduleService();
+      await build({ entryRepo, scheduleService });
+
+      await service.create({
+        workshopId: WS_ID, date: '2026-06-10', workTypeId: WT_ID,
+        customerName: 'Test', plate: 'TST 003',
+        bodyworkHours: 0, prepHours: 0, paintHours: 6,
+        stayDays: 1, channel: 'walk_in' as const,
+      } as any, USER_ID);
+
+      expect(scheduleService.simulate).toHaveBeenCalledWith(
+        expect.objectContaining({ polishHours: 0, finalControlHours: 0.5 }),
+      );
     });
   });
 

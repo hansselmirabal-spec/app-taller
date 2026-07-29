@@ -182,11 +182,21 @@ export class BudgetAppointmentsService {
     const today = new Date().toISOString().split('T')[0];
     const entryDate = repairStartDate ?? (appt.date >= today ? appt.date : today);
 
-    const LEGACY_CODES = new Set(['BODYWORK', 'PREP', 'PAINT']);
+    // POLISH/FINAL_CONTROL son código operacional (reservado por BodyshopService.create()
+    // vía pieceCount), NUNCA se reenvían como extraProcesses aunque el perito haya
+    // agregado manualmente una línea "Pulido"/"Control Final" al presupuesto — si no,
+    // esa línea informativa terminaría duplicando/pisando la reserva operacional real.
+    // Ver spec "No Leakage into Customer-Facing Budget Data" y design decisión 2.
+    const OPERATIONAL_CODES = new Set(['BODYWORK', 'PREP', 'PAINT', 'POLISH', 'FINAL_CONTROL']);
     const bodyworkHours = processes.find(p => p.code === 'BODYWORK')?.hours ?? 0;
     const prepHours     = processes.find(p => p.code === 'PREP')?.hours ?? 0;
     const paintHours    = processes.find(p => p.code === 'PAINT')?.hours ?? 0;
-    const extraProcesses = processes.filter(p => !LEGACY_CODES.has(p.code));
+    const extraProcesses = processes.filter(p => !OPERATIONAL_CODES.has(p.code));
+
+    // pieceCount SIEMPRE se deriva de appt.pieces[].qty (el desglose real del
+    // Simulador), NUNCA de appt.processes — esa es la fuente de verdad
+    // facturable, no la cantidad de piezas físicas reparadas.
+    const pieceCount = (appt.pieces ?? []).reduce((sum, p) => sum + (Number(p.qty) || 0), 0);
 
     let entry: Awaited<ReturnType<typeof this.bodyshopService.create>>;
     try {
@@ -198,6 +208,7 @@ export class BudgetAppointmentsService {
         bodyworkHours,
         prepHours,
         paintHours,
+        pieceCount,
         channel:       'walk_in',
         notes:         appt.notes ?? undefined,
         budgetNumber:  appt.budgetNumber ?? undefined,

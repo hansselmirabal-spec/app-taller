@@ -1,0 +1,50 @@
+change: chaperia-pulida-control-final
+artifact_store: hybrid
+execution_mode: interactive
+delivery_strategy: auto-forecast
+chain_strategy: stacked-to-main
+review_budget_lines: 400
+
+phases:
+  explore:
+    status: done
+    engram_topic: sdd/chaperia-pulida-control-final/explore
+    file: exploration.md
+  propose:
+    status: pending
+  spec:
+    status: pending
+  design:
+    status: pending
+  tasks:
+    status: done
+    engram_topic: sdd/chaperia-pulida-control-final/tasks
+    file: tasks.md
+  apply:
+    status: pending
+  verify:
+    status: pending
+  archive:
+    status: pending
+
+open_decisions:
+  - id: capacity-dashboards-scope
+    question: >
+      Do capacity/balance dashboard screens (getDayCapacity/getWeekCapacity/
+      getTechnicianAvailability/getMonthlyReport) need to reflect POLISH/FINAL_CONTROL
+      in this change, or stay out of scope (Kanban/Seguimiento only)?
+    status: resolved
+    decision: >
+      IN SCOPE. getDayCapacity, getWeekCapacity, getTechnicianAvailability, and
+      getMonthlyReport must be extended to include POLISH/FINAL_CONTROL alongside
+      BODYWORK/PREP/PAINT. This widens the change beyond the original "Approach 1"
+      minimal-surface recommendation from exploration.md.
+  - id: no-dedicated-tech-behavior
+    question: >
+      If a workshop has no dedicated Pulido/Control Final technician, should entry
+      creation block, or degrade gracefully (current silent-skip-with-warning)?
+    status: resolved
+    decision: >
+      DEGRADE GRACEFULLY. Matches current behavior for other processes lacking
+      capacity: simulate() pushes a warning and skips the process; entry creation
+      is not blocked.
