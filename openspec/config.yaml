@@ -1,0 +1,31 @@
+schema: spec-driven
+
+context: |
+  Tech stack: NestJS + TypeORM + PostgreSQL (apps/api), Next.js App Router (apps/web), Turborepo monorepo (3 separate lockfiles, no pnpm workspaces).
+  Architecture: modular NestJS domain modules (bodyshop, tracking, budget-appointments, budget-simulator, capacity, technicians, dms-sync). Bodyshop scheduling engine (bodyshop-schedule.service.ts) books technician capacity day-by-day against a per-process specialty pool.
+  Testing: Jest (backend + frontend), jest-circus. Strict TDD mode enabled per sdd-init/app-taller.
+  Style: conventional commits (English, no AI attribution), fresh branch off origin/main per change, class-validator DTOs, TypeORM migrations under apps/api/src/database/migrations/.
+
+rules:
+  proposal:
+    - Include rollback plan for risky/schema changes
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Include sequence diagrams for complex flows
+    - Document architecture decisions with rationale
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Follow existing code patterns
+    tdd: true
+    test_command: "pnpm test"
+  verify:
+    test_command: "pnpm test"
+    build_command: "pnpm typecheck"
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas

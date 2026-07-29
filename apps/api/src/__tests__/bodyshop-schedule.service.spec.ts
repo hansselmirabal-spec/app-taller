@@ -34,11 +34,11 @@ function makeQb(rows: any[] = []) {
   return qb;
 }
 
-async function build(overrides: { committedRows?: any[]; techs?: any[] } = {}) {
+async function build(overrides: { committedRows?: any[]; techs?: any[]; processes?: any[] } = {}) {
   const slotRepo = {
     createQueryBuilder: jest.fn().mockReturnValue(makeQb(overrides.committedRows ?? [])),
   };
-  const processRepo = { find: jest.fn().mockResolvedValue(PROCESSES) };
+  const processRepo = { find: jest.fn().mockResolvedValue(overrides.processes ?? PROCESSES) };
   const absenceRepo = { find: jest.fn().mockResolvedValue([]) };
   const workingDayRepo = { findOne: jest.fn().mockResolvedValue(null) };
   const techniciansService = {
@@ -173,5 +173,94 @@ describe('BodyshopScheduleService.simulate() — normalización de startTime', (
 
     const slot = sim.slots.find(s => s.process === 'BODYWORK');
     expect(slot?.timeStart).toBe('08:00');
+  });
+});
+
+describe('BodyshopScheduleService.simulate() — Pulida (POLISH) + Control Final (FINAL_CONTROL)', () => {
+  // Catálogo con las 5 etapas reales del proceso de chapería.
+  const PROCESSES_5 = [
+    { code: 'BODYWORK',      name: 'Chapería',      sequence: 1, active: true },
+    { code: 'PREP',          name: 'Preparación',   sequence: 2, active: true },
+    { code: 'PAINT',         name: 'Pintura',       sequence: 3, active: true },
+    { code: 'POLISH',        name: 'Pulida',        sequence: 4, active: true },
+    { code: 'FINAL_CONTROL', name: 'Control Final', sequence: 5, active: true },
+  ];
+
+  const TECHS_5 = [
+    { id: 'tech-bw',     specialty: 'CHAPERIA',      dailyHours: 8, active: true },
+    { id: 'tech-paint',  specialty: 'PINTURA',       dailyHours: 8, active: true },
+    { id: 'tech-polish', specialty: 'PULIDO',        dailyHours: 8, active: true },
+    { id: 'tech-fc',     specialty: 'CONTROL_FINAL', dailyHours: 8, active: true },
+  ];
+
+  it('agenda POLISH (0.5×piezas) y FINAL_CONTROL (0.5h fijo) después de PAINT, en secuencia', async () => {
+    const service = await build({ processes: PROCESSES_5, techs: TECHS_5 });
+
+    const sim = await service.simulate({
+      bodyworkHours:    2,
+      prepHours:        0,
+      paintHours:       2,
+      polishHours:      2.0,  // 4 piezas × 0.5h
+      finalControlHours: 0.5,
+      workshopId:       WS_ID,
+      startDate:        '2026-06-10',
+      startTime:        '08:00',
+    });
+
+    expect(sim.canSchedule).toBe(true);
+
+    const paintSlot = sim.slots.find(s => s.process === 'PAINT');
+    const polishSlot = sim.slots.find(s => s.process === 'POLISH');
+    const fcSlot      = sim.slots.find(s => s.process === 'FINAL_CONTROL');
+
+    expect(polishSlot?.hours).toBe(2.0);
+    expect(fcSlot?.hours).toBe(0.5);
+
+    // Orden: POLISH y FINAL_CONTROL empiezan después (mismo día o más tarde) que PAINT
+    expect(polishSlot!.date >= paintSlot!.date).toBe(true);
+    expect(fcSlot!.date >= polishSlot!.date).toBe(true);
+    if (fcSlot!.date === polishSlot!.date) {
+      expect(fcSlot!.timeStart >= polishSlot!.timeEnd).toBe(true);
+    }
+  });
+
+  it('estimatedFinishDate refleja el último proceso (Control Final), no Pintura, cuando POLISH/FINAL_CONTROL corren en días separados', async () => {
+    const service = await build({ processes: PROCESSES_5, techs: TECHS_5 });
+
+    // bodyworkHours=8 + paintHours=10 dejan el puntero justo en el borde del
+    // cierre del día 2, sin margen para que Control Final entre el mismo día:
+    // fuerza que FINAL_CONTROL caiga en un día posterior al de Pintura.
+    const sim = await service.simulate({
+      bodyworkHours:    8,
+      prepHours:        0,
+      paintHours:       10,
+      polishHours:      2.0,
+      finalControlHours: 0.5,
+      workshopId:       WS_ID,
+      startDate:        '2026-06-10', // miércoles
+      startTime:        '08:00',
+    });
+
+    expect(sim.canSchedule).toBe(true);
+
+    // Último slot de cada proceso: cuando una etapa se reparte en varios días,
+    // el primer match de .find() sería el tramo inicial, no el cierre real.
+    const lastPaintSlot = sim.slots.filter(s => s.process === 'PAINT').at(-1)!;
+    const fcSlot         = sim.slots.filter(s => s.process === 'FINAL_CONTROL').at(-1)!;
+
+    // Control Final corre estrictamente después de que Pintura termina.
+    expect(fcSlot.date >= lastPaintSlot.date).toBe(true);
+    if (fcSlot.date === lastPaintSlot.date) {
+      expect(fcSlot.timeStart >= lastPaintSlot.timeEnd).toBe(true);
+    }
+
+    // El finish date se calcula desde el ÚLTIMO slot (Control Final), no desde Pintura:
+    // agregar POLISH/FINAL_CONTROL debe empujar estimatedFinishDate más adelante que
+    // una simulación equivalente que solo agenda BODYWORK+PAINT.
+    const finishIfOnlyPaint = await service.simulate({
+      bodyworkHours: 8, prepHours: 0, paintHours: 10, polishHours: 0, finalControlHours: 0,
+      workshopId: WS_ID, startDate: '2026-06-10', startTime: '08:00',
+    });
+    expect(sim.estimatedFinishDate! > finishIfOnlyPaint.estimatedFinishDate!).toBe(true);
   });
 });

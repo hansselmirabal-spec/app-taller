@@ -18,12 +18,15 @@ const SPECIALTY_TO_CODE: Record<string, string> = {
   PREPARACION: 'PREP', PREPARADOR: 'PREP', PREP: 'PREP',
   PINTURA: 'PAINT', PINTOR: 'PAINT', PAINT: 'PAINT',
   PULIDO: 'POLISH', PULIDOR: 'POLISH', POLISH: 'POLISH',
+  FINAL_CONTROL: 'FINAL_CONTROL', CONTROL_FINAL: 'FINAL_CONTROL',
 };
 
 export interface SimulateInput {
   bodyworkHours: number;
   prepHours:     number;
   paintHours:    number;
+  polishHours?:       number;
+  finalControlHours?: number;
   workshopId:    string;
   startDate:     string;   // YYYY-MM-DD
   startTime?:    string;   // HH:mm  (default 08:00)
@@ -49,10 +52,11 @@ export interface ScheduleSimulation {
 }
 
 const DEFAULT_PROCESSES = [
-  { code: 'BODYWORK', name: 'Chapería',    sequence: 1 },
-  { code: 'PREP',     name: 'Preparación', sequence: 2 },
-  { code: 'PAINT',    name: 'Pintura',     sequence: 3 },
-  { code: 'POLISH',   name: 'Pulida',      sequence: 4 },
+  { code: 'BODYWORK',      name: 'Chapería',      sequence: 1 },
+  { code: 'PREP',          name: 'Preparación',   sequence: 2 },
+  { code: 'PAINT',         name: 'Pintura',       sequence: 3 },
+  { code: 'POLISH',        name: 'Pulida',        sequence: 4 },
+  { code: 'FINAL_CONTROL', name: 'Control Final', sequence: 5 },
 ];
 
 @Injectable()
@@ -76,7 +80,7 @@ export class BodyshopScheduleService {
   }
 
   async simulate(input: SimulateInput): Promise<ScheduleSimulation> {
-    const { bodyworkHours, prepHours, paintHours, workshopId, startDate, entryIdExclude } = input;
+    const { bodyworkHours, prepHours, paintHours, polishHours, finalControlHours, workshopId, startDate, entryIdExclude } = input;
     // startTime puede llegar como "09:00:00" (columnas Postgres type:'time', p.ej.
     // budget_appointments.time_start) — se trunca/valida a "HH:MM" acá, en la fuente,
     // para que nunca se guarde un valor más largo en bodyshop_entry_process_slots.time_start
@@ -84,9 +88,11 @@ export class BodyshopScheduleService {
     const startTime = this.normalizeTime(input.startTime) ?? SHOP_OPEN;
 
     const hoursByCode: Record<string, number> = {
-      BODYWORK: Number(bodyworkHours) || 0,
-      PREP:     Number(prepHours)     || 0,
-      PAINT:    Number(paintHours)    || 0,
+      BODYWORK:      Number(bodyworkHours)      || 0,
+      PREP:          Number(prepHours)          || 0,
+      PAINT:         Number(paintHours)         || 0,
+      POLISH:        Number(polishHours)        || 0,
+      FINAL_CONTROL: Number(finalControlHours)  || 0,
     };
 
     const totalHours = Object.values(hoursByCode).reduce((s, h) => s + h, 0);
