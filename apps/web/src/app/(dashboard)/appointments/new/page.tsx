@@ -1002,6 +1002,7 @@ function BodyshopNewForm() {
   const [directPrepHours,     setDirectPrepHours]     = useState('');
   const [directPaintHours,    setDirectPaintHours]    = useState('');
   const [budgetNumber,        setBudgetNumber]        = useState('');
+  const [pieceCount,          setPieceCount]          = useState('');
 
   // ── Step 3: schedule + confirm ──────────────────────────────────────────────
   const [date,        setDate]        = useState(params.get('date') || formatDate(new Date()));
@@ -1044,10 +1045,11 @@ function BodyshopNewForm() {
 
   const { data: advisorSlots = [], isLoading: advisorSlotsLoading } = useDmsAdvisorSlots(date);
 
-  const bodyworkH = parseFloat(directBodyworkHours) || 0;
-  const prepH     = parseFloat(directPrepHours)     || 0;
-  const paintH    = parseFloat(directPaintHours)    || 0;
-  const totalH    = bodyworkH + prepH + paintH;
+  const bodyworkH  = parseFloat(directBodyworkHours) || 0;
+  const prepH      = parseFloat(directPrepHours)     || 0;
+  const paintH     = parseFloat(directPaintHours)    || 0;
+  const totalH     = bodyworkH + prepH + paintH;
+  const pieceCountN = parseFloat(pieceCount) || 0;
 
   async function handleSimulate() {
     if (totalH === 0) { setError('Ingresá horas en al menos un proceso antes de simular.'); return; }
@@ -1098,6 +1100,7 @@ function BodyshopNewForm() {
         bodyworkHours: bodyworkH,
         prepHours:     prepH,
         paintHours:    paintH,
+        pieceCount:    bodyworkH > 0 ? pieceCountN : undefined,
         channel,
         timeStart:     timeStart             || null,
         advisorCode:   effectiveAdvisorCode,
@@ -1226,7 +1229,9 @@ function BodyshopNewForm() {
   }
 
   const step1Valid = !!(customerName.trim() && plate.trim());
-  const step2Valid = totalH > 0 && !!date;
+  // Cantidad de piezas sólo es obligatoria cuando hay horas de chapería cargadas
+  // (misma condición que el backend: bodyworkHours > 0).
+  const step2Valid = totalH > 0 && !!date && (bodyworkH === 0 || pieceCountN > 0);
 
   return (
     <>
@@ -1510,6 +1515,27 @@ function BodyshopNewForm() {
                   <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
                     <span className="text-xs text-slate-500 font-semibold">Total presupuesto</span>
                     <span className="text-xl font-bold text-slate-900">{totalH.toFixed(1)}h</span>
+                  </div>
+                )}
+
+                {/* Cantidad de piezas — obligatoria si hay horas de chapería (Pulida/Control Final se derivan de acá) */}
+                {bodyworkH > 0 && (
+                  <div className="px-5 py-4 border-t border-slate-100">
+                    <Field label="Cantidad de piezas" required>
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        min="1"
+                        step="1"
+                        placeholder="Ej: 4"
+                        value={pieceCount}
+                        onChange={e => setPieceCount(e.target.value)}
+                        className="max-w-[10rem]"
+                      />
+                    </Field>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Determina las horas de Pulida y Control Final.
+                    </p>
                   </div>
                 )}
               </div>

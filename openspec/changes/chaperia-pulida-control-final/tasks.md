@@ -58,7 +58,7 @@ Note: split and chain order were already resolved in design's "Chained PR plan" 
 
 ## PR3: Frontend
 
-- [ ] 3.1 `apps/web/.../appointments/new/page.tsx`: add `pieceCount` state near hours stepper (~line 1449), input field required when `bodyworkH>0`, wire into `create.mutateAsync` payload
-- [ ] 3.2 `technician-create-dialog.tsx` + `settings/technicians/page.tsx`: add `PULIDO`/`CONTROL_FINAL` to both `BODYSHOP_SPECIALTIES` lists in lockstep (lines ~12 and ~16)
-- [ ] 3.3 `settings/technicians/page.tsx`: extend `specialtyToText()` and `SpecialtyBadge()` with `isPolish`/`isFinalControl` branches + colors
-- [ ] 3.4 Manual QA: direct-Agenda Chapería submit without `pieceCount` blocked; technician settings shows new specialties with distinct badge colors
+- [x] 3.1 `apps/web/.../appointments/new/page.tsx`: add `pieceCount` state near hours stepper (~line 1449), input field required when `bodyworkH>0`, wire into `create.mutateAsync` payload
+- [x] 3.2 `technician-create-dialog.tsx` + `settings/technicians/page.tsx`: add `PULIDO`/`CONTROL_FINAL` to both `BODYSHOP_SPECIALTIES` lists in lockstep (lines ~12 and ~16)
+- [x] 3.3 `settings/technicians/page.tsx`: extend `specialtyToText()` and `SpecialtyBadge()` with `isPolish`/`isFinalControl` branches + colors
+- [x] 3.4 Manual QA: direct-Agenda Chapería submit without `pieceCount` blocked; technician settings shows new specialties with distinct badge colors — **NOTE: not executed by this agent** (no frontend test/browser harness available in this environment); code-level verification only (`step2Valid` gates the "Siguiente" button on `pieceCountN > 0` when `bodyworkH > 0`; `BODYSHOP_SPECIALTIES` + `SpecialtyBadge` verified by direct code read + `tsc --noEmit` clean). Recommend a maintainer/QA pass in a running instance before merge.
