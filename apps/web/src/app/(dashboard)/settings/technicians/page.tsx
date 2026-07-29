@@ -14,9 +14,11 @@ import type { Technician } from '@/types';
 
 // Procesos del bodyshop (Chapería / Preparación / Pintura).
 const BODYSHOP_SPECIALTIES: { value: string; label: string }[] = [
-  { value: 'CHAPERIA',    label: 'Chapería' },
-  { value: 'PREPARACION', label: 'Preparación' },
-  { value: 'PINTURA',     label: 'Pintura' },
+  { value: 'CHAPERIA',      label: 'Chapería' },
+  { value: 'PREPARACION',   label: 'Preparación' },
+  { value: 'PINTURA',       label: 'Pintura' },
+  { value: 'POLISH',        label: 'Pulido' },
+  { value: 'FINAL_CONTROL', label: 'Control Final' },
 ];
 
 // Roles predefinidos para talleres de mecánica.
@@ -34,6 +36,8 @@ function specialtyToText(value: string | null | undefined): string {
   if (v === 'CARROCERIA' || v === 'CHAPERIA' || v === 'BODYWORK') return 'Chapería';
   if (v === 'PREPARACION' || v === 'PREP')                       return 'Preparación';
   if (v === 'PINTURA' || v === 'PAINT')                          return 'Pintura';
+  if (v === 'POLISH' || v === 'PULIDO' || v === 'PULIDOR')       return 'Pulido';
+  if (v === 'FINAL_CONTROL' || v === 'CONTROL_FINAL')            return 'Control Final';
   return value;
 }
 const NO_BOX  = '__none__';
@@ -492,13 +496,17 @@ export default function TechniciansSettingsPage() {
 function SpecialtyBadge({ value }: { value: string }) {
   // Acepta cualquier alias y muestra el label legible. Color por proceso del bodyshop.
   const v = value.trim().toUpperCase();
-  const isBodywork = v === 'CARROCERIA' || v === 'CHAPERIA' || v === 'BODYWORK';
-  const isPrep     = v === 'PREPARACION' || v === 'PREP';
-  const isPaint    = v === 'PINTURA' || v === 'PAINT';
-  const cls = isBodywork ? 'bg-blue-50 text-blue-700'
-            : isPrep     ? 'bg-amber-50 text-amber-700'
-            : isPaint    ? 'bg-purple-50 text-purple-700'
-            :              'bg-slate-100 text-slate-700';
+  const isBodywork     = v === 'CARROCERIA' || v === 'CHAPERIA' || v === 'BODYWORK';
+  const isPrep         = v === 'PREPARACION' || v === 'PREP';
+  const isPaint        = v === 'PINTURA' || v === 'PAINT';
+  const isPolish       = v === 'POLISH' || v === 'PULIDO' || v === 'PULIDOR';
+  const isFinalControl = v === 'FINAL_CONTROL' || v === 'CONTROL_FINAL';
+  const cls = isBodywork     ? 'bg-blue-50 text-blue-700'
+            : isPrep         ? 'bg-amber-50 text-amber-700'
+            : isPaint        ? 'bg-purple-50 text-purple-700'
+            : isPolish       ? 'bg-teal-50 text-teal-700'
+            : isFinalControl ? 'bg-rose-50 text-rose-700'
+            :                  'bg-slate-100 text-slate-700';
   return (
     <span className={`text-xs px-2 py-1 rounded-full font-medium ${cls}`}>
       {specialtyToText(value)}

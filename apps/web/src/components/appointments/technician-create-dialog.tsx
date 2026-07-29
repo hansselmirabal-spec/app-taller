@@ -10,9 +10,11 @@ import type { Technician } from '@/types';
 
 // Procesos del bodyshop (Chapería / Preparación / Pintura).
 const BODYSHOP_SPECIALTIES: { value: string; label: string }[] = [
-  { value: 'CHAPERIA',    label: 'Chapería' },
-  { value: 'PREPARACION', label: 'Preparación' },
-  { value: 'PINTURA',     label: 'Pintura' },
+  { value: 'CHAPERIA',      label: 'Chapería' },
+  { value: 'PREPARACION',   label: 'Preparación' },
+  { value: 'PINTURA',       label: 'Pintura' },
+  { value: 'POLISH',        label: 'Pulido' },
+  { value: 'FINAL_CONTROL', label: 'Control Final' },
 ];
 
 // Roles predefinidos para talleres de mecánica.
