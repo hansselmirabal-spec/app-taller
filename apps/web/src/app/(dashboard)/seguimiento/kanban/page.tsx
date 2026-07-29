@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import {
   useTrackingBoard, useStartProcess, useCompleteProcess,
   usePauseProcess, useUnblockProcess, useSetExitDate,
-  useSetResource, useClearResource,
+  useSetResource, useClearResource, useAddProcess,
 } from '@/hooks/use-tracking';
 import { useWorkshopId } from '@/context/workshop-context';
 import { useWorkshops } from '@/hooks/use-workshops';
@@ -1219,8 +1219,8 @@ function CardDetailModal({
 // ── Card ───────────────────────────────────────────────────────────────────────
 
 function KanbanCard({
-  card, onCardClick, onStart, onComplete, onPause, onUnblock, onReleaseTech,
-  isStarting, isCompleting, isPausing, isUnblocking, isReleasingTech, todayStr,
+  card, onCardClick, onStart, onComplete, onPause, onUnblock, onReleaseTech, onAddProcess,
+  isStarting, isCompleting, isPausing, isUnblocking, isReleasingTech, isAddingProcess, todayStr,
 }: {
   card: TrackingCard;
   onCardClick: (cardId: string) => void;
@@ -1229,13 +1229,17 @@ function KanbanCard({
   onPause:    (logId: string, processName: string) => void;
   onUnblock:  (logId: string) => void;
   onReleaseTech: (sourceId: string) => void;
+  onAddProcess: (entryId: string, processCode: string, hours: number) => void;
   isStarting:      boolean;
   isCompleting:    boolean;
   isPausing:       boolean;
   isUnblocking:    boolean;
   isReleasingTech: boolean;
+  isAddingProcess: boolean;
   todayStr:        string;
 }) {
+  const [addProcessOpen, setAddProcessOpen] = useState(false);
+  const [addProcessHours, setAddProcessHours] = useState('');
   const isCancelled       = card.status === 'cancelled';
   const isWaitingResource = !isCancelled && card.waitingForResource;
   const cp = card.currentProcess;
@@ -1283,6 +1287,11 @@ function KanbanCard({
   const isStartable   = !isCancelled && cp?.status === 'pending';
   const isCompletable = !isCancelled && cp?.status === 'in_progress' && !isAgenda;
   const isPausable    = !isCancelled && (cp?.status === 'in_progress' || cp?.status === 'pending') && !isAgenda;
+
+  // Mecánica manual (F1 PR1): solo bodyshop, solo si el proceso todavía no existe
+  // (el backend rechaza duplicados sin importar su estado, ver addProcessToBodyshop).
+  const hasMechanicProcess = card.allProcesses?.some(p => p.processCode === 'MECHANIC');
+  const canAddMechanic = !isCancelled && card.sourceType === 'bodyshop' && !hasMechanicProcess;
 
   const elapsedHours = cp?.startedAt && cp.status === 'in_progress'
     ? (Date.now() - new Date(cp.startedAt).getTime()) / 3_600_000
@@ -1552,6 +1561,44 @@ function KanbanCard({
         </div>
       )}
 
+      {/* Agregar Mecánica manual (F1 PR1) — siempre visible en cards de bodyshop sin ese proceso aún */}
+      {canAddMechanic && (
+        <div onClick={e => e.stopPropagation()}>
+          {!addProcessOpen ? (
+            <button type="button" onClick={() => setAddProcessOpen(true)}
+              className="w-full flex items-center justify-center gap-1 text-[10px] font-medium text-purple-600 border border-dashed border-purple-200 rounded-lg py-1 hover:bg-purple-50 transition-colors">
+              <Plus className="h-3 w-3" /> Agregar proceso
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number" min="0.1" step="0.1" placeholder="Horas Mecánica"
+                value={addProcessHours}
+                onChange={e => setAddProcessHours(e.target.value)}
+                className="flex-1 min-w-0 text-[11px] border border-slate-200 rounded-md px-1.5 py-1"
+              />
+              <button type="button"
+                disabled={isAddingProcess || !addProcessHours || Number(addProcessHours) <= 0}
+                onClick={() => {
+                  onAddProcess(card.sourceId, 'MECHANIC', Number(addProcessHours));
+                  setAddProcessOpen(false);
+                  setAddProcessHours('');
+                }}
+                className="p-1 rounded-md bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                title="Confirmar">
+                <Check className="h-3 w-3" />
+              </button>
+              <button type="button"
+                onClick={() => { setAddProcessOpen(false); setAddProcessHours(''); }}
+                className="p-1 rounded-md bg-slate-200 text-slate-600 hover:bg-slate-300 transition-colors"
+                title="Cancelar">
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Badge fecha de salida */}
       {(card.exitDate || card.suggestedExitDate) && (
         <div className="flex items-center gap-1.5 text-[10px]">
@@ -1618,8 +1665,8 @@ function KanbanCard({
 // ── Columna ────────────────────────────────────────────────────────────────────
 
 function KanbanColumn({
-  column, onCardClick, onStart, onComplete, onPause, onUnblock, onReleaseTech,
-  loadingLogId, pausingLogId, unblockingLogId, releasingCardId, todayStr,
+  column, onCardClick, onStart, onComplete, onPause, onUnblock, onReleaseTech, onAddProcess,
+  loadingLogId, pausingLogId, unblockingLogId, releasingCardId, addingProcessEntryId, todayStr,
 }: {
   column: TrackingColumn;
   onCardClick: (cardId: string) => void;
@@ -1628,10 +1675,12 @@ function KanbanColumn({
   onPause:    (logId: string, processName: string) => void;
   onUnblock:  (logId: string) => void;
   onReleaseTech: (sourceId: string) => void;
+  onAddProcess: (entryId: string, processCode: string, hours: number) => void;
   loadingLogId:    string | null;
   pausingLogId:    string | null;
   unblockingLogId: string | null;
   releasingCardId: string | null;
+  addingProcessEntryId: string | null;
   todayStr:        string;
 }) {
   const isCancelledCol = column.processCode === '__CANCELLED__';
@@ -1667,11 +1716,13 @@ function KanbanColumn({
             onPause={onPause}
             onUnblock={onUnblock}
             onReleaseTech={onReleaseTech}
+            onAddProcess={onAddProcess}
             isStarting={loadingLogId === card.currentProcess?.logId}
             isCompleting={loadingLogId === card.currentProcess?.logId}
             isPausing={pausingLogId === card.currentProcess?.logId}
             isUnblocking={unblockingLogId === card.currentProcess?.logId}
             isReleasingTech={releasingCardId === card.sourceId}
+            isAddingProcess={addingProcessEntryId === card.sourceId}
             todayStr={todayStr}
           />
         ))}
@@ -1715,6 +1766,7 @@ export default function TrackingKanbanPage() {
   const exitDateMutation = useSetExitDate();
   const setResourceMutation   = useSetResource();
   const clearResourceMutation = useClearResource();
+  const addProcessMutation    = useAddProcess();
 
   // Card seleccionada: lookup en vivo desde board (se actualiza tras mutations)
   const selectedCard = selectedCardId
@@ -1765,6 +1817,14 @@ export default function TrackingKanbanPage() {
     setUnblockingLogId(logId);
     try { await unblockMutation.mutateAsync(logId); }
     finally { setUnblockingLogId(null); }
+  }
+
+  const [addingProcessEntryId, setAddingProcessEntryId] = useState<string | null>(null);
+
+  async function handleAddProcess(entryId: string, processCode: string, hours: number) {
+    setAddingProcessEntryId(entryId);
+    try { await addProcessMutation.mutateAsync({ entryId, processCode, hours }); }
+    finally { setAddingProcessEntryId(null); }
   }
 
   const [releasingCardId, setReleasingCardId] = useState<string | null>(null);
@@ -1985,10 +2045,12 @@ export default function TrackingKanbanPage() {
                   onPause={handlePauseOpen}
                   onUnblock={handleUnblock}
                   onReleaseTech={handleReleaseTech}
+                  onAddProcess={handleAddProcess}
                   loadingLogId={loadingLogId}
                   pausingLogId={pausingLogId}
                   unblockingLogId={unblockingLogId}
                   releasingCardId={releasingCardId}
+                  addingProcessEntryId={addingProcessEntryId}
                   todayStr={todayStr}
                 />
               ))}

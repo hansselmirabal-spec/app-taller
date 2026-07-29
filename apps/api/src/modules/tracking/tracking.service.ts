@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { DataSource, Repository, In } from 'typeorm';
 import { TrackingLog } from './tracking-log.entity';
 import { Appointment } from '../appointments/appointment.entity';
 import { BodyshopEntry } from '../bodyshop/bodyshop-entry.entity';
@@ -26,10 +26,35 @@ const BODYSHOP_PROCESS_NAMES: Record<string, string> = {
   POLISH:        'Pulido',
   MECHANIC:      'Mecánica',
   FINAL_CONTROL: 'Control Final',
+  // Paralelos agregables post-creación vía addProcessToBodyshop (ver más abajo).
+  // Sin columna dedicada en bodyshop_entries — solo viven en tracking_logs +
+  // entry.processes (jsonb).
+  DIAMANTADO:    'Diamantado',
+  LLANTAS:       'Llantas',
+  ELECTRICO:     'Eléctrico',
 };
 
 // Procesos que son PARALELOS por defecto (pueden correr junto al flujo madre)
 const BODYSHOP_PARALLEL_CODES = new Set(['MECHANIC', 'DIAMANTADO', 'LLANTAS', 'ELECTRICO']);
+
+// Entradas en estado terminal no admiten agregar procesos nuevos (spec
+// tracking-add-process: "Rejected when entry status is cancelled/terminated").
+const BODYSHOP_TERMINAL_STATUSES = new Set(['cancelled', 'done']);
+
+// Descriptor compartido: TrackingLog y entry.processes (jsonb) deben nacer con
+// el mismo code/name/hours para no desincronizarse (spec: "Transactional
+// dual-write consistency"). Única fuente de verdad para nombre/orden.
+function buildBodyshopProcessDescriptor(
+  code: string,
+  hours: number,
+): { code: string; name: string; order: number; hours: number } {
+  return {
+    code,
+    name:  BODYSHOP_PROCESS_NAMES[code] ?? code,
+    order: BODYSHOP_PROCESS_ORDER[code] ?? 99,
+    hours,
+  };
+}
 
 // Añade N días hábiles (lun-sáb) a una fecha YYYY-MM-DD
 function addBusinessDays(dateStr: string, days: number): string {
@@ -122,6 +147,8 @@ export class TrackingService {
     private readonly processTechRepo: Repository<BodyshopProcessTech>,
     @InjectRepository(Workshop)
     private readonly workshopRepo: Repository<Workshop>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
 
   // El técnico real de un log vive afuera de tracking_logs: en
@@ -225,6 +252,60 @@ export class TrackingService {
       log.plannedHours = newHours;
       await this.logRepo.save(log);
     }
+  }
+
+  // Agrega un proceso PARALELO (MECHANIC/DIAMANTADO/LLANTAS/ELECTRICO) a un
+  // ingreso de bodyshop ya existente, en cualquier momento después de su
+  // creación. Dual-write atómico: TrackingLog nuevo + entry.processes (jsonb)
+  // deben quedar consistentes — si cualquiera de los dos writes falla, ninguno
+  // persiste (spec tracking-add-process, requerimiento "transactional dual-write
+  // consistency"). No usa entryRepo.save(entry completo) para no pisar cambios
+  // concurrentes en otras columnas: solo toca `processes`.
+  async addProcessToBodyshop(entryId: string, processCode: string, hours: number): Promise<TrackingLog> {
+    if (!BODYSHOP_PARALLEL_CODES.has(processCode)) {
+      throw new BadRequestException(
+        `Solo se pueden agregar procesos paralelos (${[...BODYSHOP_PARALLEL_CODES].join(', ')}). "${processCode}" es un proceso madre.`,
+      );
+    }
+
+    const entry = await this.entryRepo.findOne({ where: { id: entryId } as any });
+    if (!entry) throw new NotFoundException('Entrada no encontrada');
+    if (BODYSHOP_TERMINAL_STATUSES.has((entry as any).status)) {
+      throw new BadRequestException('No se puede agregar un proceso a una entrada cancelada o finalizada');
+    }
+
+    const currentProcesses: { code: string; name: string; hours: number }[] = (entry as any).processes ?? [];
+    const alreadyInProcesses = currentProcesses.some(p => p.code === processCode);
+    const existingLog = await this.logRepo.findOne({
+      where: { sourceType: 'bodyshop', sourceId: entryId, processCode },
+    });
+    if (alreadyInProcesses || existingLog) {
+      throw new BadRequestException(`El proceso "${processCode}" ya existe en esta entrada`);
+    }
+
+    const descriptor = buildBodyshopProcessDescriptor(processCode, hours);
+
+    return this.dataSource.transaction(async manager => {
+      const log = manager.create(TrackingLog, {
+        sourceType:  'bodyshop',
+        sourceId:    entryId,
+        processName: descriptor.name,
+        processCode: descriptor.code,
+        orderIndex:  descriptor.order,
+        plannedHours: hours,
+        processType: 'PARALLEL',
+        status:      'pending',
+      });
+      const savedLog = await manager.save(TrackingLog, log);
+
+      const updatedProcesses = [
+        ...currentProcesses,
+        { code: descriptor.code, name: descriptor.name, hours },
+      ];
+      await manager.save(BodyshopEntry, { ...entry, processes: updatedProcesses });
+
+      return savedLog;
+    });
   }
 
   // ── Acciones ────────────────────────────────────────────────────────────────
