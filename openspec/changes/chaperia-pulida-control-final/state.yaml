@@ -21,7 +21,18 @@ phases:
     engram_topic: sdd/chaperia-pulida-control-final/tasks
     file: tasks.md
   apply:
-    status: pending
+    status: done
+    engram_topic: sdd/chaperia-pulida-control-final/apply-progress
+    prs:
+      - number: 21
+        title: "PR1 core engine"
+        merged: true
+      - number: 22
+        title: "PR2 capacity dashboards"
+        merged: true
+      - number: 23
+        title: "PR3 frontend"
+        merged: true
   verify:
     status: pending
   archive:
