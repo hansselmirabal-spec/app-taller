@@ -25,6 +25,15 @@ class BlockProcessDto {
   @IsString() reason: string;
 }
 
+// Mirror de StartProcessDto: la reanudación (Func.2, PR2) SIEMPRE requiere
+// confirmación explícita de técnico desde el frontend, pero ambos campos
+// quedan opcionales acá para compat hacia atrás (caso tech-less / callers
+// legacy que no mandan body).
+export class UnblockProcessDto {
+  @IsOptional() @IsString() technicianId?: string;
+  @IsOptional() @IsString() technicianName?: string;
+}
+
 class SetExitDateDto {
   @IsOptional() @IsString() date?: string | null;
 }
@@ -107,8 +116,16 @@ export class TrackingController {
   }
 
   @Patch('process/:logId/unblock')
-  async unblockProcess(@Param('logId') logId: string) {
-    return wrap(await this.service.unblockProcess(logId));
+  async unblockProcess(
+    @Param('logId') logId: string,
+    @Body() dto: UnblockProcessDto,
+  ) {
+    return wrap(await this.service.unblockProcess(logId, dto.technicianId, dto.technicianName));
+  }
+
+  @Get('process/:logId/resume-options')
+  async getResumeOptions(@Param('logId') logId: string) {
+    return wrap(await this.service.getResumeOptions(logId));
   }
 
   @Patch('exit-date/:sourceType/:sourceId')

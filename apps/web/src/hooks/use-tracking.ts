@@ -3,8 +3,8 @@ import {
   getTrackingBoard, startTrackingProcess, completeTrackingProcess,
   blockTrackingProcess, unblockTrackingProcess, setTrackingExitDate,
   setTrackingResource, clearTrackingResource, getResourceAgenda,
-  addTrackingProcess,
-  type TrackingBoard, type ResourceAgendaItem,
+  addTrackingProcess, getResumeOptions,
+  type TrackingBoard, type ResourceAgendaItem, type ResumeOptions,
 } from '@/lib/api';
 
 export function useTrackingBoard(date: string, workshopId: string | undefined) {
@@ -48,8 +48,19 @@ export function usePauseProcess() {
 export function useUnblockProcess() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (logId: string) => unblockTrackingProcess(logId),
+    mutationFn: ({ logId, technicianId, technicianName }: {
+      logId: string; technicianId?: string; technicianName?: string;
+    }) => unblockTrackingProcess(logId, technicianId, technicianName),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tracking-board'] }),
+  });
+}
+
+export function useResumeOptions(logId: string | null) {
+  return useQuery<ResumeOptions>({
+    queryKey: ['resume-options', logId],
+    queryFn:  () => getResumeOptions(logId!),
+    enabled:  !!logId,
+    staleTime: 0,
   });
 }
 

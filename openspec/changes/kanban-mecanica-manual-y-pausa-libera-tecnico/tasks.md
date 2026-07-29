@@ -55,41 +55,41 @@ Already resolved by design (not reopened): 2-PR split, stacked-to-main, PR1 ≈3
 
 ## Phase 5: PR2 — `blockProcess` releases technician (TDD)
 
-- [ ] 5.1 RED: test `blockProcess` snapshots `technicianId`/`technicianName` onto the log only if not already set
-- [ ] 5.2 RED: test `blockProcess` deletes `bodyshop_process_techs` row for `entryId`+`processCode`
-- [ ] 5.3 RED: test `blockProcess` no-op (0 rows deleted) when process has no assigned tech (MECHANIC/parallel, failed auto-assign)
-- [ ] 5.4 GREEN: implement snapshot-then-delete in `blockProcess`, `tracking.service.ts`
+- [x] 5.1 RED: test `blockProcess` snapshots `technicianId`/`technicianName` onto the log only if not already set
+- [x] 5.2 RED: test `blockProcess` deletes `bodyshop_process_techs` row for `entryId`+`processCode`
+- [x] 5.3 RED: test `blockProcess` no-op (0 rows deleted) when process has no assigned tech (MECHANIC/parallel, failed auto-assign)
+- [x] 5.4 GREEN: implement snapshot-then-delete in `blockProcess`, `tracking.service.ts` — plus a 5th test locking down that `sourceType: 'mechanic'` never touches `bodyshop_process_techs` (spec scope: only the 6 Chapería processes)
 
 ## Phase 6: PR2 — `unblockProcess` reassign + conflict-check (TDD)
 
-- [ ] 6.1 RED: test `isTechnicianFree(technicianId, excludeLogId?)` returns false when tech busy on another `in_progress` log, excludes own log
-- [ ] 6.2 GREEN: implement `isTechnicianFree` in `tracking.service.ts`, reuse existing conflict-check query
-- [ ] 6.3 RED: test `unblockProcess` throws `BadRequestException` when confirmed tech is busy elsewhere
-- [ ] 6.4 RED: test `unblockProcess` upserts `bodyshop_process_techs` with provided tech (falls back to `log.technicianId`), restores status, accumulates `pausedDurationMinutes`
-- [ ] 6.5 GREEN: extend `unblockProcess(logId, technicianId?, technicianName?)` in `tracking.service.ts` per Data Flow (b)
+- [x] 6.1 RED: test `isTechnicianFree(technicianId, excludeLogId?)` returns false when tech busy on another `in_progress` log, excludes own log
+- [x] 6.2 GREEN: implement `isTechnicianFree` in `tracking.service.ts`, reuse existing conflict-check query (extracted as shared private `findTechnicianConflict` reused by `isTechnicianFree`, `unblockProcess` and `getResumeOptions`)
+- [x] 6.3 RED: test `unblockProcess` throws `BadRequestException` when confirmed tech is busy elsewhere
+- [x] 6.4 RED: test `unblockProcess` upserts `bodyshop_process_techs` with provided tech (falls back to `log.technicianId`), restores status, accumulates `pausedDurationMinutes`
+- [x] 6.5 GREEN: extend `unblockProcess(logId, technicianId?, technicianName?)` in `tracking.service.ts` per Data Flow (b)
 
 ## Phase 7: PR2 — resume-options endpoint (TDD)
 
-- [ ] 7.1 RED: test `getResumeOptions(logId)` returns `{previousTechnicianId, previousTechnicianName, previousTechnicianFree, conflictProcessName}`
-- [ ] 7.2 GREEN: implement `getResumeOptions` in `tracking.service.ts`
-- [ ] 7.3 RED: test `GET tracking/process/:logId/resume-options` returns 200 with expected shape
-- [ ] 7.4 GREEN: add `UnblockProcessDto` optional `technicianId`/`technicianName` fields + `GET resume-options` route in `tracking.controller.ts`
+- [x] 7.1 RED: test `getResumeOptions(logId)` returns `{previousTechnicianId, previousTechnicianName, previousTechnicianFree, conflictProcessName}`
+- [x] 7.2 GREEN: implement `getResumeOptions` in `tracking.service.ts`
+- [x] 7.3 RED: test `GET tracking/process/:logId/resume-options` returns 200 with expected shape — unit-tested via direct controller invocation (same no-e2e-harness constraint as PR1's `addProcess`; 200 is NestJS's `@Get` default, not unit-testable)
+- [x] 7.4 GREEN: add `UnblockProcessDto` optional `technicianId`/`technicianName` fields + `GET resume-options` route in `tracking.controller.ts`
 
 ## Phase 8: PR2 — Integration tests (TDD)
 
-- [ ] 8.1 Integration (Nest test DB): paused tech drops out of `getTechnicianAvailability`, reappears on resume
-- [ ] 8.2 Integration (Nest test DB): 2+ paused processes on one entry release/restore independently
+- [x] 8.1 Integration (Nest test DB): paused tech drops out of `getTechnicianAvailability`, reappears on resume — **deviation**: no Nest test DB / sqlite / testcontainers harness exists anywhere in the repo (verified: no `*.spec.ts` uses one, `package.json` declares no such dependency — same constraint PR1 already documented for e2e/supertest). Degraded per `strict-tdd.md`'s "Choosing Test Layer" to a stateful mock (real `Map`-backed `bodyshop_process_techs` double) that `blockProcess`/`unblockProcess` mutate for real across sequential calls, proving the delete/recreate contract that `getTechnicianAvailability` depends on (`bodyshop.service.ts:947-956`, iterates `e.processTechsList`) without needing to boot that service or a real DB.
+- [x] 8.2 Integration (Nest test DB): 2+ paused processes on one entry release/restore independently — same stateful-mock degradation; proves each process's row is deleted independently of the other.
 
 ## Phase 9: PR2 — Frontend wiring (no test harness — manual QA)
 
-- [ ] 9.1 [Frontend, no RED] create `apps/web/src/components/kanban/resume-tech-modal.tsx`, copying `ProcessTechRow` interaction pattern
-- [ ] 9.2 [Frontend, no RED] update `unblockTrackingProcess` signature + add `getResumeOptions` in `apps/web/src/lib/api.ts`
-- [ ] 9.3 [Frontend, no RED] update `useUnblockProcess` params + add `useResumeOptions` hook in `apps/web/src/hooks/use-tracking.ts`
-- [ ] 9.4 [Frontend, no RED] wire `ResumeTechModal` in `page.tsx`: pause triggers `blockProcess`; resume opens modal pre-filled from resume-options
-- [ ] 9.5 [Frontend, no RED] unify parallel resume in `page.tsx`: `status==='blocked'` → `onUnblock` (modal); `'pending'` → `onStart` (unchanged)
-- [ ] 9.6 [Frontend, manual QA] verify: pause BODYWORK frees tech on capacity screens; resume modal suggests prior tech or alternatives when busy; parallel MECHANIC resume also goes through modal
+- [x] 9.1 [Frontend, no RED] create `apps/web/src/components/kanban/resume-tech-modal.tsx`, copying `ProcessTechRow` interaction pattern
+- [x] 9.2 [Frontend, no RED] update `unblockTrackingProcess` signature + add `getResumeOptions` in `apps/web/src/lib/api.ts`
+- [x] 9.3 [Frontend, no RED] update `useUnblockProcess` params + add `useResumeOptions` hook in `apps/web/src/hooks/use-tracking.ts`
+- [x] 9.4 [Frontend, no RED] wire `ResumeTechModal` in `page.tsx`: pause triggers `blockProcess` (unchanged); resume opens modal pre-filled from resume-options
+- [x] 9.5 [Frontend, no RED] unify parallel resume in `page.tsx`: `status==='blocked'` → `onUnblock` (modal); `'pending'` → `onStart` (unchanged)
+- [ ] 9.6 [Frontend, manual QA] verify: pause BODYWORK frees tech on capacity screens; resume modal suggests prior tech or alternatives when busy; parallel MECHANIC resume also goes through modal — **not run**: no browser/QA environment available in this session (same constraint as PR1's 3.4); typecheck is clean and logic reviewed against spec, but needs a human/QA pass before merge.
 
 ## Phase 10: PR2 — Verification
 
-- [ ] 10.1 `pnpm test` (api) green for all PR2 unit + integration tests
-- [ ] 10.2 `pnpm typecheck` green across api+web
+- [x] 10.1 `pnpm test` (api) green for all PR2 unit + integration tests — full suite: 22 suites, 290 passed / 2 skipped (pre-existing, same skips as PR1), 0 failed
+- [x] 10.2 `pnpm typecheck` green across api+web — both clean, zero errors

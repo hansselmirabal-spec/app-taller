@@ -130,6 +130,9 @@ function makeWorkshopRepo(overrides: any = {}) {
 function makeProcessTechRepo(overrides: any = {}) {
   return {
     findOne: jest.fn().mockResolvedValue(null),
+    delete:  jest.fn().mockResolvedValue({ affected: 0 }),
+    save:    jest.fn().mockImplementation((d: any) => Promise.resolve(d)),
+    create:  jest.fn().mockImplementation((d: any) => d),
     ...overrides,
   };
 }
@@ -978,6 +981,379 @@ describe('TrackingService', () => {
 
       await expect(service.addProcessToBodyshop(ENTRY_ID, 'MECHANIC', 2)).rejects.toThrow('DB down (log)');
       expect(saved.find((s: any) => s.entity === BodyshopEntry)).toBeUndefined();
+    });
+  });
+
+  // ── blockProcess — releases technician (PR2 — kanban-mecanica-manual-y-pausa-libera-tecnico) ──
+
+  describe('blockProcess — libera técnico (PR2)', () => {
+    it('snapshotea technicianId/technicianName en el log ANTES de liberar bodyshop_process_techs (solo si no estaba seteado)', async () => {
+      const log = makeLog({
+        status: 'in_progress', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'BODYWORK', technicianId: null,
+      });
+      const logRepo = makeLogRepo({ findOne: jest.fn().mockResolvedValue(log) });
+      const processTechRepo = makeProcessTechRepo({
+        findOne: jest.fn().mockResolvedValue({
+          entryId: ENTRY_ID, process: 'BODYWORK', technicianId: TECH_ID, technician: { name: 'Luis Benitez' },
+        }),
+      });
+
+      const { service } = await build({ logRepo, processTechRepo });
+      await service.blockProcess(LOG_ID, 'Falta pieza de repuesto');
+
+      expect(logRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ technicianId: TECH_ID, technicianName: 'Luis Benitez' }),
+      );
+    });
+
+    it('NO pisa technicianId/technicianName si el log ya los tenía seteados (no vuelve a resolver)', async () => {
+      const log = makeLog({
+        status: 'in_progress', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'BODYWORK',
+        technicianId: 'tech-already', technicianName: 'Ya Asignado',
+      });
+      const logRepo = makeLogRepo({ findOne: jest.fn().mockResolvedValue(log) });
+      const processTechRepo = makeProcessTechRepo({
+        findOne: jest.fn().mockResolvedValue({
+          entryId: ENTRY_ID, process: 'BODYWORK', technicianId: TECH_ID, technician: { name: 'Otro Técnico' },
+        }),
+      });
+
+      const { service } = await build({ logRepo, processTechRepo });
+      await service.blockProcess(LOG_ID, 'Falta pieza de repuesto');
+
+      expect(logRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ technicianId: 'tech-already', technicianName: 'Ya Asignado' }),
+      );
+      expect(processTechRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('borra la fila de bodyshop_process_techs (entryId+processCode) al pausar un proceso bodyshop', async () => {
+      const log = makeLog({
+        status: 'in_progress', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'PAINT',
+        technicianId: TECH_ID, technicianName: 'Luis Benitez',
+      });
+      const logRepo = makeLogRepo({ findOne: jest.fn().mockResolvedValue(log) });
+      const processTechRepo = makeProcessTechRepo();
+
+      const { service } = await build({ logRepo, processTechRepo });
+      await service.blockProcess(LOG_ID, 'Falta pieza de repuesto');
+
+      expect(processTechRepo.delete).toHaveBeenCalledWith({ entryId: ENTRY_ID, process: 'PAINT' });
+    });
+
+    it('es no-op (0 filas borradas) cuando el proceso no tiene técnico asignado (ej. MECHANIC paralelo sin auto-asignación)', async () => {
+      const log = makeLog({
+        status: 'in_progress', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'MECHANIC',
+        processType: 'PARALLEL', technicianId: null,
+      });
+      const logRepo = makeLogRepo({ findOne: jest.fn().mockResolvedValue(log) });
+      const processTechRepo = makeProcessTechRepo({
+        findOne: jest.fn().mockResolvedValue(null), // resolveAssignedTechnician: sin asignación
+        delete:  jest.fn().mockResolvedValue({ affected: 0 }),
+      });
+
+      const { service } = await build({ logRepo, processTechRepo });
+      const result = await service.blockProcess(LOG_ID, 'Sin técnico asignado');
+
+      expect(processTechRepo.delete).toHaveBeenCalledWith({ entryId: ENTRY_ID, process: 'MECHANIC' });
+      expect(result.status).toBe('blocked');
+      const savedLog = logRepo.save.mock.calls[0][0];
+      expect(savedLog.technicianId).toBeNull();
+    });
+
+    it('NO toca bodyshop_process_techs para procesos de sourceType mechanic (fuera de alcance del spec: solo Chapería)', async () => {
+      const log = makeLog({ status: 'in_progress', sourceType: 'mechanic' });
+      const logRepo = makeLogRepo({ findOne: jest.fn().mockResolvedValue(log) });
+      const processTechRepo = makeProcessTechRepo();
+
+      const { service } = await build({ logRepo, processTechRepo });
+      await service.blockProcess(LOG_ID, 'reason');
+
+      expect(processTechRepo.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── isTechnicianFree (PR2) ────────────────────────────────────────────────
+
+  describe('isTechnicianFree (PR2)', () => {
+    it('retorna false cuando el técnico está in_progress en otro log', async () => {
+      const conflict = makeLog({ id: 'log-other', technicianId: TECH_ID, status: 'in_progress' });
+      const logRepo = makeLogRepo({ findOne: jest.fn().mockResolvedValue(conflict) });
+      const { service } = await build({ logRepo });
+
+      const free = await (service as any).isTechnicianFree(TECH_ID);
+      expect(free).toBe(false);
+    });
+
+    it('excluye el propio log del chequeo (excludeLogId coincide con el log encontrado)', async () => {
+      const ownLog = makeLog({ id: 'log-own', technicianId: TECH_ID, status: 'in_progress' });
+      const logRepo = makeLogRepo({ findOne: jest.fn().mockResolvedValue(ownLog) });
+      const { service } = await build({ logRepo });
+
+      const free = await (service as any).isTechnicianFree(TECH_ID, 'log-own');
+      expect(free).toBe(true);
+    });
+
+    it('retorna true cuando no hay ningún log in_progress con ese técnico', async () => {
+      const logRepo = makeLogRepo({ findOne: jest.fn().mockResolvedValue(null) });
+      const { service } = await build({ logRepo });
+
+      const free = await (service as any).isTechnicianFree(TECH_ID);
+      expect(free).toBe(true);
+    });
+  });
+
+  // ── unblockProcess — reassign + conflict-check (PR2) ─────────────────────
+
+  describe('unblockProcess — reasigna técnico + chequeo de conflicto (PR2)', () => {
+    it('rechaza reanudar cuando el técnico confirmado está ocupado en otro vehículo', async () => {
+      const log = makeLog({
+        status: 'blocked', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'BODYWORK', pausedAt: new Date(),
+      });
+      const conflict = makeLog({
+        id: 'log-other', sourceId: 'entry-999', status: 'in_progress',
+        technicianId: TECH_ID, technicianName: 'Luis Benitez', processName: 'Pintura',
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(log)      // el log a reanudar
+          .mockResolvedValueOnce(conflict), // chequeo de conflicto
+      });
+
+      const { service } = await build({ logRepo });
+      await expect(service.unblockProcess(LOG_ID, TECH_ID, 'Luis Benitez'))
+        .rejects.toThrow(/Luis Benitez.*Pintura/);
+      expect(logRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('crea la fila de bodyshop_process_techs con el técnico confirmado cuando no había fila previa', async () => {
+      const pausedAt = new Date(Date.now() - 20 * 60_000);
+      const log = makeLog({
+        status: 'blocked', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'PAINT', pausedAt, technicianId: null,
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(log)   // log a reanudar
+          .mockResolvedValueOnce(null)  // conflict check: libre
+          .mockResolvedValueOnce(null)  // otherBlocked
+          .mockResolvedValueOnce(log),  // hasInProgress
+      });
+      const processTechRepo = makeProcessTechRepo({ findOne: jest.fn().mockResolvedValue(null) });
+
+      const { service } = await build({ logRepo, processTechRepo });
+      await service.unblockProcess(LOG_ID, TECH_ID, 'Luis Benitez');
+
+      expect(processTechRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ entryId: ENTRY_ID, process: 'PAINT', technicianId: TECH_ID }),
+      );
+    });
+
+    it('actualiza la fila existente si ya había una (upsert por unique key entryId+process)', async () => {
+      const pausedAt = new Date(Date.now() - 20 * 60_000);
+      const log = makeLog({
+        status: 'blocked', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'PAINT', pausedAt, technicianId: null,
+      });
+      const existingRow = { id: 'pt-1', entryId: ENTRY_ID, process: 'PAINT', technicianId: 'old-tech' };
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(log)
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(log),
+      });
+      const processTechRepo = makeProcessTechRepo({ findOne: jest.fn().mockResolvedValue(existingRow) });
+
+      const { service } = await build({ logRepo, processTechRepo });
+      await service.unblockProcess(LOG_ID, TECH_ID, 'Luis Benitez');
+
+      expect(processTechRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'pt-1', technicianId: TECH_ID }),
+      );
+    });
+
+    it('sin technicianId param, cae al log.technicianId (snapshot dejado por blockProcess)', async () => {
+      const pausedAt = new Date(Date.now() - 20 * 60_000);
+      const log = makeLog({
+        status: 'blocked', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'BODYWORK', pausedAt,
+        technicianId: TECH_ID, technicianName: 'Luis Benitez',
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(log)
+          .mockResolvedValueOnce(null) // conflict: libre
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(log),
+      });
+      const processTechRepo = makeProcessTechRepo({ findOne: jest.fn().mockResolvedValue(null) });
+
+      const { service } = await build({ logRepo, processTechRepo });
+      await service.unblockProcess(LOG_ID);
+
+      expect(processTechRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ entryId: ENTRY_ID, process: 'BODYWORK', technicianId: TECH_ID }),
+      );
+    });
+
+    it('acumula pausedDurationMinutes y restaura status in_progress al reanudar con técnico confirmado', async () => {
+      const pausedAt = new Date(Date.now() - 45 * 60_000);
+      const log = makeLog({
+        status: 'blocked', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'BODYWORK',
+        startedAt: new Date('2026-06-10T08:00:00Z'), pausedAt, pausedDurationMinutes: 15,
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(log)
+          .mockResolvedValueOnce(null) // sin conflicto
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(log),
+      });
+      const processTechRepo = makeProcessTechRepo({ findOne: jest.fn().mockResolvedValue(null) });
+
+      const { service } = await build({ logRepo, processTechRepo });
+      const result = await service.unblockProcess(LOG_ID, TECH_ID, 'Luis Benitez');
+
+      expect(result.status).toBe('in_progress');
+      const savedLog = logRepo.save.mock.calls[0][0];
+      expect(savedLog.pausedDurationMinutes).toBeGreaterThan(59); // 15 acumulados + ~45 de esta pausa
+    });
+  });
+
+  // ── getResumeOptions (PR2) ────────────────────────────────────────────────
+
+  describe('getResumeOptions (PR2)', () => {
+    it('retorna previousTechnicianId/Name null y previousTechnicianFree=false cuando el log no tiene técnico snapshoteado', async () => {
+      const log = makeLog({ technicianId: null, technicianName: null });
+      const logRepo = makeLogRepo({ findOne: jest.fn().mockResolvedValue(log) });
+      const { service } = await build({ logRepo });
+
+      const result = await service.getResumeOptions(LOG_ID);
+      expect(result).toEqual({
+        previousTechnicianId: null, previousTechnicianName: null,
+        previousTechnicianFree: false, conflictProcessName: null,
+      });
+    });
+
+    it('retorna previousTechnicianFree=true y conflictProcessName=null cuando el técnico sigue libre', async () => {
+      const log = makeLog({ technicianId: TECH_ID, technicianName: 'Luis Benitez' });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(log)   // el log
+          .mockResolvedValueOnce(null), // sin conflicto
+      });
+      const { service } = await build({ logRepo });
+
+      const result = await service.getResumeOptions(LOG_ID);
+      expect(result).toEqual({
+        previousTechnicianId: TECH_ID, previousTechnicianName: 'Luis Benitez',
+        previousTechnicianFree: true, conflictProcessName: null,
+      });
+    });
+
+    it('retorna previousTechnicianFree=false y conflictProcessName con el proceso donde está ocupado', async () => {
+      const log = makeLog({ technicianId: TECH_ID, technicianName: 'Luis Benitez' });
+      const conflict = makeLog({ id: 'log-other', technicianId: TECH_ID, status: 'in_progress', processName: 'Pintura' });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(log)
+          .mockResolvedValueOnce(conflict),
+      });
+      const { service } = await build({ logRepo });
+
+      const result = await service.getResumeOptions(LOG_ID);
+      expect(result.previousTechnicianFree).toBe(false);
+      expect(result.conflictProcessName).toBe('Pintura');
+    });
+
+    it('NotFoundException si el log no existe', async () => {
+      const logRepo = makeLogRepo({ findOne: jest.fn().mockResolvedValue(null) });
+      const { service } = await build({ logRepo });
+      await expect(service.getResumeOptions('no-existe')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── Integration-style — contrato pausa libera / reanuda restaura técnico (PR2) ──
+  // No existe harness de Nest test DB (sqlite/testcontainers/pg-mem) en el repo —
+  // verificado: ningún *.spec.ts del proyecto lo usa y package.json no declara esas
+  // dependencias. Degradamos a un mock CON ESTADO real (Map) para
+  // bodyshop_process_techs que blockProcess/unblockProcess mutan de verdad en cada
+  // llamada, probando el contrato "borrar==liberar, recrear==restaurar" del que
+  // depende getTechnicianAvailability (bodyshop.service.ts:947-956, itera
+  // e.processTechsList = filas de bodyshop_process_techs) sin necesitar levantar
+  // ese servicio ni una DB real (strict-tdd.md: "degrade gracefully" cuando la capa
+  // de integración no está disponible).
+
+  describe('Integration-style — pausa libera / reanuda restaura técnico (PR2)', () => {
+    function makeStatefulProcessTechRepo() {
+      const rows = new Map<string, { entryId: string; process: string; technicianId: string }>();
+      const key = (entryId: string, process: string) => `${entryId}::${process}`;
+      return {
+        rows,
+        findOne: jest.fn(async ({ where }: any) => rows.get(key(where.entryId, where.process)) ?? null),
+        delete: jest.fn(async (crit: any) => {
+          const existed = rows.delete(key(crit.entryId, crit.process));
+          return { affected: existed ? 1 : 0 };
+        }),
+        save: jest.fn(async (row: any) => { rows.set(key(row.entryId, row.process), row); return row; }),
+        create: jest.fn((data: any) => ({ ...data })),
+      };
+    }
+
+    it('pausar un proceso bodyshop borra su fila en bodyshop_process_techs; reanudar la recrea con el técnico confirmado', async () => {
+      const processTechRepo = makeStatefulProcessTechRepo();
+      processTechRepo.rows.set('entry-int::BODYWORK', { entryId: 'entry-int', process: 'BODYWORK', technicianId: TECH_ID });
+
+      const log = makeLog({
+        status: 'in_progress', sourceType: 'bodyshop', sourceId: 'entry-int', processCode: 'BODYWORK',
+        startedAt: new Date('2026-06-10T08:00:00Z'), technicianId: TECH_ID, technicianName: 'Luis Benitez',
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(log)   // blockProcess: log
+          .mockResolvedValueOnce(log)   // unblockProcess: log (mismo objeto, ya mutado a 'blocked')
+          .mockResolvedValueOnce(null)  // conflict check: libre
+          .mockResolvedValueOnce(null)  // otherBlocked
+          .mockResolvedValueOnce(log),  // hasInProgress
+      });
+
+      const { service } = await build({ logRepo, processTechRepo });
+
+      await service.blockProcess(LOG_ID, 'Falta pieza de repuesto');
+      // La fila desaparece — así deja de sumar horas ocupadas en getTechnicianAvailability
+      expect(processTechRepo.rows.has('entry-int::BODYWORK')).toBe(false);
+
+      await service.unblockProcess(LOG_ID, TECH_ID, 'Luis Benitez');
+      // La fila reaparece con el técnico confirmado — vuelve a sumar horas ocupadas
+      expect(processTechRepo.rows.get('entry-int::BODYWORK')).toMatchObject({ technicianId: TECH_ID });
+    });
+
+    it('2+ procesos pausados en el mismo entry se liberan de forma independiente (uno no afecta al otro)', async () => {
+      const processTechRepo = makeStatefulProcessTechRepo();
+      processTechRepo.rows.set('entry-int::BODYWORK', { entryId: 'entry-int', process: 'BODYWORK', technicianId: 'tech-a' });
+      processTechRepo.rows.set('entry-int::PAINT',    { entryId: 'entry-int', process: 'PAINT',    technicianId: 'tech-b' });
+
+      const bodyworkLog = makeLog({
+        id: 'log-bw', status: 'in_progress', sourceType: 'bodyshop', sourceId: 'entry-int',
+        processCode: 'BODYWORK', technicianId: 'tech-a', technicianName: 'Tech A',
+      });
+      const paintLog = makeLog({
+        id: 'log-pt', status: 'in_progress', sourceType: 'bodyshop', sourceId: 'entry-int',
+        processCode: 'PAINT', technicianId: 'tech-b', technicianName: 'Tech B',
+      });
+
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(bodyworkLog) // blockProcess(BODYWORK): log
+          .mockResolvedValueOnce(paintLog),   // blockProcess(PAINT): log
+      });
+
+      const { service } = await build({ logRepo, processTechRepo });
+
+      await service.blockProcess('log-bw', 'Falta pieza de repuesto');
+      await service.blockProcess('log-pt', 'Esperando aprobación cliente');
+
+      // Ambas filas borradas de forma independiente — pausar una no afecta la otra
+      expect(processTechRepo.rows.has('entry-int::BODYWORK')).toBe(false);
+      expect(processTechRepo.rows.has('entry-int::PAINT')).toBe(false);
     });
   });
 });
