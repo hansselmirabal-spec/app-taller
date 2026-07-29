@@ -1453,6 +1453,14 @@ export async function unblockTrackingProcess(logId: string): Promise<void> {
   await http(`/tracking/process/${logId}/unblock`, { method: 'PATCH' });
 }
 
+export async function addTrackingProcess(entryId: string, processCode: string, hours: number): Promise<void> {
+  if (MOCK) return delay(undefined);
+  await http(`/tracking/process/bodyshop/${entryId}/add`, {
+    method: 'POST',
+    body: JSON.stringify({ processCode, hours }),
+  });
+}
+
 export async function setTrackingExitDate(
   sourceType: 'mechanic' | 'bodyshop',
   sourceId: string,

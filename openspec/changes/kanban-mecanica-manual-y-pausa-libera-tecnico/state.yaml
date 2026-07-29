@@ -1,0 +1,51 @@
+change: kanban-mecanica-manual-y-pausa-libera-tecnico
+artifact_store: hybrid
+execution_mode: interactive
+delivery_strategy: auto-forecast
+chain_strategy: stacked-to-main
+review_budget_lines: 400
+
+phases:
+  explore:
+    status: done
+    engram_topic: sdd/kanban-mecanica-manual-y-pausa-libera-tecnico/explore
+    file: exploration.md
+  propose:
+    status: done
+    engram_topic: sdd/kanban-mecanica-manual-y-pausa-libera-tecnico/proposal
+    file: proposal.md
+  spec:
+    status: done
+    engram_topic: sdd/kanban-mecanica-manual-y-pausa-libera-tecnico/spec
+    files:
+      - specs/tracking-add-process/spec.md
+      - specs/tracking-pause-technician-release/spec.md
+  design:
+    status: done
+    engram_topic: sdd/kanban-mecanica-manual-y-pausa-libera-tecnico/design
+    file: design.md
+  tasks:
+    status: done
+    engram_topic: sdd/kanban-mecanica-manual-y-pausa-libera-tecnico/tasks
+    file: tasks.md
+  apply:
+    status: pending
+  verify:
+    status: pending
+  archive:
+    status: pending
+
+open_decisions:
+  - id: pausa-libera-tecnico-scope
+    question: >
+      Does "pausa libera técnico" require touching BodyshopProcessTech / making
+      the technician disappear from capacity-availability screens while paused
+      (structural), or is it scoped purely to the resume-time confirm/change UX
+      plus the tracking_log's own technicianId (UX-only)?
+    status: resolved
+    decision: >
+      STRUCTURAL (full scope). On pause, the technician must disappear from
+      "occupied" on capacity/availability screens (getTechnicianAvailability,
+      getDayCapacity, etc.) — not just gain a confirm/change step on resume.
+      Requires touching both tracking.service.ts AND bodyshop.service.ts
+      (BodyshopProcessTech release/re-assignment).

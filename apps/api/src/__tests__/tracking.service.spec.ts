@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { TrackingService } from '../modules/tracking/tracking.service';
 import { TrackingLog } from '../modules/tracking/tracking-log.entity';
@@ -134,16 +134,44 @@ function makeProcessTechRepo(overrides: any = {}) {
   };
 }
 
+// ─── DataSource / transaction manager mock (addProcessToBodyshop) ──────────
+// addProcessToBodyshop hace un dual-write dentro de dataSource.transaction(manager => ...).
+// El mock enruta manager.create/save por clase de entidad (igual patrón que
+// bodyshop.service.spec.ts) y permite simular el fallo de UNO de los dos writes
+// para probar que el otro nunca "confirma" (rollback).
+
+function makeManager(opts: { failOn?: 'log' | 'entry' } = {}) {
+  const saved: { entity: any; data: any }[] = [];
+  const manager = {
+    create: (_entity: any, data: any) => ({ ...data }),
+    save: async (entity: any, data: any) => {
+      if (entity === TrackingLog && opts.failOn === 'log') throw new Error('DB down (log)');
+      if (entity === BodyshopEntry && opts.failOn === 'entry') throw new Error('DB down (entry)');
+      saved.push({ entity, data });
+      if (entity === TrackingLog) return { id: 'log-new-001', ...data };
+      return data;
+    },
+  };
+  return { manager, saved };
+}
+
+function makeDataSource(manager: any) {
+  return { transaction: jest.fn().mockImplementation(async (cb: any) => cb(manager)) };
+}
+
 // ─── Module builder ───────────────────────────────────────────────────────────
 
 async function build(repos: {
   logRepo?: any; apptRepo?: any; entryRepo?: any; workshopRepo?: any; processTechRepo?: any;
+  managerBundle?: ReturnType<typeof makeManager>;
 } = {}) {
   const logRepo         = repos.logRepo         ?? makeLogRepo();
   const apptRepo        = repos.apptRepo        ?? makeApptRepo();
   const entryRepo       = repos.entryRepo       ?? makeEntryRepo();
   const workshopRepo    = repos.workshopRepo    ?? makeWorkshopRepo();
   const processTechRepo = repos.processTechRepo ?? makeProcessTechRepo();
+  const { manager, saved } = repos.managerBundle ?? makeManager();
+  const dataSource      = makeDataSource(manager);
 
   const mod = await Test.createTestingModule({
     providers: [
@@ -153,6 +181,7 @@ async function build(repos: {
       { provide: getRepositoryToken(BodyshopEntry),       useValue: entryRepo },
       { provide: getRepositoryToken(BodyshopProcessTech), useValue: processTechRepo },
       { provide: getRepositoryToken(Workshop),            useValue: workshopRepo },
+      { provide: getDataSourceToken(),                    useValue: dataSource },
     ],
   }).compile();
 
@@ -162,6 +191,7 @@ async function build(repos: {
     apptRepo,
     entryRepo,
     workshopRepo,
+    saved,
   };
 }
 
@@ -850,6 +880,104 @@ describe('TrackingService', () => {
       const entry    = new Date('2026-06-10');
       const suggested = new Date(card.suggestedExitDate!);
       expect(suggested.getTime()).toBeGreaterThan(entry.getTime());
+    });
+  });
+
+  // ── addProcessToBodyshop (PR1 — kanban-mecanica-manual-y-pausa-libera-tecnico) ──
+
+  describe('addProcessToBodyshop', () => {
+    const ENTRY_WITH_BODYWORK: any = {
+      ...MOCK_ENTRY,
+      status: 'in_progress',
+      processes: [{ code: 'BODYWORK', name: 'Chapería', hours: 8 }],
+    };
+
+    it('rechaza códigos MADRE (ej. PAINT) — solo procesos paralelos son agregables', async () => {
+      const entryRepo = makeEntryRepo({ findOne: jest.fn().mockResolvedValue(ENTRY_WITH_BODYWORK) });
+      const { service } = await build({ entryRepo });
+
+      await expect(service.addProcessToBodyshop(ENTRY_ID, 'PAINT', 3)).rejects.toThrow(BadRequestException);
+      // Validación de código es pura — no debería tocar la DB.
+      expect(entryRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('rechaza proceso duplicado ya presente en entry.processes', async () => {
+      const entryRepo = makeEntryRepo({ findOne: jest.fn().mockResolvedValue({
+        ...ENTRY_WITH_BODYWORK,
+        processes: [...ENTRY_WITH_BODYWORK.processes, { code: 'LLANTAS', name: 'Llantas', hours: 1 }],
+      }) });
+      const { service } = await build({ entryRepo });
+
+      await expect(service.addProcessToBodyshop(ENTRY_ID, 'LLANTAS', 1)).rejects.toThrow(BadRequestException);
+    });
+
+    it('rechaza proceso duplicado ya presente como TrackingLog (aunque no esté en processes jsonb)', async () => {
+      const entryRepo = makeEntryRepo({ findOne: jest.fn().mockResolvedValue(ENTRY_WITH_BODYWORK) });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn().mockResolvedValue(makeLog({ processCode: 'MECHANIC', sourceType: 'bodyshop', sourceId: ENTRY_ID })),
+      });
+      const { service } = await build({ entryRepo, logRepo });
+
+      await expect(service.addProcessToBodyshop(ENTRY_ID, 'MECHANIC', 2)).rejects.toThrow(BadRequestException);
+    });
+
+    it('rechaza cuando la entrada está cancelada (estado terminal)', async () => {
+      const entryRepo = makeEntryRepo({ findOne: jest.fn().mockResolvedValue({ ...ENTRY_WITH_BODYWORK, status: 'cancelled' }) });
+      const { service } = await build({ entryRepo });
+
+      await expect(service.addProcessToBodyshop(ENTRY_ID, 'MECHANIC', 2)).rejects.toThrow(BadRequestException);
+    });
+
+    it('NotFoundException si la entrada no existe', async () => {
+      const entryRepo = makeEntryRepo({ findOne: jest.fn().mockResolvedValue(null) });
+      const { service } = await build({ entryRepo });
+
+      await expect(service.addProcessToBodyshop('no-existe', 'MECHANIC', 2)).rejects.toThrow(NotFoundException);
+    });
+
+    it('dual-write exitoso: crea TrackingLog nuevo + entrada matching en entry.processes (mismo code/horas)', async () => {
+      const entryRepo = makeEntryRepo({ findOne: jest.fn().mockResolvedValue(ENTRY_WITH_BODYWORK) });
+      const { service, saved } = await build({ entryRepo });
+
+      const result = await service.addProcessToBodyshop(ENTRY_ID, 'MECHANIC', 2.5);
+
+      expect(result).toMatchObject({
+        sourceType: 'bodyshop', sourceId: ENTRY_ID,
+        processCode: 'MECHANIC', processName: 'Mecánica',
+        plannedHours: 2.5, processType: 'PARALLEL', status: 'pending',
+      });
+
+      const logWrite   = saved.find((s: any) => s.entity === TrackingLog);
+      const entryWrite = saved.find((s: any) => s.entity === BodyshopEntry);
+      expect(logWrite).toBeDefined();
+      expect(logWrite!.data).toMatchObject({ processCode: 'MECHANIC', plannedHours: 2.5 });
+      expect(entryWrite).toBeDefined();
+      expect(entryWrite!.data.processes).toEqual([
+        { code: 'BODYWORK', name: 'Chapería', hours: 8 },
+        { code: 'MECHANIC', name: 'Mecánica', hours: 2.5 },
+      ]);
+    });
+
+    it('rollback: si falla el write de entry.processes, el TrackingLog no queda confirmado', async () => {
+      const entryRepo = makeEntryRepo({ findOne: jest.fn().mockResolvedValue(ENTRY_WITH_BODYWORK) });
+      const managerBundle = makeManager({ failOn: 'entry' });
+      const { service, saved } = await build({ entryRepo, managerBundle });
+
+      await expect(service.addProcessToBodyshop(ENTRY_ID, 'MECHANIC', 2)).rejects.toThrow('DB down (entry)');
+      // dataSource.transaction(cb) hace ROLLBACK real si cb() rechaza (garantía de
+      // TypeORM); acá lo probamos indirectamente: el write de BodyshopEntry nunca
+      // llegó a "saved" (mock), y el método entero rechazó — ningún caller externo
+      // observa el TrackingLog creado.
+      expect(saved.find((s: any) => s.entity === BodyshopEntry)).toBeUndefined();
+    });
+
+    it('rollback: si falla el write del TrackingLog, el update de entry.processes no queda confirmado', async () => {
+      const entryRepo = makeEntryRepo({ findOne: jest.fn().mockResolvedValue(ENTRY_WITH_BODYWORK) });
+      const managerBundle = makeManager({ failOn: 'log' });
+      const { service, saved } = await build({ entryRepo, managerBundle });
+
+      await expect(service.addProcessToBodyshop(ENTRY_ID, 'MECHANIC', 2)).rejects.toThrow('DB down (log)');
+      expect(saved.find((s: any) => s.entity === BodyshopEntry)).toBeUndefined();
     });
   });
 });

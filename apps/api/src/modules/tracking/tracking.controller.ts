@@ -5,7 +5,12 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { WorkshopAccessGuard } from '../../common/guards/workshop-access.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
-import { IsOptional, IsString } from 'class-validator';
+import { IsOptional, IsString, IsNumber, Min } from 'class-validator';
+
+export class AddProcessDto {
+  @IsString() processCode: string;
+  @IsNumber() @Min(0.1) hours: number;
+}
 
 class CompleteProcessDto {
   @IsOptional() @IsString() notes?: string;
@@ -67,6 +72,14 @@ export class TrackingController {
     @Param('sourceId') sourceId: string,
   ) {
     return wrap(await this.service.getCardProcesses(sourceType, sourceId));
+  }
+
+  @Post('process/bodyshop/:entryId/add')
+  async addProcess(
+    @Param('entryId') entryId: string,
+    @Body() dto: AddProcessDto,
+  ) {
+    return wrap(await this.service.addProcessToBodyshop(entryId, dto.processCode, dto.hours));
   }
 
   @Patch('process/:logId/start')
