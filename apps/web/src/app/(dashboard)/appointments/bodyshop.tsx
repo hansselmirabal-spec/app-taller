@@ -17,6 +17,7 @@ import { getWeekDays, entriesOnDay } from '@/lib/bodyshop-calendar';
 import { ActivitiesPanel } from '@/components/kanban/activities-panel';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { TechnicianCreateDialog } from '@/components/appointments/technician-create-dialog';
+import { CitaTypeDialog } from '@/components/appointments/cita-type-dialog';
 import type { BodyshopEntry, CapacityStatus, Technician } from '@/types';
 import { InfoButton } from '@/components/ui/info-button';
 import { MotivationalLoader } from '@/components/ui/motivational-loader';
@@ -71,6 +72,7 @@ export default function BodyshopAppointmentsPage() {
   const [date, setDate]       = useState(formatDate(new Date()));
   const [tab,  setTab]        = useState<MainTab>('agenda');
   const [capView, setCapView] = useState<'day' | 'week'>('day');
+  const [showCitaTypeDialog, setShowCitaTypeDialog] = useState(false);
 
   const { data: dayCap, isLoading } = useBodyshopDayCapacity(date);
   const cancel = useCancelBodyshopEntry();
@@ -140,7 +142,7 @@ export default function BodyshopAppointmentsPage() {
         </div>
         {canEdit && (
           <button
-            onClick={() => router.push(`/appointments/new?date=${date}`)}
+            onClick={() => setShowCitaTypeDialog(true)}
             className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors shadow-sm"
           >
             <Plus className="h-4 w-4" /> Nuevo Ingreso
@@ -312,7 +314,7 @@ export default function BodyshopAppointmentsPage() {
                   <p className="text-sm font-medium">Sin ingresos para este día</p>
                   {canEdit && (
                     <button
-                      onClick={() => router.push(`/appointments/new?date=${date}`)}
+                      onClick={() => setShowCitaTypeDialog(true)}
                       className="mt-4 text-sm text-orange-600 hover:underline font-semibold"
                     >
                       + Registrar primer ingreso
@@ -339,6 +341,12 @@ export default function BodyshopAppointmentsPage() {
           </>
         )}
       </div>
+
+      <CitaTypeDialog
+        open={showCitaTypeDialog}
+        onOpenChange={setShowCitaTypeDialog}
+        date={date}
+      />
     </div>
   );
 }
