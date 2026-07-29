@@ -377,10 +377,33 @@ export class TrackingService {
     if (!log) throw new NotFoundException('Proceso no encontrado');
     if (log.status === 'completed') throw new BadRequestException('No se puede pausar un proceso completado');
 
+    // Snapshot del técnico asignado ANTES de borrar bodyshop_process_techs — así
+    // getResumeOptions puede sugerir "el mismo técnico de antes" incluso después
+    // de liberar su capacidad (spec: "suggest same technician if still free").
+    // Solo si el log todavía no lo tenía (no pisar un snapshot previo).
+    if (!log.technicianId) {
+      const assigned = await this.resolveAssignedTechnician(log);
+      if (assigned) {
+        log.technicianId = assigned.id;
+        log.technicianName = assigned.name || null;
+      }
+    }
+
     log.status = 'blocked';
     log.blockedReason = reason;
     log.pausedAt = new Date();
     const saved = await this.logRepo.save(log);
+
+    // Libera la capacidad del técnico: BORRA (no anula) la fila de
+    // bodyshop_process_techs para que deje de sumar horas ocupadas en
+    // getTechnicianAvailability/getDayCapacity mientras está pausado (spec
+    // tracking-pause-technician-release, alcance: los 6 procesos reales de
+    // Chapería — solo sourceType 'bodyshop', que es donde vive esa tabla).
+    // No-op si el proceso no tenía técnico asignado (ej. MECHANIC paralelo sin
+    // auto-asignación) — TypeORM `delete` no falla si no matchea ninguna fila.
+    if (log.sourceType === 'bodyshop') {
+      await this.processTechRepo.delete({ entryId: log.sourceId, process: log.processCode });
+    }
 
     // Liberar capacidad del técnico marcando el appointment/entry como 'paused'
     await this.setPauseStatus(log.sourceType, log.sourceId, true);
@@ -388,10 +411,42 @@ export class TrackingService {
     return saved;
   }
 
-  async unblockProcess(logId: string): Promise<TrackingLog> {
+  // Reutiliza el mismo criterio de conflicto que startProcess: un técnico no
+  // puede figurar in_progress en dos logs a la vez. excludeLogId excluye el
+  // propio log del chequeo.
+  private async findTechnicianConflict(technicianId: string, excludeLogId?: string): Promise<TrackingLog | null> {
+    const conflict = await this.logRepo.findOne({
+      where: { technicianId, status: 'in_progress' },
+    });
+    if (!conflict) return null;
+    if (excludeLogId && conflict.id === excludeLogId) return null;
+    return conflict;
+  }
+
+  private async isTechnicianFree(technicianId: string, excludeLogId?: string): Promise<boolean> {
+    return (await this.findTechnicianConflict(technicianId, excludeLogId)) === null;
+  }
+
+  async unblockProcess(logId: string, technicianId?: string, technicianName?: string): Promise<TrackingLog> {
     const log = await this.logRepo.findOne({ where: { id: logId } });
     if (!log) throw new NotFoundException('Proceso no encontrado');
     if (log.status !== 'blocked') throw new BadRequestException('El proceso no está pausado');
+
+    // Reanudar SIEMPRE requiere confirmación explícita de técnico (spec:
+    // "Resume always requires explicit technician confirmation") — la UI manda
+    // el técnico confirmado; si no lo manda, cae al snapshot dejado por
+    // blockProcess (compat hacia atrás / caso tech-less).
+    const effectiveTechnicianId   = technicianId ?? log.technicianId ?? undefined;
+    const effectiveTechnicianName = technicianName ?? log.technicianName ?? undefined;
+
+    if (effectiveTechnicianId) {
+      const conflict = await this.findTechnicianConflict(effectiveTechnicianId, logId);
+      if (conflict) {
+        throw new BadRequestException(
+          `${conflict.technicianName || effectiveTechnicianName || 'El técnico'} ya está trabajando en otro vehículo (proceso "${conflict.processName}"). Hay que pausarlo o completarlo antes de reanudar este.`,
+        );
+      }
+    }
 
     log.status = log.startedAt ? 'in_progress' : 'pending';
     log.blockedReason = null;
@@ -400,7 +455,27 @@ export class TrackingService {
       log.pausedDurationMinutes = (log.pausedDurationMinutes ?? 0) + deltaMins;
       log.pausedAt = null;
     }
+    if (effectiveTechnicianId)   log.technicianId   = effectiveTechnicianId;
+    if (effectiveTechnicianName) log.technicianName = effectiveTechnicianName;
     const saved = await this.logRepo.save(log);
+
+    // Recrea la fila de bodyshop_process_techs borrada en blockProcess — vuelve
+    // a sumar horas ocupadas del técnico confirmado. Upsert por unique key
+    // (entryId, process), mismo patrón que assignProcessTechnician en
+    // bodyshop.service.ts.
+    if (log.sourceType === 'bodyshop' && effectiveTechnicianId) {
+      const existing = await this.processTechRepo.findOne({
+        where: { entryId: log.sourceId, process: log.processCode },
+      });
+      if (existing) {
+        existing.technicianId = effectiveTechnicianId;
+        await this.processTechRepo.save(existing);
+      } else {
+        await this.processTechRepo.save(
+          this.processTechRepo.create({ entryId: log.sourceId, process: log.processCode, technicianId: effectiveTechnicianId }),
+        );
+      }
+    }
 
     // Solo restaurar si no hay otros procesos bloqueados para el mismo origen
     const otherBlocked = await this.logRepo.findOne({
@@ -414,6 +489,35 @@ export class TrackingService {
     }
 
     return saved;
+  }
+
+  // GET tracking/process/:logId/resume-options — sugiere al operador con quién
+  // reanudar: el técnico que estaba antes de pausar (si sigue libre) o, si está
+  // ocupado en otro proceso, el nombre de ese proceso para que el frontend
+  // muestre el conflicto y ofrezca elegir otro (spec: "Unavailable suggested
+  // technician does not block resume").
+  async getResumeOptions(logId: string): Promise<{
+    previousTechnicianId: string | null;
+    previousTechnicianName: string | null;
+    previousTechnicianFree: boolean;
+    conflictProcessName: string | null;
+  }> {
+    const log = await this.logRepo.findOne({ where: { id: logId } });
+    if (!log) throw new NotFoundException('Proceso no encontrado');
+
+    const previousTechnicianId   = log.technicianId   ?? null;
+    const previousTechnicianName = log.technicianName ?? null;
+    if (!previousTechnicianId) {
+      return { previousTechnicianId: null, previousTechnicianName: null, previousTechnicianFree: false, conflictProcessName: null };
+    }
+
+    const conflict = await this.findTechnicianConflict(previousTechnicianId, logId);
+    return {
+      previousTechnicianId,
+      previousTechnicianName,
+      previousTechnicianFree: !conflict,
+      conflictProcessName: conflict?.processName ?? null,
+    };
   }
 
   private async setPauseStatus(

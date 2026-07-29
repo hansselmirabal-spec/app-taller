@@ -1448,9 +1448,33 @@ export async function blockTrackingProcess(logId: string, reason: string): Promi
   });
 }
 
-export async function unblockTrackingProcess(logId: string): Promise<void> {
+export async function unblockTrackingProcess(
+  logId: string,
+  technicianId?: string,
+  technicianName?: string,
+): Promise<void> {
   if (MOCK) return delay(undefined);
-  await http(`/tracking/process/${logId}/unblock`, { method: 'PATCH' });
+  await http(`/tracking/process/${logId}/unblock`, {
+    method: 'PATCH',
+    body: JSON.stringify({ technicianId, technicianName }),
+  });
+}
+
+export interface ResumeOptions {
+  previousTechnicianId: string | null;
+  previousTechnicianName: string | null;
+  previousTechnicianFree: boolean;
+  conflictProcessName: string | null;
+}
+
+export async function getResumeOptions(logId: string): Promise<ResumeOptions> {
+  if (MOCK) {
+    return delay({
+      previousTechnicianId: null, previousTechnicianName: null,
+      previousTechnicianFree: true, conflictProcessName: null,
+    });
+  }
+  return http<ResumeOptions>(`/tracking/process/${logId}/resume-options`);
 }
 
 export async function addTrackingProcess(entryId: string, processCode: string, hours: number): Promise<void> {

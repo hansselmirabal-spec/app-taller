@@ -13,6 +13,7 @@ import { createBodyshopEntry, releaseTechNoStart } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import type { TrackingCard, TrackingColumn, TrackingProcessSummary } from '@/lib/api';
 import { InfoButton } from '@/components/ui/info-button';
+import { ResumeTechModal } from '@/components/kanban/resume-tech-modal';
 import { useRequirePermission } from '@/hooks/use-require-permission';
 import {
   AlertTriangle, RefreshCw, Car, Clock, TrendingDown,
@@ -815,7 +816,7 @@ function CardDetailModal({
   onStart:    (logId: string) => void;
   onComplete: (logId: string) => void;
   onPause:    (logId: string, processName: string) => void;
-  onUnblock:  (logId: string) => void;
+  onUnblock:  (logId: string, processName: string) => void;
   loadingLogId:    string | null;
   pausingLogId:    string | null;
   unblockingLogId: string | null;
@@ -1172,7 +1173,7 @@ function CardDetailModal({
           <div className="flex-shrink-0 p-4 border-t border-slate-100 bg-slate-50/50 rounded-b-2xl">
             <div className="flex gap-2">
               {isBlocked ? (
-                <button type="button" disabled={!!unblockingLogId} onClick={() => onUnblock(cp.logId)}
+                <button type="button" disabled={!!unblockingLogId} onClick={() => onUnblock(cp.logId, cp.processName)}
                   className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold py-2.5 rounded-xl bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50 transition-colors">
                   <PlayCircle className="h-3.5 w-3.5" />
                   {unblockingLogId ? 'Reanudando...' : 'Reanudar proceso'}
@@ -1227,7 +1228,7 @@ function KanbanCard({
   onStart:    (logId: string, technicianId?: string, technicianName?: string) => void;
   onComplete: (logId: string) => void;
   onPause:    (logId: string, processName: string) => void;
-  onUnblock:  (logId: string) => void;
+  onUnblock:  (logId: string, processName: string) => void;
   onReleaseTech: (sourceId: string) => void;
   onAddProcess: (entryId: string, processCode: string, hours: number) => void;
   isStarting:      boolean;
@@ -1528,12 +1529,24 @@ function KanbanCard({
                 )}
                 {!isDone && (
                   <div className="flex gap-1 flex-shrink-0">
-                    {(isPending || isPaused) && (
+                    {isPending && (
                       <button type="button"
                         onClick={() => onStart(p.logId)}
                         className="p-1 rounded-md bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-                        title={isPaused ? 'Reanudar' : 'Iniciar'}>
+                        title="Iniciar">
                         <Play className="h-2.5 w-2.5" />
+                      </button>
+                    )}
+                    {isPaused && (
+                      // Reanudar SIEMPRE pasa por confirmación de técnico — unifica
+                      // el resume de paralelos (ej. Mecánica manual) bajo el mismo
+                      // flujo onUnblock que ya usan los procesos madre (PR2: antes
+                      // este botón llamaba onStart, saltándose la confirmación).
+                      <button type="button"
+                        onClick={() => onUnblock(p.logId, p.processName)}
+                        className="p-1 rounded-md bg-slate-600 text-white hover:bg-slate-700 transition-colors"
+                        title="Reanudar">
+                        <PlayCircle className="h-2.5 w-2.5" />
                       </button>
                     )}
                     {isRunning && (
@@ -1615,7 +1628,7 @@ function KanbanCard({
       {cp && !isCancelled && (
         <div className="flex gap-2 pt-0.5" onClick={e => e.stopPropagation()}>
           {isBlocked ? (
-            <button type="button" disabled={isUnblocking} onClick={() => onUnblock(cp.logId)}
+            <button type="button" disabled={isUnblocking} onClick={() => onUnblock(cp.logId, cp.processName)}
               className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold py-1.5 rounded-lg bg-slate-600 text-white hover:bg-slate-700 disabled:opacity-50 transition-colors">
               <PlayCircle className="h-3 w-3" />
               {isUnblocking ? 'Reanudando...' : 'Reanudar'}
@@ -1673,7 +1686,7 @@ function KanbanColumn({
   onStart:    (logId: string, technicianId?: string, technicianName?: string) => void;
   onComplete: (logId: string) => void;
   onPause:    (logId: string, processName: string) => void;
-  onUnblock:  (logId: string) => void;
+  onUnblock:  (logId: string, processName: string) => void;
   onReleaseTech: (sourceId: string) => void;
   onAddProcess: (entryId: string, processCode: string, hours: number) => void;
   loadingLogId:    string | null;
@@ -1751,6 +1764,7 @@ export default function TrackingKanbanPage() {
   const [pausingLogId, setPausingLogId]     = useState<string | null>(null);
   const [unblockingLogId, setUnblockingLogId] = useState<string | null>(null);
   const [pauseModal, setPauseModal]         = useState<{ logId: string; processName: string } | null>(null);
+  const [resumeModal, setResumeModal]       = useState<{ logId: string; processName: string } | null>(null);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [filterTech, setFilterTech]         = useState('');
   const [filterSemaphore, setFilterSemaphore] = useState('');
@@ -1813,10 +1827,22 @@ export default function TrackingKanbanPage() {
     }
   }
 
-  async function handleUnblock(logId: string) {
-    setUnblockingLogId(logId);
-    try { await unblockMutation.mutateAsync(logId); }
-    finally { setUnblockingLogId(null); }
+  // Reanudar SIEMPRE requiere confirmación explícita de técnico (spec: "Resume
+  // always requires explicit technician confirmation") — el botón "Reanudar"
+  // ya no llama unblock directo, abre el modal de confirmación.
+  function handleUnblockOpen(logId: string, processName: string) {
+    setResumeModal({ logId, processName });
+  }
+
+  async function handleResumeConfirm(technicianId?: string, technicianName?: string) {
+    if (!resumeModal) return;
+    setUnblockingLogId(resumeModal.logId);
+    try {
+      await unblockMutation.mutateAsync({ logId: resumeModal.logId, technicianId, technicianName });
+      setResumeModal(null);
+    } finally {
+      setUnblockingLogId(null);
+    }
   }
 
   const [addingProcessEntryId, setAddingProcessEntryId] = useState<string | null>(null);
@@ -1892,6 +1918,17 @@ export default function TrackingKanbanPage() {
         />
       )}
 
+      {/* Modal de confirmación de técnico al reanudar (z-50, sobre el modal de detalle) */}
+      {resumeModal && (
+        <ResumeTechModal
+          logId={resumeModal.logId}
+          processName={resumeModal.processName}
+          onConfirm={handleResumeConfirm}
+          onClose={() => setResumeModal(null)}
+          isLoading={unblockMutation.isPending}
+        />
+      )}
+
       {/* Modal de detalle de card (z-40) */}
       {selectedCard && (
         <CardDetailModal
@@ -1900,7 +1937,7 @@ export default function TrackingKanbanPage() {
           onStart={handleStart}
           onComplete={handleComplete}
           onPause={handlePauseOpen}
-          onUnblock={handleUnblock}
+          onUnblock={handleUnblockOpen}
           loadingLogId={loadingLogId}
           pausingLogId={pausingLogId}
           unblockingLogId={unblockingLogId}
@@ -2043,7 +2080,7 @@ export default function TrackingKanbanPage() {
                   onStart={handleStart}
                   onComplete={handleComplete}
                   onPause={handlePauseOpen}
-                  onUnblock={handleUnblock}
+                  onUnblock={handleUnblockOpen}
                   onReleaseTech={handleReleaseTech}
                   onAddProcess={handleAddProcess}
                   loadingLogId={loadingLogId}
