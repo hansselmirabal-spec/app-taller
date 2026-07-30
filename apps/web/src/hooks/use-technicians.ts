@@ -3,12 +3,12 @@ import { getTechnicians, createTechnician, updateTechnician } from '@/lib/api';
 import { useWorkshopId } from '@/context/workshop-context';
 import { useActiveWorkshop } from '@/hooks/use-active-workshop';
 
-export function useTechnicians() {
+export function useTechnicians(includeInactive?: boolean) {
   const workshopId = useWorkshopId();
   const { workshop } = useActiveWorkshop();
   return useQuery({
-    queryKey: ['technicians', workshopId],
-    queryFn: () => getTechnicians(workshopId, workshop?.name),
+    queryKey: ['technicians', workshopId, includeInactive ?? false],
+    queryFn: () => getTechnicians(workshopId, workshop?.name, includeInactive),
     staleTime: 5 * 60_000,
     enabled: !!workshopId,
   });

@@ -154,7 +154,7 @@ export default function TechniciansSettingsPage() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold text-slate-900">
-              {isBodyshop ? 'Operarios' : 'Técnicos'}
+              Técnicos
             </h1>
             {isBodyshop && (
               <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">

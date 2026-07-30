@@ -22,7 +22,7 @@ const NAV_MAIN: Array<{ href: string; label: string; icon: any; module: ModuleId
   { href: '/appointments', label: 'Agenda',                  icon: ClipboardList,   module: 'appointments', bodyshopOnly: true },
   { href: '/presupuesto',  label: 'Presupuestos',            icon: FileText,        module: 'presupuesto',  bodyshopOnly: true },
   { href: '/recursos',     label: 'Recursos',                icon: Package,         module: 'recursos',     bodyshopOnly: true },
-  { href: '/porteria',     label: 'Reportería',              icon: BarChart3,       module: 'reports'      },
+  { href: '/reporteria',   label: 'Reportería',              icon: BarChart3,       module: 'reports'      },
   { href: '/kanban',       label: 'Kanban Operativo',        icon: KanbanSquare,    module: 'kanban'       },
   { href: '/seguimiento',  label: 'Seguimiento OTs',         icon: FileSearch,      module: 'seguimiento'  },
   { href: '/documentacion', label: 'Documentación',          icon: BookOpen,        module: 'documentation' },

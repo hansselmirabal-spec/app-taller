@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const PUBLIC_PATHS = ['/login', '/change-password'];
-const PROTECTED_PREFIX = ['/dashboard', '/appointments', '/capacity', '/kanban', '/reports', '/settings', '/porteria', '/seguimiento'];
+const PROTECTED_PREFIX = ['/dashboard', '/appointments', '/capacity', '/kanban', '/reports', '/settings', '/reporteria', '/seguimiento'];
 
 function decodeJwt(token: string): { exp?: number } | null {
   try {

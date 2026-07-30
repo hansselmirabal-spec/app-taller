@@ -30,6 +30,10 @@ export default function CalendarSettingsPage() {
   const createAbsence = useCreateAbsence();
   const deleteAbsence = useDeleteAbsence();
   const { data: technicians = [] } = useTechnicians();
+  // Incluye técnicos inactivos solo para resolver el nombre en la tabla de
+  // Registros — el selector de alta de ausencia sigue usando `technicians`
+  // (activos) para no permitir marcar ausente a alguien que ya no trabaja acá.
+  const { data: allTechnicians = [] } = useTechnicians(true);
   const { data: absences = [] } = useAbsences();
   const { isBodyshop } = useActiveWorkshop();
 
@@ -420,7 +424,7 @@ export default function CalendarSettingsPage() {
             <tbody>
               {absences.map(ab => {
                 const { label, cls } = absenceLabel(ab.type);
-                const tech = technicians.find(t => t.id === ab.technicianId);
+                const tech = allTechnicians.find(t => t.id === ab.technicianId);
                 return (
                   <tr key={ab.id} className="border-b border-slate-100 last:border-0">
                     <td className="px-4 py-2.5 text-slate-700">{formatDateDisplay(ab.date)}</td>
