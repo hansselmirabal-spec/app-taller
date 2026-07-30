@@ -477,7 +477,7 @@ export default function WorkshopsPage() {
                             <Database className="h-3 w-3" />
                             {w.dmsBranch}
                           </span>
-                        : <span className="text-slate-300">Sin filtro</span>}
+                        : <span className="text-slate-400" title="Sin sucursal DMS asignada — este taller ve OTs de todas las sucursales">Sin filtro (ve todas)</span>}
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${w.active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>

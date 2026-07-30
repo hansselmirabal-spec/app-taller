@@ -191,15 +191,29 @@ function useBodyshopReporteriaData(from: string, to: string) {
     });
   }, [weekCap, from, to]);
 
-  const allEntries    = useMemo((): BodyshopEntry[] => days.flatMap(d => d.cap?.entries ?? []), [days]);
-  const activeEntries = useMemo(() => allEntries.filter(e => e.status !== 'cancelled'), [allEntries]);
+  const allEntries = useMemo((): BodyshopEntry[] => days.flatMap(d => d.cap?.entries ?? []), [days]);
+
+  // allEntries es día-multiplicado (un vehículo con stayDays=6 aparece 6
+  // veces) — necesario para las series diarias (processTrend, processBarData,
+  // kpiOccupancy, que usan `days` directamente), pero infla cualquier
+  // agregado que deba contar vehículos/ingresos distintos. uniqueEntries
+  // dedupea por entry.id para esos casos.
+  const uniqueEntries = useMemo(() => {
+    const seen = new Set<string>();
+    return allEntries.filter(e => {
+      if (seen.has(e.id)) return false;
+      seen.add(e.id);
+      return true;
+    });
+  }, [allEntries]);
+  const uniqueActiveEntries = useMemo(() => uniqueEntries.filter(e => e.status !== 'cancelled'), [uniqueEntries]);
 
   const kpiTotal = useMemo(() => ({
-    value:     allEntries.length,
-    active:    activeEntries.length,
-    cancelled: allEntries.filter(e => e.status === 'cancelled').length,
-    done:      allEntries.filter(e => e.status === 'done').length,
-  }), [allEntries, activeEntries]);
+    value:     uniqueEntries.length,
+    active:    uniqueActiveEntries.length,
+    cancelled: uniqueEntries.filter(e => e.status === 'cancelled').length,
+    done:      uniqueEntries.filter(e => e.status === 'done').length,
+  }), [uniqueEntries, uniqueActiveEntries]);
 
   const kpiOccupancy = useMemo(() => {
     const daysWithData = days.filter(d => d.cap !== null);
@@ -213,9 +227,9 @@ function useBodyshopReporteriaData(from: string, to: string) {
   }, [days]);
 
   const kpiStay = useMemo(() => {
-    if (!activeEntries.length) return { avg: 0 };
-    return { avg: parseFloat((activeEntries.reduce((s, e) => s + e.stayDays, 0) / activeEntries.length).toFixed(1)) };
-  }, [activeEntries]);
+    if (!uniqueActiveEntries.length) return { avg: 0 };
+    return { avg: parseFloat((uniqueActiveEntries.reduce((s, e) => s + e.stayDays, 0) / uniqueActiveEntries.length).toFixed(1)) };
+  }, [uniqueActiveEntries]);
 
   const processTrend = useMemo(() => days.map(d => ({
     date:   format(parseISO(d.date + 'T12:00:00'), 'd/M', { locale: es }),
@@ -234,7 +248,7 @@ function useBodyshopReporteriaData(from: string, to: string) {
 
   const workTypeMix = useMemo(() => {
     const counts: Record<string, { name: string; color: string; count: number; totalHours: number }> = {};
-    activeEntries.forEach(e => {
+    uniqueActiveEntries.forEach(e => {
       const wt = e.workType;
       if (!wt) return;
       if (!counts[wt.id]) counts[wt.id] = { name: wt.name, color: wt.color, count: 0, totalHours: 0 };
@@ -242,18 +256,18 @@ function useBodyshopReporteriaData(from: string, to: string) {
       counts[wt.id].totalHours = round1(counts[wt.id].totalHours + wt.bodyworkHours + wt.prepHours + wt.paintHours);
     });
     return Object.values(counts).sort((a, b) => b.count - a.count);
-  }, [activeEntries]);
+  }, [uniqueActiveEntries]);
 
   const channelMix = useMemo(() => {
     const counts: Record<string, number> = { walk_in: 0, phone: 0, online: 0, insurance: 0 };
-    allEntries.forEach(e => { if (e.channel in counts) counts[e.channel]++; });
+    uniqueEntries.forEach(e => { if (e.channel in counts) counts[e.channel]++; });
     return Object.entries(counts)
       .filter(([, v]) => v > 0)
       .map(([channel, count]) => ({ channel, label: CHANNEL_LABELS[channel] ?? channel, count, color: CHANNEL_COLORS[channel] ?? '#94a3b8' }))
       .sort((a, b) => b.count - a.count);
-  }, [allEntries]);
+  }, [uniqueEntries]);
 
-  const tableData = useMemo(() => [...allEntries].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30), [allEntries]);
+  const tableData = useMemo(() => [...uniqueEntries].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30), [uniqueEntries]);
 
   // ── Datos extra para variantes de KPI ──────────────────────────────────────
 
@@ -277,11 +291,11 @@ function useBodyshopReporteriaData(from: string, to: string) {
   // Distribución de estadías (para bar en kpi_estadia)
   const stayDistribution = useMemo(() => {
     const dist: Record<number, number> = {};
-    activeEntries.forEach(e => { dist[e.stayDays] = (dist[e.stayDays] ?? 0) + 1; });
+    uniqueActiveEntries.forEach(e => { dist[e.stayDays] = (dist[e.stayDays] ?? 0) + 1; });
     return Object.entries(dist)
       .map(([d, count]) => ({ name: `${d}d`, days: Number(d), count }))
       .sort((a, b) => a.days - b.days);
-  }, [activeEntries]);
+  }, [uniqueActiveEntries]);
 
   // Status donut para kpi_ingresos/donut
   const statusDonut = useMemo(() => {
@@ -292,9 +306,9 @@ function useBodyshopReporteriaData(from: string, to: string) {
       { key: 'cancelled',   label: 'Cancelado',   color: '#ef4444' },
     ];
     return s
-      .map(({ key, label, color }) => ({ name: label, color, count: allEntries.filter(e => e.status === key).length }))
+      .map(({ key, label, color }) => ({ name: label, color, count: uniqueEntries.filter(e => e.status === key).length }))
       .filter(d => d.count > 0);
-  }, [allEntries]);
+  }, [uniqueEntries]);
 
   return {
     kpiTotal, kpiOccupancy, kpiStay, processTrend, workTypeMix, channelMix,

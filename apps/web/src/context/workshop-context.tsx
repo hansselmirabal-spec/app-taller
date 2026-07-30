@@ -15,7 +15,12 @@ const WorkshopContext = createContext<WorkshopContextValue>({
 });
 
 export function WorkshopProvider({ children }: { children: React.ReactNode }) {
-  const [workshopId, setWorkshopIdState] = useState<string>('');
+  // Arrancar con el ID guardado (si existe) en vez de '' — mientras workshopId
+  // está vacío, useActiveWorkshop() no encuentra el taller y cae al fallback
+  // 'MECHANIC', haciendo que cualquier página se comporte transitoriamente
+  // como si el taller activo fuera Mecánica hasta que el useEffect de abajo
+  // resuelva. getActiveWorkshopId() ya es SSR-safe.
+  const [workshopId, setWorkshopIdState] = useState<string>(() => getActiveWorkshopId());
   const qc = useQueryClient();
 
   // Usa TanStack Query para que el token esté disponible y haya retry automático
