@@ -30,6 +30,15 @@ export class BudgetAppointmentsController {
     return wrap(await this.service.findByDate(workshopId, date, user.id, user.role));
   }
 
+  @Get('by-plate/:plate')
+  async findByPlate(
+    @Param('plate') plate: string,
+    @Query('workshopId') workshopId: string,
+  ) {
+    if (!workshopId) throw new BadRequestException('workshopId es requerido');
+    return wrap(await this.service.findByPlate(workshopId, plate));
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return wrap(await this.service.findOne(id));
