@@ -479,9 +479,9 @@ export default function SeguimientoPage() {
                 className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-md font-medium transition-all ${
                   view === 'kanban' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'
                 }`}
-                title="Vista kanban"
+                title="Vista kanban (datos del DMS, todas las sucursales)"
               >
-                <LayoutGrid className="h-3.5 w-3.5" /> Kanban
+                <LayoutGrid className="h-3.5 w-3.5" /> Kanban DMS
               </button>
             </div>
             <TipoServicioLegend />
@@ -1552,7 +1552,7 @@ function TipoServicioLegend() {
           <div className="px-4 py-3 border-b border-slate-100 bg-gradient-to-br from-slate-50 to-white">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-sm font-bold text-slate-900">Tipos de servicio</h3>
+                <h3 className="text-sm font-bold text-slate-900">Tipos de servicio (DMS)</h3>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   Cada OT lleva un código que indica la naturaleza del trabajo. Los colores agrupan por familia.
                 </p>
