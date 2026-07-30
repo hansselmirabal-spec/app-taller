@@ -330,7 +330,7 @@ export default function RolesSettingsPage() {
         <div className="space-y-2">
           {[
             { name: 'Administrador', desc: 'Acceso total a todos los módulos. No se puede restringir.' },
-            { name: 'Recepción (default)', desc: 'Dashboard, Capacidad (solo ver), Agenda y Turnos, Seguimiento (solo ver).' },
+            { name: 'Recepción (default)', desc: 'Panel de Control, Capacidad (solo ver), Agenda y Turnos, Seguimiento (solo ver).' },
           ].map(r => (
             <div key={r.name} className="flex items-start gap-2">
               <ShieldCheck className="h-3.5 w-3.5 text-slate-400 mt-0.5 flex-shrink-0" />

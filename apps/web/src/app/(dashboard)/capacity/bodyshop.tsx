@@ -5,7 +5,7 @@ import { addWeeks, subWeeks, startOfWeek, addDays, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useBodyshopWeekCapacity } from '@/hooks/use-bodyshop';
 import { useTechnicians } from '@/hooks/use-technicians';
-import { formatDate } from '@/lib/utils';
+import { formatDate, round1 } from '@/lib/utils';
 import type { ProcessCapacity, CapacityStatus, Technician, BodyshopTechDayCapacity, BodyshopDayCapacity } from '@/types';
 import { InfoButton } from '@/components/ui/info-button';
 import { MotivationalLoader } from '@/components/ui/motivational-loader';
@@ -214,7 +214,7 @@ function CapacityDetailPopup({
                   {techsForProc.map(tech => {
                     const usedRate = tech.availableHours > 0 ? tech.usedHours / tech.availableHours : 0;
                     const techPct  = Math.round(usedRate * 100);
-                    const freeH    = Math.max(0, tech.availableHours - tech.usedHours);
+                    const freeH    = round1(Math.max(0, tech.availableHours - tech.usedHours));
                     const isAbsent = tech.availableHours === 0 && tech.isWorkingDay;
                     return (
                       <div key={tech.technicianId} className="flex items-center gap-2">
@@ -355,7 +355,7 @@ function TechnicianCell({
 
   const isAbsent = techCap.availableHours === 0 && techCap.isWorkingDay;
   const isHalfDay = techCap.absenceType === 'half' || techCap.absenceType === 'holiday';
-  const freeHours = Math.max(0, techCap.availableHours - techCap.usedHours);
+  const freeHours = round1(Math.max(0, techCap.availableHours - techCap.usedHours));
   const usedRate = techCap.availableHours > 0 ? techCap.usedHours / techCap.availableHours : 0;
   const style = techOccupancyStyle(usedRate);
 
