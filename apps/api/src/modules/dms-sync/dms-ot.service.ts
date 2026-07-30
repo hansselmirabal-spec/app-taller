@@ -644,6 +644,7 @@ export class DmsOtService {
         asesor,
         COUNT(*) AS total,
         COUNT(*) FILTER (WHERE estado_ot = 'Abierto') AS abiertas,
+        COUNT(*) FILTER (WHERE fecha_cierre_ot IS NOT NULL) AS cerradas,
         COALESCE(SUM(monto) FILTER (WHERE fecha_cierre_ot IS NOT NULL), 0) AS "montoTotal"
       FROM dms_ot_rows
       WHERE asesor IS NOT NULL ${baseAnd}
@@ -719,10 +720,16 @@ export class DmsOtService {
         diasIngreso:  Number(r.diasIngreso ?? 0),
         monto:        Number(r.monto ?? 0),
       })),
-      topAsesores: topAsesores.map(a => ({
-        asesor: a.asesor, total: Number(a.total),
-        finalizadas: Number(a.abiertas), tasaCierre: 0, monto: Number(a.montoTotal ?? 0),
-      })),
+      topAsesores: topAsesores.map(a => {
+        const total = Number(a.total);
+        const cerradas = Number(a.cerradas ?? 0);
+        return {
+          asesor: a.asesor, total,
+          finalizadas: cerradas,
+          tasaCierre: total > 0 ? Math.round((cerradas / total) * 1000) / 10 : 0,
+          monto: Number(a.montoTotal ?? 0),
+        };
+      }),
     };
   }
 
