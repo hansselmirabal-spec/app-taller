@@ -15,6 +15,8 @@ import {
   useCreateBodyshopEntry, useBodyshopDayCapacity, useBodyshopTechAvailability,
   useDmsBodyshopSucursales, useDmsBodyshopAsesores,
 } from '@/hooks/use-bodyshop';
+import { useBudgetAppointmentsByPlate } from '@/hooks/use-budget-appointments';
+import type { BudgetAppointment } from '@/types';
 import type { BodyshopScheduleSimulation } from '@/hooks/use-bodyshop';
 import { useActiveWorkshop } from '@/hooks/use-active-workshop';
 import { useWorkshopId } from '@/context/workshop-context';
@@ -1003,6 +1005,7 @@ function BodyshopNewForm() {
   const [directPaintHours,    setDirectPaintHours]    = useState('');
   const [budgetNumber,        setBudgetNumber]        = useState('');
   const [pieceCount,          setPieceCount]          = useState('');
+  const [linkedBudgetId,      setLinkedBudgetId]      = useState<string | null>(null);
 
   // ── Step 3: schedule + confirm ──────────────────────────────────────────────
   const [date,        setDate]        = useState(params.get('date') || formatDate(new Date()));
@@ -1024,6 +1027,34 @@ function BodyshopNewForm() {
 
   const { data: dmsSucursales = [] }                      = useDmsBodyshopSucursales();
   const { data: dmsAsesores   = [], isLoading: dmsAsesoresLoading } = useDmsBodyshopAsesores(dmsSucursalId);
+
+  // Presupuestos de esta chapa disponibles para vincular al ingreso directo
+  // (bypass del botón "Aprobar" en el módulo Presupuestos). Solo referencia
+  // presupuestos reales de nuestro sistema — nunca texto libre externo.
+  const { data: plateBudgets = [], isLoading: plateBudgetsLoading } = useBudgetAppointmentsByPlate(workshopId, plate);
+  const linkedBudget = linkedBudgetId ? plateBudgets.find(b => b.id === linkedBudgetId) ?? null : null;
+
+  function budgetTotalHours(b: BudgetAppointment): number {
+    return (b.processes ?? []).reduce((sum, p) => sum + (Number(p.hours) || 0), 0);
+  }
+
+  function selectLinkedBudget(b: BudgetAppointment) {
+    setLinkedBudgetId(b.id);
+    const bw   = b.processes?.find(p => p.code === 'BODYWORK')?.hours ?? 0;
+    const prep = b.processes?.find(p => p.code === 'PREP')?.hours ?? 0;
+    const paint = b.processes?.find(p => p.code === 'PAINT')?.hours ?? 0;
+    setDirectBodyworkHours(bw    > 0 ? String(bw)    : '');
+    setDirectPrepHours(prep      > 0 ? String(prep)  : '');
+    setDirectPaintHours(paint    > 0 ? String(paint) : '');
+    const pieces = (b.pieces ?? []).reduce((sum, p) => sum + (Number(p.qty) || 0), 0);
+    setPieceCount(pieces > 0 ? String(pieces) : '');
+    setBudgetNumber(b.budgetNumber ?? '');
+    setSimulation(null);
+  }
+
+  function unlinkBudget() {
+    setLinkedBudgetId(null);
+  }
 
   // Auto-dismiss DMS toast
   useEffect(() => {
@@ -1426,21 +1457,62 @@ function BodyshopNewForm() {
           {step === 2 && (
             <div className="max-w-xl mx-auto space-y-5">
 
-              {/* Número de presupuesto */}
+              {/* Vínculo a presupuesto existente */}
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="bg-slate-900 px-5 py-3 flex items-center gap-2">
                   <Hash className="h-3.5 w-3.5 text-slate-400" />
-                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Número de presupuesto</span>
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Presupuesto</span>
                 </div>
-                <div className="px-5 py-4">
-                  <Input
-                    type="text"
-                    placeholder="Ej: 2024-001, PRE-5523..."
-                    value={budgetNumber}
-                    onChange={e => setBudgetNumber(e.target.value)}
-                    className="text-sm font-semibold"
-                    autoFocus
-                  />
+                <div className="px-5 py-4 space-y-2">
+                  {linkedBudget ? (
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-emerald-800 truncate">
+                          {linkedBudget.budgetNumber || `Presupuesto ${linkedBudget.id.slice(0, 8)}`}
+                        </p>
+                        <p className="text-xs text-emerald-700">
+                          {linkedBudget.customerName} · {formatDateDisplay(linkedBudget.date)} · {budgetTotalHours(linkedBudget).toFixed(1)}h
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={unlinkBudget}
+                        className="flex-shrink-0 text-xs font-medium text-emerald-700 hover:text-emerald-900 underline"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  ) : plateBudgetsLoading ? (
+                    <p className="text-xs text-slate-400 italic">Buscando presupuestos de esta chapa...</p>
+                  ) : plateBudgets.length > 0 ? (
+                    <div className="space-y-1.5">
+                      <p className="text-xs text-slate-500">Presupuestos encontrados para esta chapa — elegí uno para precargar las horas, o seguí sin vincular ninguno:</p>
+                      {plateBudgets.map(b => (
+                        <button
+                          key={b.id}
+                          type="button"
+                          onClick={() => selectLinkedBudget(b)}
+                          className="w-full text-left px-3 py-2 rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 transition-colors"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-semibold text-slate-800">
+                              {b.budgetNumber || `Presupuesto ${b.id.slice(0, 8)}`}
+                            </span>
+                            <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full ${b.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {b.status === 'approved' ? 'Aprobado' : 'Pendiente'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            {b.customerName} · {formatDateDisplay(b.date)} · {budgetTotalHours(b).toFixed(1)}h
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400 italic">
+                      {plate.trim().length >= 3 ? 'Sin presupuestos pendientes para esta chapa.' : 'Ingresá la chapa en el paso anterior para buscar presupuestos.'}
+                    </p>
+                  )}
                 </div>
               </div>
 

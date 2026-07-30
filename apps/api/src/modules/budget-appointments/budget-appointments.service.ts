@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import {
   IsString, IsOptional, IsArray, IsNumber,
   ValidateNested, Matches, Min,
@@ -127,6 +127,18 @@ export class BudgetAppointmentsService {
       where,
       relations: ['perito'],
       order: { timeStart: 'ASC' },
+    });
+  }
+
+  // Presupuestos de esta chapa disponibles para vincular manualmente desde el
+  // wizard de ingreso directo (bypass del botón "Aprobar"). Excluye los que ya
+  // generaron su propio bodyshop_entry (linkedEntryId seteado) para no ofrecer
+  // un presupuesto que ya está resuelto y duplicaría el ingreso.
+  async findByPlate(workshopId: string, plate: string): Promise<BudgetAppointment[]> {
+    return this.repo.find({
+      where: { workshopId, plate: plate.toUpperCase().trim(), linkedEntryId: IsNull() },
+      relations: ['perito'],
+      order: { date: 'DESC' },
     });
   }
 

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  getBudgetAppointments, getBudgetAppointment,
+  getBudgetAppointments, getBudgetAppointment, getBudgetAppointmentsByPlate,
   createBudgetAppointment, updateBudgetProcesses,
   cancelBudgetAppointment, approveBudgetAppointment,
   rejectBudgetAppointment,
@@ -23,6 +23,15 @@ export function useBudgetAppointment(id: string | null) {
     queryKey: [KEY, id],
     queryFn:  () => getBudgetAppointment(id!),
     enabled:  !!id,
+    staleTime: 30_000,
+  });
+}
+
+export function useBudgetAppointmentsByPlate(workshopId: string | undefined, plate: string) {
+  return useQuery({
+    queryKey: [KEY, 'by-plate', workshopId, plate],
+    queryFn:  () => getBudgetAppointmentsByPlate(workshopId!, plate),
+    enabled:  !!workshopId && plate.trim().length >= 3,
     staleTime: 30_000,
   });
 }

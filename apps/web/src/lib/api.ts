@@ -1603,6 +1603,12 @@ export async function getBudgetAppointment(id: string): Promise<BudgetAppointmen
   return http<BudgetAppointment>(`/budget-appointments/${id}`);
 }
 
+export async function getBudgetAppointmentsByPlate(workshopId: string, plate: string): Promise<BudgetAppointment[]> {
+  if (!plate.trim()) return [];
+  if (MOCK) return delay([]);
+  return http<BudgetAppointment[]>(`/budget-appointments/by-plate/${encodeURIComponent(plate.trim().toUpperCase())}?workshopId=${encodeURIComponent(workshopId)}`);
+}
+
 export async function createBudgetAppointment(dto: {
   workshopId: string;
   date: string;

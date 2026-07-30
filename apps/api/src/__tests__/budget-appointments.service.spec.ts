@@ -42,6 +42,7 @@ function makeRepo(appt: any) {
   return {
     findOne: jest.fn().mockResolvedValue(appt),
     save: jest.fn().mockImplementation((a: any) => Promise.resolve(a)),
+    find: jest.fn().mockResolvedValue([]),
   };
 }
 
@@ -117,5 +118,37 @@ describe('BudgetAppointmentsService.approve — pieceCount', () => {
     const { budget } = await service.approve(APPT_ID, USER_ID);
 
     expect(budget.processes).toEqual(originalProcesses);
+  });
+});
+
+describe('BudgetAppointmentsService.findByPlate', () => {
+  it('busca por workshopId + chapa normalizada (mayúsculas, sin espacios extra) y excluye linkedEntryId', async () => {
+    const repo = makeRepo(null);
+    const bodyshopService = makeBodyshopService();
+    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any);
+
+    await service.findByPlate(WS_ID, '  tst 001  ');
+
+    expect(repo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ workshopId: WS_ID, plate: 'TST 001' }),
+        order: { date: 'DESC' },
+      }),
+    );
+    // linkedEntryId debe filtrarse con IsNull() (un FindOperator, no un valor literal)
+    const whereArg = (repo.find as jest.Mock).mock.calls[0][0].where;
+    expect(whereArg.linkedEntryId).toBeDefined();
+  });
+
+  it('devuelve la lista tal cual la resuelve el repo (ya excluye presupuestos vinculados)', async () => {
+    const found = [makeAppt({ id: 'appt-002', linkedEntryId: null })];
+    const repo = makeRepo(null);
+    repo.find = jest.fn().mockResolvedValue(found);
+    const bodyshopService = makeBodyshopService();
+    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any);
+
+    const result = await service.findByPlate(WS_ID, 'TST 001');
+
+    expect(result).toEqual(found);
   });
 });
