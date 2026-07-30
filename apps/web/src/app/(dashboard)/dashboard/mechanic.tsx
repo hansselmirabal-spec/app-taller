@@ -46,7 +46,7 @@ interface DWidget {
 
 const DEFAULT_WIDGETS: DWidget[] = [
   { id:'d1', type:'kpi_util',     title:'Utilización',          color:'#3b82f6', layout:{ x:0, y:0, w:3, h:2 } },
-  { id:'d2', type:'kpi_turnos',   title:'Turnos del Período',   color:'#8b5cf6', layout:{ x:3, y:0, w:3, h:2 } },
+  { id:'d2', type:'kpi_turnos',   title:'Citas del Período',    color:'#8b5cf6', layout:{ x:3, y:0, w:3, h:2 } },
   { id:'d3', type:'kpi_techs',    title:'Técnicos Disponibles', color:'#22c55e', layout:{ x:6, y:0, w:3, h:2 } },
   { id:'d4', type:'kpi_horas',    title:'Horas en Uso',         color:'#f59e0b', layout:{ x:9, y:0, w:3, h:2 } },
   { id:'d5', type:'timeline_hoy', title:'Timeline de Hoy',      color:'#3b82f6', layout:{ x:0, y:2, w:7, h:4 } },
@@ -57,10 +57,10 @@ const DEFAULT_WIDGETS: DWidget[] = [
 
 const CATALOG: Array<{ type: WidgetType; label: string; icon: React.ReactNode }> = [
   { type:'kpi_util',          label:'KPI Utilización',      icon:<Activity className="h-4 w-4"/> },
-  { type:'kpi_turnos',        label:'KPI Turnos',           icon:<Hash className="h-4 w-4"/> },
+  { type:'kpi_turnos',        label:'KPI Citas',            icon:<Hash className="h-4 w-4"/> },
   { type:'kpi_techs',         label:'KPI Técnicos',         icon:<Users className="h-4 w-4"/> },
   { type:'kpi_horas',         label:'KPI Horas en Uso',     icon:<Clock className="h-4 w-4"/> },
-  { type:'semana_bar',        label:'Turnos por Día',       icon:<BarChart3 className="h-4 w-4"/> },
+  { type:'semana_bar',        label:'Citas por Día',        icon:<BarChart3 className="h-4 w-4"/> },
   { type:'timeline_hoy',      label:'Timeline de Hoy',      icon:<CalendarRange className="h-4 w-4"/> },
   { type:'tiempo_periodo',    label:'Horas Semana / Mes',   icon:<Clock className="h-4 w-4"/> },
   { type:'bandas',            label:'Carga por Técnico',    icon:<Zap className="h-4 w-4"/> },
@@ -168,7 +168,7 @@ function useDashboardData(mode: PeriodMode, customFrom: string, customTo: string
       if (c.absenceType === 'half') list.push({ id: c.technicianId + '_ha', tipo: 'Media jornada', desc: `${c.technicianName} trabaja medio día`, level: 'warning' });
     });
     const cancelToday = todayAppts.filter(a => a.status === 'cancelled').length;
-    if (cancelToday > 0) list.push({ id: 'cancel', tipo: 'Cancelaciones', desc: `${cancelToday} turno${cancelToday > 1 ? 's' : ''} cancelado${cancelToday > 1 ? 's' : ''} hoy`, level: 'warning' });
+    if (cancelToday > 0) list.push({ id: 'cancel', tipo: 'Cancelaciones', desc: `${cancelToday} cita${cancelToday > 1 ? 's' : ''} cancelada${cancelToday > 1 ? 's' : ''} hoy`, level: 'warning' });
     return list;
   }, [dailyCap, todayAppts]);
 
@@ -298,7 +298,7 @@ function TurnosListWidget({ appointments }: { appointments: Appointment[] }) {
           );
         })}
         {selected.size > 0 && <button onClick={() => setSelected(new Set())} className="text-[10px] text-slate-400 hover:text-slate-600 underline ml-1">limpiar</button>}
-        <span className="ml-auto text-[10px] text-slate-400 tabular-nums">{filtered.length} turnos</span>
+        <span className="ml-auto text-[10px] text-slate-400 tabular-nums">{filtered.length} citas</span>
       </div>
       <div className="flex-1 overflow-auto">
         <table className="w-full text-xs">
@@ -327,7 +327,7 @@ function TurnosListWidget({ appointments }: { appointments: Appointment[] }) {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400">Sin turnos</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400">Sin citas</td></tr>}
           </tbody>
         </table>
       </div>
@@ -425,7 +425,7 @@ function TimelineHoyWidget({ appointments, technicians }: { appointments: Appoin
                   {tech.name.split(' ')[0]}
                 </span>
                 <span className="text-[10px] text-slate-400 block mt-0.5">
-                  {techAppts.length} turno{techAppts.length !== 1 ? 's' : ''}
+                  {techAppts.length} cita{techAppts.length !== 1 ? 's' : ''}
                 </span>
               </div>
 
@@ -545,7 +545,7 @@ function RankingServiciosWidget({ data }: { data: { name: string; color: string;
               <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ background: item.color }} />
               <span className="text-xs font-semibold text-slate-800 truncate max-w-[120px]">{item.name}</span>
             </div>
-            <span className="text-xs font-bold text-slate-700">{item.count} turno{item.count !== 1 ? 's' : ''}</span>
+            <span className="text-xs font-bold text-slate-700">{item.count} cita{item.count !== 1 ? 's' : ''}</span>
           </div>
           <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden ml-6">
             <div className="h-full rounded-full" style={{ width: `${(item.count / max) * 100}%`, background: item.color }} />
@@ -576,7 +576,7 @@ function CancelacionesWidget({ appointments }: { appointments: Appointment[] }) 
       </div>
       <div className="text-center">
         <p className="text-sm font-semibold text-slate-900">{cancelled} cancelaciones</p>
-        <p className="text-xs text-slate-500">de {total} turnos totales</p>
+        <p className="text-xs text-slate-500">de {total} citas totales</p>
       </div>
     </div>
   );
@@ -612,7 +612,7 @@ function HeatmapDemandaWidget({ appointments }: { appointments: Appointment[] })
               const count = grid[`${dow}_${h}`] ?? 0;
               const opacity = count > 0 ? 0.2 + (count / maxVal) * 0.75 : 0.06;
               return (
-                <div key={dow} className="w-8 h-5 rounded-sm flex items-center justify-center" style={{ background: `rgba(59,130,246,${opacity})` }} title={`${count} turno${count !== 1 ? 's' : ''}`}>
+                <div key={dow} className="w-8 h-5 rounded-sm flex items-center justify-center" style={{ background: `rgba(59,130,246,${opacity})` }} title={`${count} cita${count !== 1 ? 's' : ''}`}>
                   {count > 0 && <span className="text-[8px] text-blue-900 font-bold">{count}</span>}
                 </div>
               );

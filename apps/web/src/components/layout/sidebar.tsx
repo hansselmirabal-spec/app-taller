@@ -158,7 +158,7 @@ export function Sidebar() {
             )}
           >
             <ShieldCheck className={cn('h-4 w-4 flex-shrink-0', inSystemSettings ? 'text-blue-600' : 'text-slate-400')} />
-            <span className="flex-1 leading-none text-left">Configuración del Sistema</span>
+            <span className="flex-1 leading-none text-left">Seguridad y Accesos</span>
             {systemSettingsOpen
               ? <ChevronDown className="h-3 w-3 text-slate-400" />
               : <ChevronRight className="h-3 w-3 text-slate-400" />

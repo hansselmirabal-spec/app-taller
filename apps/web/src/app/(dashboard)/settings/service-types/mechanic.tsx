@@ -36,7 +36,7 @@ export default function MechanicServiceTypesPage() {
   return (
     <div className="max-w-2xl mx-auto px-6 py-8">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-semibold text-slate-900">Tipos de servicio</h1>
+        <h1 className="text-xl font-semibold text-slate-900">Tipos de servicio (Configuración)</h1>
         {canEdit && (
           <Button size="sm" onClick={() => setShowForm(!showForm)}>
             <Plus className="h-4 w-4 mr-1" /> Agregar
