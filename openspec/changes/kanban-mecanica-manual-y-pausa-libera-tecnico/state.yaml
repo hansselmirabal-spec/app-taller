@@ -29,7 +29,15 @@ phases:
     engram_topic: sdd/kanban-mecanica-manual-y-pausa-libera-tecnico/tasks
     file: tasks.md
   apply:
-    status: pending
+    status: done
+    engram_topic: sdd/kanban-mecanica-manual-y-pausa-libera-tecnico/apply-progress
+    prs:
+      - number: 25
+        title: "PR1 add process"
+        merged: true
+      - number: 26
+        title: "PR2 pause releases technician"
+        merged: true
   verify:
     status: pending
   archive:
