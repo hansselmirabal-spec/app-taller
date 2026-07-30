@@ -958,7 +958,7 @@ export default function MechanicReporteriaPage() {
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href="/porteria/productividad"
+            href="/reporteria/productividad"
             className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
             title="Reporte de productividad por técnico"
           >
