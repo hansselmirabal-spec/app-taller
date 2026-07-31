@@ -6,13 +6,15 @@ import { es } from 'date-fns/locale';
 import { useBodyshopWeekCapacity } from '@/hooks/use-bodyshop';
 import { useTechnicians } from '@/hooks/use-technicians';
 import { formatDate, round1 } from '@/lib/utils';
-import type { ProcessCapacity, CapacityStatus, Technician, BodyshopTechDayCapacity, BodyshopDayCapacity } from '@/types';
+import type { ProcessCapacity, CapacityStatus, Technician, BodyshopTechDayCapacity, BodyshopDayCapacity, BodyshopBalanceProcess } from '@/types';
 import { InfoButton } from '@/components/ui/info-button';
 import { MotivationalLoader } from '@/components/ui/motivational-loader';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-const SPECIALTY_TO_PROCESS: Record<string, 'BODYWORK' | 'PREP' | 'PAINT'> = {
+// Debe reflejar BALANCE_PROCESSES / SPECIALTY_TO_PROCESS del backend
+// (apps/api/src/modules/bodyshop/bodyshop.service.ts) — 5 procesos reales.
+const SPECIALTY_TO_PROCESS: Record<string, BodyshopBalanceProcess> = {
   'CARROCERIA': 'BODYWORK',
   'BODYWORK':   'BODYWORK',
   'CHAPERIA':   'BODYWORK',
@@ -20,10 +22,15 @@ const SPECIALTY_TO_PROCESS: Record<string, 'BODYWORK' | 'PREP' | 'PAINT'> = {
   'PREP':       'PREP',
   'PINTURA':    'PAINT',
   'PAINT':      'PAINT',
+  'PULIDO':     'POLISH',
+  'PULIDOR':    'POLISH',
+  'POLISH':     'POLISH',
+  'CONTROL_FINAL': 'FINAL_CONTROL',
+  'FINAL_CONTROL': 'FINAL_CONTROL',
 };
 
 const PROCESSES: {
-  key: 'BODYWORK' | 'PREP' | 'PAINT';
+  key: BodyshopBalanceProcess;
   label: string;
   color: string;
   accent: string;
@@ -55,9 +62,23 @@ const PROCESSES: {
     rowBg: 'bg-orange-50/40', subRowBg: 'bg-orange-50/20',
     borderColor: 'border-orange-100', barColor: 'bg-orange-500',
   },
+  {
+    key: 'POLISH', label: 'Pulida',
+    color: '#14b8a6', accent: 'teal',
+    textColor: 'text-teal-700', badgeBg: 'bg-teal-100 text-teal-700',
+    rowBg: 'bg-teal-50/40', subRowBg: 'bg-teal-50/20',
+    borderColor: 'border-teal-100', barColor: 'bg-teal-500',
+  },
+  {
+    key: 'FINAL_CONTROL', label: 'Control Final',
+    color: '#ec4899', accent: 'pink',
+    textColor: 'text-pink-700', badgeBg: 'bg-pink-100 text-pink-700',
+    rowBg: 'bg-pink-50/40', subRowBg: 'bg-pink-50/20',
+    borderColor: 'border-pink-100', barColor: 'bg-pink-500',
+  },
 ];
 
-const PROCESS_MAP = Object.fromEntries(PROCESSES.map(p => [p.key, p])) as Record<'BODYWORK' | 'PREP' | 'PAINT', typeof PROCESSES[0]>;
+const PROCESS_MAP = Object.fromEntries(PROCESSES.map(p => [p.key, p])) as Record<BodyshopBalanceProcess, typeof PROCESSES[0]>;
 
 const STATUS_STYLES: Record<CapacityStatus, string> = {
   OK:         'bg-emerald-50 border-emerald-200 text-emerald-700',
@@ -90,7 +111,7 @@ function occupancyBarColor(rate: number): string {
 
 type PopupTarget = {
   dateStr: string;
-  processKey: 'BODYWORK' | 'PREP' | 'PAINT' | 'GLOBAL';
+  processKey: BodyshopBalanceProcess | 'GLOBAL';
   x: number;
   y: number;
   fromBottom: boolean;
@@ -154,7 +175,7 @@ function CapacityDetailPopup({
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 capitalize">{dateLabel}</p>
           <p className="text-xs font-bold text-slate-700">
-            {isGlobal ? 'Resumen global' : PROCESS_MAP[target.processKey as 'BODYWORK' | 'PREP' | 'PAINT']?.label}
+            {isGlobal ? 'Resumen global' : PROCESS_MAP[target.processKey as BodyshopBalanceProcess]?.label}
           </p>
         </div>
         <button onClick={onClose} className="p-1 rounded hover:bg-slate-200 transition-colors">
@@ -408,7 +429,7 @@ function TechnicianCell({
 export default function BodyshopCapacityPage() {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
-    BODYWORK: true, PREP: true, PAINT: true,
+    BODYWORK: true, PREP: true, PAINT: true, POLISH: true, FINAL_CONTROL: true,
   });
   const [popup, setPopup] = useState<PopupTarget | null>(null);
 
@@ -421,8 +442,8 @@ export default function BodyshopCapacityPage() {
   const { data: technicians = [] }           = useTechnicians();
 
   // Mapear técnicos a su proceso según especialidad
-  const techsByProcess: Record<'BODYWORK' | 'PREP' | 'PAINT', Technician[]> = {
-    BODYWORK: [], PREP: [], PAINT: [],
+  const techsByProcess: Record<BodyshopBalanceProcess, Technician[]> = {
+    BODYWORK: [], PREP: [], PAINT: [], POLISH: [], FINAL_CONTROL: [],
   };
   for (const tech of technicians) {
     const processKey = SPECIALTY_TO_PROCESS[(tech.specialty ?? '').toUpperCase()];

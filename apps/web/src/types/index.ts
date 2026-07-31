@@ -265,8 +265,10 @@ export type WeekCapacity = Record<string, TechnicianCapacity[]>;
 
 export type CapacityStatus = 'OK' | 'RISK' | 'OVERLOADED';
 
+export type BodyshopBalanceProcess = 'BODYWORK' | 'PREP' | 'PAINT' | 'POLISH' | 'FINAL_CONTROL';
+
 export interface ProcessCapacity {
-  process: 'BODYWORK' | 'PREP' | 'PAINT';
+  process: BodyshopBalanceProcess;
   label: string;
   commercializableHours: number;
   occupiedHours: number;
@@ -279,7 +281,7 @@ export interface BodyshopTechDayCapacity {
   technicianId: string;
   technicianName: string;
   specialty: string | null;
-  process: 'BODYWORK' | 'PREP' | 'PAINT' | null;
+  process: BodyshopBalanceProcess | null;
   dailyHours: number;
   availableHours: number;
   usedHours: number;
@@ -291,7 +293,7 @@ export interface BodyshopDayCapacity {
   workshopId: string;
   date: string;
   commercializableTotal: number;
-  byProcess: { BODYWORK: ProcessCapacity; PREP: ProcessCapacity; PAINT: ProcessCapacity };
+  byProcess: Record<BodyshopBalanceProcess, ProcessCapacity>;
   byTechnician: BodyshopTechDayCapacity[];
   globalOccupancyRate: number;
   globalStatus: CapacityStatus;
