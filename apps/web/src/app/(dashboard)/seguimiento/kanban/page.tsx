@@ -830,6 +830,15 @@ function CardDetailModal({
   const [showResourceForm, setShowResourceForm] = useState(false);
 
   const cp       = card.currentProcess;
+  // Placeholder sintético del backend (buildCard) cuando todos los procesos
+  // madre terminaron pero queda un paralelo pendiente/en curso — logId
+  // '__parallel__' no existe en tracking_logs, nunca se le puede pegar
+  // start/complete/pause (era el bug reportado: "completar" no dejaba avanzar).
+  // La acción real es sobre el/los paralelo(s) que todavía están abiertos.
+  const isParallelPlaceholder = cp?.logId === '__parallel__';
+  const blockingParallels = isParallelPlaceholder
+    ? card.parallelProcesses.filter(p => p.status === 'pending' || p.status === 'in_progress' || p.status === 'blocked')
+    : [];
   const isBlocked = cp?.status === 'blocked';
   const isAgenda  = cp?.processCode === 'AGENDA';
   const timeline  = buildTimeline(card.allProcesses);
@@ -1169,7 +1178,45 @@ function CardDetailModal({
           </div>
         )}
 
-        {cp && (
+        {cp && isParallelPlaceholder && (
+          <div className="flex-shrink-0 p-4 border-t border-slate-100 bg-slate-50/50 rounded-b-2xl space-y-2">
+            <p className="text-[11px] font-semibold text-purple-600 uppercase tracking-wide">
+              Paralelo pendiente — hay que cerrarlo para finalizar
+            </p>
+            {blockingParallels.map(p => (
+              <div key={p.logId} className="flex items-center gap-2 bg-white rounded-lg border border-slate-200 px-3 py-2">
+                <span className="flex-1 text-xs font-medium text-slate-700">{p.processName}</span>
+                {p.status === 'pending' && (
+                  <button type="button" disabled={!!loadingLogId} onClick={() => onStart(p.logId)}
+                    className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                    <Play className="h-3 w-3" /> Iniciar
+                  </button>
+                )}
+                {p.status === 'blocked' && (
+                  <button type="button" disabled={!!unblockingLogId} onClick={() => onUnblock(p.logId, p.processName)}
+                    className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50 transition-colors">
+                    <PlayCircle className="h-3 w-3" /> Reanudar
+                  </button>
+                )}
+                {p.status === 'in_progress' && (
+                  <>
+                    <button type="button" disabled={!!pausingLogId} onClick={() => onPause(p.logId, p.processName)}
+                      className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-orange-100 text-orange-700 hover:bg-orange-200 disabled:opacity-50 transition-colors"
+                      title="Pausar">
+                      <PauseCircle className="h-3.5 w-3.5" />
+                    </button>
+                    <button type="button" disabled={!!loadingLogId} onClick={() => onComplete(p.logId)}
+                      className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+                      <CheckCircle2 className="h-3 w-3" /> Completar
+                    </button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {cp && !isParallelPlaceholder && (
           <div className="flex-shrink-0 p-4 border-t border-slate-100 bg-slate-50/50 rounded-b-2xl">
             <div className="flex gap-2">
               {isBlocked ? (
@@ -1285,9 +1332,14 @@ function KanbanCard({
     ? { border: 'border-l-blue-400', bg: 'bg-blue-50/40', badge: 'bg-blue-100 text-blue-700' }
     : SEMAPHORE[card.semaphore];
 
-  const isStartable   = !isCancelled && cp?.status === 'pending';
-  const isCompletable = !isCancelled && cp?.status === 'in_progress' && !isAgenda;
-  const isPausable    = !isCancelled && (cp?.status === 'in_progress' || cp?.status === 'pending') && !isAgenda;
+  // Placeholder sintético del backend (buildCard) cuando todos los procesos
+  // madre terminaron pero queda un paralelo pendiente/en curso — logId
+  // '__parallel__' no existe en tracking_logs, nunca se le puede pegar
+  // start/complete/pause. La acción real está en la fila del paralelo.
+  const isParallelPlaceholder = cp?.logId === '__parallel__';
+  const isStartable   = !isCancelled && !isParallelPlaceholder && cp?.status === 'pending';
+  const isCompletable = !isCancelled && !isParallelPlaceholder && cp?.status === 'in_progress' && !isAgenda;
+  const isPausable    = !isCancelled && !isParallelPlaceholder && (cp?.status === 'in_progress' || cp?.status === 'pending') && !isAgenda;
 
   // Mecánica manual (F1 PR1): solo bodyshop, solo si el proceso todavía no existe
   // (el backend rechaza duplicados sin importar su estado, ver addProcessToBodyshop).
@@ -1625,7 +1677,7 @@ function KanbanCard({
       )}
 
       {/* Acciones — stopPropagation para no abrir el modal (no para canceladas) */}
-      {cp && !isCancelled && (
+      {cp && !isCancelled && !isParallelPlaceholder && (
         <div className="flex gap-2 pt-0.5" onClick={e => e.stopPropagation()}>
           {isBlocked ? (
             <button type="button" disabled={isUnblocking} onClick={() => onUnblock(cp.logId, cp.processName)}
