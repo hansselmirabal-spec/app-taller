@@ -548,6 +548,58 @@ describe('TrackingService', () => {
       expect(logRepo.save).toHaveBeenCalledWith(expect.objectContaining({ status: 'in_progress' }));
     });
 
+    it('starting a PARALLEL process (ej. Mecánica) pauses the active MOTHER process of the same entry, tagging the pause with the parallel\'s name', async () => {
+      const mechanicLog = makeLog({
+        id: 'log-mechanic', sourceType: 'bodyshop', sourceId: ENTRY_ID,
+        processCode: 'MECHANIC', processName: 'Mecánica', processType: 'PARALLEL', status: 'pending',
+      });
+      const motherLog = makeLog({
+        id: 'log-prep', sourceType: 'bodyshop', sourceId: ENTRY_ID,
+        processCode: 'PREP', processName: 'Preparación', processType: 'MOTHER', status: 'in_progress',
+        technicianId: TECH_ID, technicianName: 'Técnico 1',
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(mechanicLog) // el log que se está iniciando
+          .mockResolvedValueOnce(motherLog),  // búsqueda de proceso madre activo
+      });
+      const processTechRepo = makeProcessTechRepo();
+      const entryRepo = makeEntryRepo();
+
+      const { service } = await build({ logRepo, processTechRepo, entryRepo });
+      await service.startProcess('log-mechanic');
+
+      expect(logRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'log-prep', status: 'blocked', blockedReason: 'Mecánica' }),
+      );
+      expect(processTechRepo.delete).toHaveBeenCalledWith({ entryId: ENTRY_ID, process: 'PREP' });
+      expect(entryRepo.update).toHaveBeenCalledWith({ id: ENTRY_ID }, { status: 'paused' });
+      expect(logRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'log-mechanic', status: 'in_progress' }),
+      );
+    });
+
+    it('starting a PARALLEL process does nothing extra when there is no active MOTHER process', async () => {
+      const mechanicLog = makeLog({
+        id: 'log-mechanic', sourceType: 'bodyshop', sourceId: ENTRY_ID,
+        processCode: 'MECHANIC', processName: 'Mecánica', processType: 'PARALLEL', status: 'pending',
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(mechanicLog) // el log que se está iniciando
+          .mockResolvedValueOnce(null),       // no hay proceso madre in_progress
+      });
+      const entryRepo = makeEntryRepo();
+
+      const { service } = await build({ logRepo, entryRepo });
+      await service.startProcess('log-mechanic');
+
+      expect(entryRepo.update).not.toHaveBeenCalled();
+      expect(logRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'log-mechanic', status: 'in_progress' }),
+      );
+    });
+
     it('allows starting when the technician\'s other in_progress log is on the same vehicle', async () => {
       const log = makeLog({ status: 'pending', processType: 'PARALLEL' });
       const sameVehicleLog = makeLog({
