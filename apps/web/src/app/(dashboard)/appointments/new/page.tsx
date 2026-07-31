@@ -1056,6 +1056,25 @@ function BodyshopNewForm() {
     setLinkedBudgetId(null);
   }
 
+  // Si había un presupuesto vinculado y el usuario vuelve al Paso 1 y cambia
+  // la chapa, las horas/piezas precargadas por selectLinkedBudget() quedaban
+  // "pegadas" del vehículo anterior — un cambio de chapa invalida cualquier
+  // dato derivado de un presupuesto que podría ser de otro vehículo. No toca
+  // nada si el usuario cargó horas a mano sin vincular ningún presupuesto.
+  const linkedBudgetPlateRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (linkedBudgetId && linkedBudgetPlateRef.current && linkedBudgetPlateRef.current !== plate) {
+      setLinkedBudgetId(null);
+      setDirectBodyworkHours('');
+      setDirectPrepHours('');
+      setDirectPaintHours('');
+      setPieceCount('');
+      setBudgetNumber('');
+      setSimulation(null);
+    }
+    if (linkedBudgetId) linkedBudgetPlateRef.current = plate;
+  }, [plate, linkedBudgetId]);
+
   // Auto-dismiss DMS toast
   useEffect(() => {
     if (!dmsToast) return;
