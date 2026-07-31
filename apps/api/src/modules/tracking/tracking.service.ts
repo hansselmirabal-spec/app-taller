@@ -346,7 +346,20 @@ export class TrackingService {
     }
 
     if (log.processType === 'PARALLEL') {
-      // Paralelos corren simultáneamente: no resetear otros procesos
+      // Un paralelo (ej. Mecánica) se hace afuera de Chapería: no consume
+      // técnicos del taller, pero mientras está en curso el vehículo no se
+      // puede seguir trabajando adentro. Al arrancarlo, pausamos el proceso
+      // madre activo (mismo mecanismo que blockProcess) con motivo = el
+      // nombre del paralelo, para que quede contado en el reloj de pausas y
+      // el operario deba reanudar explícitamente (con confirmación de
+      // técnico) cuando el paralelo termine. Confirmado con negocio 2026-07-31.
+      const activeMother = await this.logRepo.findOne({
+        where: { sourceType: log.sourceType, sourceId: log.sourceId, status: 'in_progress', processType: 'MOTHER' } as any,
+      });
+      if (activeMother) {
+        await this.pauseLog(activeMother, log.processName);
+        await this.setPauseStatus(log.sourceType, log.sourceId, true);
+      }
     } else {
       // MOTHER: solo un proceso madre in_progress por source a la vez.
       // Se cambia a 'pending' pero se preserva startedAt para no corromper
@@ -372,11 +385,10 @@ export class TrackingService {
     return this.logRepo.save(log);
   }
 
-  async blockProcess(logId: string, reason: string): Promise<TrackingLog> {
-    const log = await this.logRepo.findOne({ where: { id: logId } });
-    if (!log) throw new NotFoundException('Proceso no encontrado');
-    if (log.status === 'completed') throw new BadRequestException('No se puede pausar un proceso completado');
-
+  // Snapshotea técnico + marca 'blocked' + libera bodyshop_process_techs.
+  // Compartido por blockProcess (pausa manual) y por startProcess cuando un
+  // paralelo (ej. Mecánica) pausa automáticamente el proceso madre activo.
+  private async pauseLog(log: TrackingLog, reason: string): Promise<TrackingLog> {
     // Snapshot del técnico asignado ANTES de borrar bodyshop_process_techs — así
     // getResumeOptions puede sugerir "el mismo técnico de antes" incluso después
     // de liberar su capacidad (spec: "suggest same technician if still free").
@@ -404,6 +416,16 @@ export class TrackingService {
     if (log.sourceType === 'bodyshop') {
       await this.processTechRepo.delete({ entryId: log.sourceId, process: log.processCode });
     }
+
+    return saved;
+  }
+
+  async blockProcess(logId: string, reason: string): Promise<TrackingLog> {
+    const log = await this.logRepo.findOne({ where: { id: logId } });
+    if (!log) throw new NotFoundException('Proceso no encontrado');
+    if (log.status === 'completed') throw new BadRequestException('No se puede pausar un proceso completado');
+
+    const saved = await this.pauseLog(log, reason);
 
     // Liberar capacidad del técnico marcando el appointment/entry como 'paused'
     await this.setPauseStatus(log.sourceType, log.sourceId, true);
