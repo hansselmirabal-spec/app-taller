@@ -771,9 +771,11 @@ export function getBodyshopCapacity(date: string, workshopId: string): BodyshopD
   const totalOcc = occBW + occPrep + occPaint;
 
   const byProcess = {
-    BODYWORK: buildProcessCapacity('BODYWORK', 'Chapería',    commBW,    occBW),
-    PREP:     buildProcessCapacity('PREP',     'Preparación', commPrep,  occPrep),
-    PAINT:    buildProcessCapacity('PAINT',    'Pintura',     commPaint, occPaint),
+    BODYWORK:      buildProcessCapacity('BODYWORK',      'Chapería',      commBW,    occBW),
+    PREP:          buildProcessCapacity('PREP',          'Preparación',   commPrep,  occPrep),
+    PAINT:         buildProcessCapacity('PAINT',          'Pintura',      commPaint, occPaint),
+    POLISH:        buildProcessCapacity('POLISH',         'Pulida',       0, 0),
+    FINAL_CONTROL: buildProcessCapacity('FINAL_CONTROL',  'Control Final', 0, 0),
   };
 
   const globalRate   = commercial > 0 ? totalOcc / commercial : 0;
