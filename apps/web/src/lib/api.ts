@@ -10,6 +10,7 @@ import type {
   Technician, ServiceType, Appointment, TechnicianCapacity, Absence, Specialty, Workshop,
   WorkType, BodyshopEntry, BodyshopDayCapacity, BodyshopWeekCapacity, User, Role, Permissions,
   BodyshopCatalogGroup, BodyshopCatalogProcess, BodyshopCatalogGrade, BodyshopCatalogPiece,
+  BodyshopBalanceProcess,
 } from '@/types';
 import { calcMonthlyLoadReport, type TechMonthlyRow } from './bodyshop-analytics';
 import { randomId } from './utils';
@@ -835,7 +836,7 @@ export type { TechMonthlyRow };
 // ─── Bodyshop Schedule (Gantt por proceso) ────────────────────────────────────
 
 export interface BodyshopProcessWindow {
-  process: 'BODYWORK' | 'PREP' | 'PAINT';
+  process: BodyshopBalanceProcess;
   startDay: number;
   endDay: number;
   hours: number;
@@ -873,14 +874,14 @@ export interface BodyshopScheduleKpis {
 }
 
 export interface BodyshopSchedule {
-  baseDailyCap: { BODYWORK: number; PREP: number; PAINT: number };
+  baseDailyCap: Record<BodyshopBalanceProcess, number>;
   entries: BodyshopScheduleEntry[];
   kpis: BodyshopScheduleKpis;
 }
 
 export async function getBodyshopSchedule(workshopId: string, from: string, to: string): Promise<BodyshopSchedule> {
   if (MOCK) return delay({
-    baseDailyCap: { BODYWORK: 0, PREP: 0, PAINT: 0 },
+    baseDailyCap: { BODYWORK: 0, PREP: 0, PAINT: 0, POLISH: 0, FINAL_CONTROL: 0 },
     entries: [],
     kpis: { totalInShop: 0, onSchedule: 0, delayed: 0, done: 0, exitToday: 0, totalHoursWeek: 0 },
   });

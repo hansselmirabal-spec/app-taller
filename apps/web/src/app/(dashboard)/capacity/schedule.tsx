@@ -8,12 +8,17 @@ import { useWorkshopId } from '@/context/workshop-context';
 import { formatDate, sumBodyshopHours } from '@/lib/utils';
 import { AlertTriangle, CheckCircle2, Clock, LayoutList, Users, X } from 'lucide-react';
 import type { BodyshopScheduleEntry, BodyshopProcessWindow, BodyshopScheduleKpis } from '@/hooks/use-bodyshop';
-import type { Technician } from '@/types';
+import type { Technician, BodyshopBalanceProcess } from '@/types';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
+// Debe reflejar BALANCE_PROCESSES / SPECIALTY_TO_PROCESS del backend
+// (apps/api/src/modules/bodyshop/bodyshop.service.ts) — 5 procesos reales.
+// Antes solo tenía 3: un vehículo en etapa Pulida/Control Final durante la
+// semana mostrada hacía que PROC_MAP[win.process] fuera undefined y rompía
+// la pantalla (proc.cellBg de undefined).
 const PROCESSES: {
-  key: 'BODYWORK' | 'PREP' | 'PAINT';
+  key: BodyshopBalanceProcess;
   label: string;
   abbrev: string;
   specialty: string[];           // especialidades que mapean a este proceso
@@ -44,9 +49,23 @@ const PROCESSES: {
     headerBg: 'bg-orange-50 border-orange-200',
     badgeBg: 'bg-orange-100 text-orange-700', barColor: 'bg-orange-500',
   },
+  {
+    key: 'POLISH', label: 'Pulida', abbrev: 'Pul.',
+    specialty: ['PULIDO', 'PULIDOR', 'POLISH'],
+    cellBg: 'bg-teal-100', cellText: 'text-teal-800',
+    headerBg: 'bg-teal-50 border-teal-200',
+    badgeBg: 'bg-teal-100 text-teal-700', barColor: 'bg-teal-500',
+  },
+  {
+    key: 'FINAL_CONTROL', label: 'Control Final', abbrev: 'Ctrl.',
+    specialty: ['CONTROL_FINAL', 'FINAL_CONTROL'],
+    cellBg: 'bg-pink-100', cellText: 'text-pink-800',
+    headerBg: 'bg-pink-50 border-pink-200',
+    badgeBg: 'bg-pink-100 text-pink-700', barColor: 'bg-pink-500',
+  },
 ];
 
-const PROC_MAP = Object.fromEntries(PROCESSES.map(p => [p.key, p])) as Record<'BODYWORK' | 'PREP' | 'PAINT', typeof PROCESSES[0]>;
+const PROC_MAP = Object.fromEntries(PROCESSES.map(p => [p.key, p])) as Record<BodyshopBalanceProcess, typeof PROCESSES[0]>;
 
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
   scheduled:   { label: 'Agendado',   cls: 'bg-blue-50 text-blue-700 border border-blue-200' },
@@ -266,7 +285,7 @@ function getWindowForDay(entry: BodyshopScheduleEntry, dayIndex: number): Bodysh
   return null;
 }
 
-function techProcessKey(specialty: string | null | undefined): 'BODYWORK' | 'PREP' | 'PAINT' | null {
+function techProcessKey(specialty: string | null | undefined): BodyshopBalanceProcess | null {
   const s = (specialty ?? '').toUpperCase();
   for (const p of PROCESSES) {
     if (p.specialty.includes(s)) return p.key;
