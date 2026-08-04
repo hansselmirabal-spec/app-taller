@@ -108,6 +108,7 @@ export interface BudgetAppointment {
   pieces: BudgetPiece[] | null;
   notes: string | null;
   budgetNumber: string | null;
+  insuranceCompany: string | null;
   linkedEntryId: string | null;
   rejectionReason: string | null;
   createdBy: string;

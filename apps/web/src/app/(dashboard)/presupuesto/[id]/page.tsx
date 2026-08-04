@@ -215,6 +215,12 @@ export default function PresupuestoDetailPage() {
                   <p className="font-medium text-slate-800">{appt.phone}</p>
                 </div>
               )}
+              {appt.insuranceCompany && (
+                <div>
+                  <span className="text-slate-400 text-xs">Aseguradora</span>
+                  <p className="font-medium text-slate-800">{appt.insuranceCompany}</p>
+                </div>
+              )}
               {appt.budgetNumber && (
                 <div>
                   <span className="text-slate-400 text-xs">N° Presupuesto</span>

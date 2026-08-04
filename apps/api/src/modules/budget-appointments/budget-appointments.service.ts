@@ -50,6 +50,7 @@ export class CreateBudgetAppointmentDto {
   @IsOptional() @IsString() phone?: string | null;
   @IsOptional() @IsString() notes?: string | null;
   @IsOptional() @IsString() budgetNumber?: string | null;
+  @IsOptional() @IsString() insuranceCompany?: string | null;
 }
 
 export class RejectBudgetAppointmentDto {
@@ -114,6 +115,7 @@ export class BudgetAppointmentsService {
       phone:        dto.phone ?? null,
       notes:        dto.notes ?? null,
       budgetNumber: dto.budgetNumber ?? null,
+      insuranceCompany: dto.insuranceCompany ?? null,
       status:       'pending',
       createdBy:    userId,
     });

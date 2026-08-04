@@ -8,6 +8,14 @@ import { useCreateBudgetAppointment } from '@/hooks/use-budget-appointments';
 import { useWorkshopId } from '@/context/workshop-context';
 import { getStoredUser } from '@/lib/auth';
 import { useUsers } from '@/hooks/use-users';
+import { useVehicleLookup } from '@/hooks/use-vehicle-lookup';
+
+// Chapas y chasis siempre incluyen letras. Un valor solo numérico suele ser
+// un número de OT o de cliente ingresado por error en este campo (mismo
+// criterio que en Agenda → Nuevo Ingreso y en el Simulador de presupuesto).
+function looksLikePlateOrChassis(value: string): boolean {
+  return /[A-Z]/i.test(value);
+}
 
 export default function NuevaCitaPresupuestoPage() {
   const router     = useRouter();
@@ -26,14 +34,32 @@ export default function NuevaCitaPresupuestoPage() {
   const [timeStart, setTimeStart]   = useState('09:00');
   const [timeEnd, setTimeEnd]       = useState('09:30');
   const [plate, setPlate]           = useState('');
+  const [plateSearchError, setPlateSearchError] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [phone, setPhone]           = useState('');
-  const [budgetNumber, setBudgetNumber] = useState('');
+  const [insuranceCompany, setInsuranceCompany] = useState('');
   const [notes, setNotes]           = useState('');
   const [selectedPeritoId, setSelectedPeritoId] = useState('');
   const [error, setError]           = useState('');
 
+  const { lookup, isLooking, vehicleData } = useVehicleLookup();
   const createMutation = useCreateBudgetAppointment();
+
+  async function handlePlateLookup() {
+    const value = plate.trim().toUpperCase();
+    if (!value) return;
+    if (!looksLikePlateOrChassis(value)) {
+      setPlateSearchError('Eso no parece una chapa ni un chasis (¿será un número de OT o de cliente?). La chapa lleva letras, ej: AACA898.');
+      return;
+    }
+    setPlateSearchError('');
+    const data = await lookup(value);
+    if (data) {
+      if (!customerName.trim()) setCustomerName(data.customerName);
+    } else {
+      setPlateSearchError('Vehículo no encontrado en DMS');
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -53,7 +79,7 @@ export default function NuevaCitaPresupuestoPage() {
         customerName: customerName.trim(),
         phone: phone.trim() || null,
         notes: notes.trim() || null,
-        budgetNumber: budgetNumber.trim() || null,
+        insuranceCompany: insuranceCompany.trim() || null,
         peritoId: isAdmin && selectedPeritoId ? selectedPeritoId : null,
       });
       router.push(`/presupuesto/${result.id}`);
@@ -119,29 +145,46 @@ export default function NuevaCitaPresupuestoPage() {
             </div>
           </div>
 
-          {/* Vehículo */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Chapa / Patente *</label>
-              <input
-                type="text"
-                value={plate}
-                onChange={e => setPlate(e.target.value.toUpperCase())}
-                placeholder="ABC 123"
-                required
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium uppercase outline-none focus:ring-2 focus:ring-blue-400"
-              />
+          {/* Vehículo — misma búsqueda por chapa o chasis que el Simulador / Nuevo Ingreso.
+              Sin N° Presupuesto: a esta altura (agendando) todavía no existe un
+              presupuesto — ese número se carga más adelante, al aprobarlo. */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+              Chapa o Chasis *
+              {vehicleData && (
+                <span className="ml-2 text-emerald-500 font-normal normal-case">{vehicleData.model}</span>
+              )}
+            </label>
+            <p className="text-[11px] text-slate-400 mb-1.5">
+              Ingresá la chapa (ej: AACA898) o el número de chasis (ej: 9BD186DZ0LB035786)
+            </p>
+            <div className="flex gap-1.5">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={plate}
+                  onChange={e => { setPlate(e.target.value.toUpperCase()); setPlateSearchError(''); }}
+                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handlePlateLookup())}
+                  placeholder="AACA898 · 9BD186DZ0LB035786"
+                  required
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium uppercase outline-none focus:ring-2 focus:ring-blue-400 pr-8"
+                />
+                {isLooking && (
+                  <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-slate-400" />
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => handlePlateLookup()}
+                disabled={isLooking || !plate.trim()}
+                className="px-3 py-2 text-xs font-semibold bg-blue-600 text-white rounded-lg disabled:opacity-60 flex-shrink-0 hover:bg-blue-700 transition-colors"
+              >
+                {isLooking ? '...' : 'Buscar'}
+              </button>
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1.5">N° Presupuesto</label>
-              <input
-                type="text"
-                value={budgetNumber}
-                onChange={e => setBudgetNumber(e.target.value)}
-                placeholder="Opcional"
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400"
-              />
-            </div>
+            {plateSearchError && (
+              <p className="text-[11px] text-red-600 mt-1">{plateSearchError}</p>
+            )}
           </div>
 
           {/* Cliente */}
@@ -157,16 +200,28 @@ export default function NuevaCitaPresupuestoPage() {
             />
           </div>
 
-          {/* Teléfono */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1.5">Teléfono</label>
-            <input
-              type="tel"
-              value={phone}
-              onChange={e => setPhone(e.target.value)}
-              placeholder="0981 000 000"
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400"
-            />
+          {/* Teléfono / Aseguradora */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Teléfono</label>
+              <input
+                type="tel"
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+                placeholder="0981 000 000"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Aseguradora</label>
+              <input
+                type="text"
+                value={insuranceCompany}
+                onChange={e => setInsuranceCompany(e.target.value)}
+                placeholder="Opcional"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </div>
           </div>
 
           {/* Perito (solo admin) */}
