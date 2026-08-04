@@ -813,6 +813,16 @@ export class BodyshopService {
     }
 
     const techHoursMap = new Map<string, number>();
+    // Detalle de a qué ingresos corresponden esas horas — para el popup de
+    // "trabajos del técnico" en el frontend (Calendario de Capacidad → click
+    // en celda de operario). No confundir con dayCap.entries (todos los
+    // ingresos del día): acá es por técnico, con la porción de horas de ESE
+    // técnico en ESE proceso ese día puntual.
+    const techJobsMap = new Map<string, { entryId: string; plate: string; processCode: BalanceProcess; processLabel: string; hours: number }[]>();
+    const addTechJob = (technicianId: string, entryId: string, plate: string, code: BalanceProcess, hours: number) => {
+      if (!techJobsMap.has(technicianId)) techJobsMap.set(technicianId, []);
+      techJobsMap.get(technicianId)!.push({ entryId, plate, processCode: code, processLabel: PROCESS_LABEL[code], hours: round2(hours) });
+    };
     for (const e of entriesInShop) {
       const stayDays = Math.max(Number((e as any).stayDays) || 1, 1);
 
@@ -831,12 +841,14 @@ export class BodyshopService {
 
         if (assigned) {
           techHoursMap.set(assigned.technicianId, (techHoursMap.get(assigned.technicianId) ?? 0) + dailyShare);
+          addTechJob(assigned.technicianId, e.id, e.plate, code, dailyShare);
         } else {
           const procTechs = activeTechs.filter(t => techProcess(t.specialty) === code);
           if (procTechs.length > 0) {
             const share = dailyShare / procTechs.length;
             for (const tech of procTechs) {
               techHoursMap.set(tech.id, (techHoursMap.get(tech.id) ?? 0) + share);
+              addTechJob(tech.id, e.id, e.plate, code, share);
             }
           }
         }
@@ -858,6 +870,7 @@ export class BodyshopService {
         usedHours:      round2(techHoursMap.get(tech.id) ?? 0),
         absenceType:    absType,
         isWorkingDay:   !isSunday && !isGlobalHoliday,
+        jobs:           techJobsMap.get(tech.id) ?? [],
       };
     });
 

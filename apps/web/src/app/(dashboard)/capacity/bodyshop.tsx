@@ -296,6 +296,105 @@ function CapacityDetailPopup({
   );
 }
 
+// ─── Popup de trabajos de un técnico (mismo look que CapacityDetailPopup) ────
+
+type TechPopupTarget = {
+  dateStr: string;
+  technicianId: string;
+  x: number;
+  y: number;
+  fromBottom: boolean;
+};
+
+function TechnicianJobsPopup({
+  target,
+  techCap,
+  onClose,
+}: {
+  target: TechPopupTarget;
+  techCap: BodyshopTechDayCapacity;
+  onClose: () => void;
+}) {
+  const popupRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [onClose]);
+
+  const usedRate = techCap.availableHours > 0 ? techCap.usedHours / techCap.availableHours : 0;
+  const pct = Math.round(usedRate * 100);
+  const dateLabel = format(new Date(target.dateStr + 'T12:00:00'), "EEEE d MMM", { locale: es });
+  const jobs = [...techCap.jobs].sort((a, b) => b.hours - a.hours);
+
+  return (
+    <div
+      ref={popupRef}
+      className="fixed z-50 w-72 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+      style={
+        target.fromBottom
+          ? { bottom: window.innerHeight - target.y + 6, left: Math.min(target.x, window.innerWidth - 296) }
+          : { top: target.y + 6, left: Math.min(target.x, window.innerWidth - 296) }
+      }
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 capitalize">{dateLabel}</p>
+          <p className="text-xs font-bold text-slate-700">{techCap.technicianName}</p>
+        </div>
+        <button onClick={onClose} className="p-1 rounded hover:bg-slate-200 transition-colors">
+          <X className="h-3.5 w-3.5 text-slate-400" />
+        </button>
+      </div>
+
+      {/* Ocupación del técnico */}
+      <div className="px-4 pt-3 pb-2 border-b border-slate-100">
+        <div className="flex items-end justify-between mb-1.5">
+          <span className="text-2xl font-black text-slate-900">{pct}%</span>
+          <span className="text-xs text-slate-400 tabular-nums">{techCap.usedHours}h de {techCap.availableHours}h</span>
+        </div>
+        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${occupancyBarColor(usedRate)}`}
+            style={{ width: `${Math.min(pct, 100)}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Trabajos que componen esas horas */}
+      <div className="px-4 py-2.5 space-y-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Trabajos</p>
+        {jobs.length > 0 ? (
+          jobs.map(job => (
+            <div key={`${job.entryId}-${job.processCode}`} className="flex items-center justify-between gap-2">
+              <div className="flex items-baseline gap-1.5 min-w-0">
+                <span className="text-xs font-semibold text-slate-700 truncate">{job.plate}</span>
+                <span className="text-[9px] text-slate-400 truncate">{job.processLabel}</span>
+              </div>
+              <span className="text-[10px] font-semibold text-slate-600 tabular-nums flex-shrink-0">{job.hours}h</span>
+            </div>
+          ))
+        ) : (
+          <p className="text-[10px] text-slate-400 italic">Sin trabajos asignados este día</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Cell: proceso agregado ───────────────────────────────────────────────────
 
 function ProcessCell({
@@ -363,11 +462,13 @@ function TechnicianCell({
   isToday,
   isSunday,
   processColor,
+  onClick,
 }: {
   techCap: BodyshopTechDayCapacity | null;
   isToday: boolean;
   isSunday: boolean;
   processColor: string;
+  onClick?: (e: React.MouseEvent) => void;
 }) {
   if (isSunday) {
     return <div className="h-[52px] rounded-lg border border-slate-100 bg-slate-50/50" />;
@@ -384,12 +485,13 @@ function TechnicianCell({
 
   return (
     <div
-      className={`h-[52px] rounded-lg border px-2 py-1.5 flex flex-col justify-between ${
+      onClick={!isAbsent ? onClick : undefined}
+      className={`h-[52px] rounded-lg border px-2 py-1.5 flex flex-col justify-between transition-all ${
         isAbsent
           ? 'bg-slate-100 border-slate-200'
           : isHalfDay
-          ? 'bg-amber-50/60 border-amber-200'
-          : `border-slate-200 ${isToday ? 'ring-1 ring-blue-200' : ''} bg-white`
+          ? `bg-amber-50/60 border-amber-200 ${onClick ? 'cursor-pointer hover:brightness-95 hover:shadow-sm' : ''}`
+          : `border-slate-200 ${isToday ? 'ring-1 ring-blue-200' : ''} bg-white ${onClick ? 'cursor-pointer hover:brightness-95 hover:shadow-sm' : ''}`
       }`}
     >
       {isAbsent ? (
@@ -434,6 +536,7 @@ export default function BodyshopCapacityPage() {
     BODYWORK: true, PREP: true, PAINT: true, POLISH: true, FINAL_CONTROL: true,
   });
   const [popup, setPopup] = useState<PopupTarget | null>(null);
+  const [techPopup, setTechPopup] = useState<TechPopupTarget | null>(null);
 
   const weekDates = Array.from({ length: 6 }, (_, i) => addDays(weekStart, i));
   const from = formatDate(weekDates[0]);
@@ -476,13 +579,27 @@ export default function BodyshopCapacityPage() {
 
   const closePopup = useCallback(() => setPopup(null), []);
 
-  // Cerrar popup al cambiar semana
-  useEffect(() => { setPopup(null); }, [weekStart]);
+  const openTechPopup = useCallback((
+    e: React.MouseEvent,
+    dateStr: string,
+    technicianId: string,
+  ) => {
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const fromBottom = rect.bottom + 320 > window.innerHeight;
+    setTechPopup({ dateStr, technicianId, x: rect.left, y: fromBottom ? rect.top : rect.bottom, fromBottom });
+  }, []);
+
+  const closeTechPopup = useCallback(() => setTechPopup(null), []);
+  const closeAllPopups = useCallback(() => { setPopup(null); setTechPopup(null); }, []);
+
+  // Cerrar popups al cambiar semana
+  useEffect(() => { setPopup(null); setTechPopup(null); }, [weekStart]);
 
   const COLS = `140px repeat(6, 1fr)`;
 
   return (
-    <div className="flex flex-col h-full bg-slate-50" onClick={closePopup}>
+    <div className="flex flex-col h-full bg-slate-50" onClick={closeAllPopups}>
 
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <div className="bg-white border-b border-slate-200 px-6 py-4 flex-shrink-0">
@@ -537,7 +654,7 @@ export default function BodyshopCapacityPage() {
       </div>
 
       {/* ── Grid ──────────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto p-6" onClick={closePopup}>
+      <div className="flex-1 overflow-auto p-6" onClick={closeAllPopups}>
         {isLoading ? (
           <MotivationalLoader className="h-64" />
         ) : (
@@ -662,6 +779,7 @@ export default function BodyshopCapacityPage() {
                                 isToday={isToday}
                                 isSunday={isSunday}
                                 processColor={proc.color}
+                                onClick={techCap && !isSunday ? e => openTechPopup(e, dateStr, tech.id) : undefined}
                               />
                             </div>
                           );
@@ -743,6 +861,16 @@ export default function BodyshopCapacityPage() {
           onClose={closePopup}
         />
       )}
+      {techPopup && (() => {
+        const techCap = weekCap[techPopup.dateStr]?.byTechnician.find(t => t.technicianId === techPopup.technicianId);
+        return techCap ? (
+          <TechnicianJobsPopup
+            target={techPopup}
+            techCap={techCap}
+            onClose={closeTechPopup}
+          />
+        ) : null;
+      })()}
     </div>
   );
 }

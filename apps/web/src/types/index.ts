@@ -277,6 +277,14 @@ export interface ProcessCapacity {
   status: CapacityStatus;
 }
 
+export interface BodyshopTechJob {
+  entryId: string;
+  plate: string;
+  processCode: BodyshopBalanceProcess;
+  processLabel: string;
+  hours: number;
+}
+
 export interface BodyshopTechDayCapacity {
   technicianId: string;
   technicianName: string;
@@ -287,6 +295,7 @@ export interface BodyshopTechDayCapacity {
   usedHours: number;
   absenceType: string | null;
   isWorkingDay: boolean;
+  jobs: BodyshopTechJob[];
 }
 
 export interface BodyshopDayCapacity {
