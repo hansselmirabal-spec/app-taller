@@ -72,6 +72,9 @@ export class BudgetAppointment {
   @Column({ name: 'budget_number', type: 'varchar', length: 50, nullable: true })
   budgetNumber: string | null;
 
+  @Column({ name: 'insurance_company', type: 'varchar', length: 100, nullable: true })
+  insuranceCompany: string | null;
+
   @Column({ name: 'linked_entry_id', type: 'uuid', nullable: true })
   linkedEntryId: string | null;
 

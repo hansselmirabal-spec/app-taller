@@ -1620,6 +1620,7 @@ export async function createBudgetAppointment(dto: {
   phone?: string | null;
   notes?: string | null;
   budgetNumber?: string | null;
+  insuranceCompany?: string | null;
   peritoId?: string | null;
 }): Promise<BudgetAppointment> {
   if (MOCK) return delay({ id: `mock-ba-${Date.now()}`, status: 'pending', processes: [], ...dto } as unknown as BudgetAppointment);
