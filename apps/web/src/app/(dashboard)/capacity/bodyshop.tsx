@@ -302,11 +302,13 @@ function ProcessCell({
   proc,
   isToday,
   isSunday,
+  processColor,
   onClick,
 }: {
   proc: ProcessCapacity | null;
   isToday: boolean;
   isSunday: boolean;
+  processColor: string;
   onClick?: (e: React.MouseEvent) => void;
 }) {
   if (isSunday) {
@@ -335,10 +337,10 @@ function ProcessCell({
         <span className="text-xs font-bold tabular-nums">{pct}%</span>
       </div>
       <div>
-        <div className="h-1.5 rounded-full bg-current opacity-15 overflow-hidden">
+        <div className="h-1.5 rounded-full bg-white/60 overflow-hidden">
           <div
-            className="h-full rounded-full bg-current opacity-70"
-            style={{ width: `${Math.min(pct, 100)}%` }}
+            className="h-full rounded-full transition-all"
+            style={{ width: `${Math.min(pct, 100)}%`, background: processColor, opacity: pct > 0 ? 0.85 : 0 }}
           />
         </div>
         {overflowPct > 0 ? (
@@ -616,6 +618,7 @@ export default function BodyshopCapacityPage() {
                             proc={procCap}
                             isToday={isToday}
                             isSunday={isSunday}
+                            processColor={proc.color}
                             onClick={dayCap && !isSunday ? e => openPopup(e, dateStr, proc.key) : undefined}
                           />
                         </div>
