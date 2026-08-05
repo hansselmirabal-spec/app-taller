@@ -66,6 +66,8 @@ export default function TechniciansSettingsPage() {
   const [search, setSearch] = useState('');
   const [filterSpecialty, setFilterSpecialty] = useState('');
   const [filterBox, setFilterBox] = useState('');
+  const [formError, setFormError] = useState('');
+  const [editError, setEditError] = useState('');
 
   // Derived box list from technicians data
   const allBoxes = useMemo(() => {
@@ -122,47 +124,57 @@ export default function TechniciansSettingsPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    setFormError('');
     if (!newName.trim()) return;
     if (newIsPerito && !newEmail.trim()) {
-      alert('El email es obligatorio para marcar un técnico como perito.');
+      setFormError('El email es obligatorio para marcar un técnico como perito.');
       return;
     }
-    await create.mutateAsync({
-      name: newName.trim(),
-      dailyHours: parseFloat(newHours) || 8,
-      specialty: newEffectiveSpecialty || null,
-      box: newBox || null,
-      dmsAdvisorCode: newEffectiveSpecialty === 'ASESOR' ? (newDmsAdvisorCode || null) : null,
-      email: newEmail.trim() || null,
-      isPerito: newIsPerito,
-    });
-    setNewName(''); setNewHours('8'); setNewSpecialty(''); setNewRoleSelect(''); setNewBox(''); setNewDmsAdvisorCode('');
-    setNewEmail('');
-    setShowForm(false);
+    try {
+      await create.mutateAsync({
+        name: newName.trim(),
+        dailyHours: parseFloat(newHours) || 8,
+        specialty: newEffectiveSpecialty || null,
+        box: newBox || null,
+        dmsAdvisorCode: newEffectiveSpecialty === 'ASESOR' ? (newDmsAdvisorCode || null) : null,
+        email: newEmail.trim() || null,
+        isPerito: newIsPerito,
+      });
+      setNewName(''); setNewHours('8'); setNewSpecialty(''); setNewRoleSelect(''); setNewBox(''); setNewDmsAdvisorCode('');
+      setNewEmail('');
+      setShowForm(false);
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : 'Error al crear el técnico');
+    }
   }
 
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
     if (!editing) return;
+    setEditError('');
     const editingIsPerito = editing.specialty?.trim().toUpperCase() === PERITO_ROLE_VALUE;
     if (editingIsPerito && !editing.email?.trim()) {
-      alert('El email es obligatorio para el rol de perito.');
+      setEditError('El email es obligatorio para el rol de perito.');
       return;
     }
-    await update.mutateAsync({
-      id: editing.id,
-      data: {
-        name: editing.name,
-        dailyHours: editing.dailyHours,
-        specialty: editing.specialty || null,
-        box: editing.box || null,
-        active: editing.active,
-        dmsAdvisorCode: editing.dmsAdvisorCode || null,
-        email: editing.email || null,
-        isPerito: editingIsPerito,
-      },
-    });
-    setEditing(null);
+    try {
+      await update.mutateAsync({
+        id: editing.id,
+        data: {
+          name: editing.name,
+          dailyHours: editing.dailyHours,
+          specialty: editing.specialty || null,
+          box: editing.box || null,
+          active: editing.active,
+          dmsAdvisorCode: editing.dmsAdvisorCode || null,
+          email: editing.email || null,
+          isPerito: editingIsPerito,
+        },
+      });
+      setEditing(null);
+    } catch (err: unknown) {
+      setEditError(err instanceof Error ? err.message : 'Error al guardar');
+    }
   }
 
   const specialtyLabel = isBodyshop ? 'Proceso' : 'Especialidad';
@@ -283,9 +295,13 @@ export default function TechniciansSettingsPage() {
             </div>
           )}
 
+          {formError && (
+            <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{formError}</p>
+          )}
+
           <div className="flex gap-2 justify-end">
             <Button type="submit" size="sm" disabled={create.isPending}>Guardar</Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => { setShowForm(false); setNewRoleSelect(''); setNewDmsAdvisorCode(''); setNewEmail(''); }}>Cancelar</Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => { setShowForm(false); setNewRoleSelect(''); setNewDmsAdvisorCode(''); setNewEmail(''); setFormError(''); }}>Cancelar</Button>
           </div>
         </form>
       )}
@@ -417,7 +433,7 @@ export default function TechniciansSettingsPage() {
                             <Button size="sm" type="submit" disabled={update.isPending}>
                               <Check className="h-3.5 w-3.5" />
                             </Button>
-                            <Button size="sm" variant="outline" type="button" onClick={() => setEditing(null)}>
+                            <Button size="sm" variant="outline" type="button" onClick={() => { setEditing(null); setEditError(''); }}>
                               <X className="h-3.5 w-3.5" />
                             </Button>
                           </div>
@@ -466,6 +482,9 @@ export default function TechniciansSettingsPage() {
                               />
                             </div>
                           )}
+                          {editError && (
+                            <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{editError}</p>
+                          )}
                         </form>
                       </td>
                     ) : (
@@ -509,7 +528,7 @@ export default function TechniciansSettingsPage() {
                         {canEdit && (
                           <td className="px-4 py-3 text-right">
                             <button
-                              onClick={() => setEditing(tech)}
+                              onClick={() => { setEditing(tech); setEditError(''); }}
                               className="p-1.5 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-900"
                             >
                               <Pencil className="h-3.5 w-3.5" />
