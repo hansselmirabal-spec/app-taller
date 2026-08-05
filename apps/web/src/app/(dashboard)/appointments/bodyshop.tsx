@@ -8,7 +8,9 @@ import {
 import BodyshopReport from './bodyshop-report';
 import { format, addDays, subDays, parseISO, startOfWeek, differenceInDays } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { useQueryClient } from '@tanstack/react-query';
 import { useBodyshopDayCapacity, useCancelBodyshopEntry, useBodyshopEntriesKanban, useAssignBodyshopTechnician, useAssignBodyshopProcessTechnician, usePatchBodyshopEntryHours, useBodyshopWeekCapacity } from '@/hooks/use-bodyshop';
+import { useSetExitDate } from '@/hooks/use-tracking';
 import { useModulePermission } from '@/hooks/use-module-permission';
 import { useTechnicians } from '@/hooks/use-technicians';
 import { useDailyCapacity } from '@/hooks/use-capacity';
@@ -63,6 +65,47 @@ const processConfig = {
   PREP:     { label: 'Preparación', badge: 'bg-violet-100 text-violet-700', pill: 'bg-violet-50 text-violet-700' },
   PAINT:    { label: 'Pintura',     badge: 'bg-orange-100 text-orange-700', pill: 'bg-orange-50 text-orange-700' },
 } as const;
+
+// ─── Fecha de entrega — mismos cálculos que ExitDateSection en Kanban/Seguimiento ──
+
+const DAYS_SHORT_ES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+function fmtExitDateLabel(dateStr: string): string {
+  if (!dateStr) return '—';
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  return `${DAYS_SHORT_ES[date.getDay()]} ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}`;
+}
+
+// Días hábiles (excluye domingos) entre dos fechas — negativo si toStr ya pasó.
+function diffBusinessDays(fromStr: string, toStr: string): number {
+  const [fy, fm, fd] = fromStr.split('-').map(Number);
+  const [ty, tm, td] = toStr.split('-').map(Number);
+  const from = new Date(fy, fm - 1, fd);
+  const to   = new Date(ty, tm - 1, td);
+  let count = 0;
+  const dir = to >= from ? 1 : -1;
+  const cur = new Date(from);
+  while (cur.toDateString() !== to.toDateString()) {
+    cur.setDate(cur.getDate() + dir);
+    if (cur.getDay() !== 0) count += dir;
+  }
+  return count;
+}
+
+// entryDate + max(1, ceil(horas/8)) días hábiles — mismo cálculo que
+// suggestExitDate() en tracking.service.ts (colchón: no se trabaja el día de entrada).
+function suggestExitDateLocal(entryDateStr: string, plannedHours: number): string {
+  const days = Math.max(1, Math.ceil(plannedHours / 8));
+  const [y, m, d] = entryDateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  let added = 0;
+  while (added < days) {
+    date.setDate(date.getDate() + 1);
+    if (date.getDay() !== 0) added++;
+  }
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
 
 type MainTab = 'agenda' | 'report';
 
@@ -955,7 +998,37 @@ function EntryPopup({
 }) {
   const { data: technicians = [] } = useTechnicians();
   const patchHours = usePatchBodyshopEntryHours();
+  const setExitDate = useSetExitDate();
+  const qc = useQueryClient();
   const totalHours = sumBodyshopHoursWithExtras(entry);
+
+  // Fecha de entrega — mismos dos valores que la tarjeta de Kanban Operativo:
+  // Sugerida (colchón + horas, calculada) y Prometida al cliente (manual,
+  // entry.estimatedFinishDate). daysLeft < 0 = atrasado.
+  const [editingExit, setEditingExit] = useState(false);
+  const [exitValue, setExitValue]     = useState(entry.estimatedFinishDate ?? '');
+  const todayStr    = formatDate(new Date());
+  const suggested   = suggestExitDateLocal(entry.date, totalHours);
+  const promised    = entry.estimatedFinishDate ?? null;
+  const targetDate  = promised ?? suggested;
+  const daysLeft    = diffBusinessDays(todayStr, targetDate);
+  const daysColor   = daysLeft < 0 ? 'text-red-600' : daysLeft === 0 ? 'text-orange-600' : 'text-emerald-600';
+
+  function handleSaveExit() {
+    setExitDate.mutate(
+      { sourceType: 'bodyshop', sourceId: entry.id, date: exitValue || null },
+      { onSuccess: () => qc.invalidateQueries({ queryKey: ['bodyshop-capacity'] }) },
+    );
+    setEditingExit(false);
+  }
+  function handleClearExit() {
+    setExitDate.mutate(
+      { sourceType: 'bodyshop', sourceId: entry.id, date: null },
+      { onSuccess: () => qc.invalidateQueries({ queryKey: ['bodyshop-capacity'] }) },
+    );
+    setExitValue(suggested);
+    setEditingExit(false);
+  }
 
   // Estado del panel de ajuste de horas. Se guarda como STRING mientras se tipea
   // (no como número parseado en cada tecla) — guardar el número ya parseado de
@@ -1157,6 +1230,76 @@ function EntryPopup({
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* Fecha de entrega — sugerida / prometida al cliente + atraso */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide flex items-center gap-1.5">
+                  <CalendarDays className="h-3.5 w-3.5" /> Fecha de entrega
+                </p>
+                {!editingExit && (
+                  <button
+                    type="button"
+                    onClick={() => { setExitValue(promised ?? suggested); setEditingExit(true); }}
+                    className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-blue-600 transition-colors"
+                  >
+                    <Edit2 className="h-3 w-3" />
+                    {promised ? 'Editar' : 'Establecer'}
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">Sugerida <span className="text-[10px] text-slate-400">(colchón + horas)</span></span>
+                <span className="font-medium text-slate-700">{fmtExitDateLabel(suggested)}</span>
+              </div>
+
+              {!editingExit ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">Prometida al cliente</span>
+                  <div className="flex items-center gap-2">
+                    {promised ? (
+                      <span className={`text-sm font-bold ${promised === suggested ? 'text-slate-700' : 'text-indigo-700'}`}>
+                        {fmtExitDateLabel(promised)}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-slate-400 italic">No establecida</span>
+                    )}
+                    <span className={`text-[11px] font-semibold ${daysColor}`}>
+                      {daysLeft === 0 ? 'Hoy' : daysLeft > 0 ? `en ${daysLeft}d` : `${Math.abs(daysLeft)}d atraso`}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={exitValue}
+                      min={todayStr}
+                      onChange={e => setExitValue(e.target.value)}
+                      className="flex-1 text-xs font-medium rounded-lg border border-slate-200 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-indigo-400"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setEditingExit(false)}
+                      className="flex-1 text-xs font-semibold text-slate-500 border border-slate-200 rounded-lg py-1.5 hover:bg-slate-100 transition-colors">
+                      Cancelar
+                    </button>
+                    {promised && (
+                      <button type="button" onClick={handleClearExit}
+                        className="flex-1 text-xs font-semibold text-slate-500 border border-slate-200 rounded-lg py-1.5 hover:bg-slate-100 transition-colors">
+                        Quitar
+                      </button>
+                    )}
+                    <button type="button" onClick={handleSaveExit} disabled={!exitValue || setExitDate.isPending}
+                      className="flex-1 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg py-1.5 transition-colors disabled:opacity-50">
+                      {setExitDate.isPending ? 'Guardando...' : 'Confirmar'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Severity + work type meta */}
