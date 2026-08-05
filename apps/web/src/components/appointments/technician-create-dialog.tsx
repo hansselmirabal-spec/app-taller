@@ -8,14 +8,18 @@ import { useTechnicians, useCreateTechnician } from '@/hooks/use-technicians';
 import { useActiveWorkshop } from '@/hooks/use-active-workshop';
 import type { Technician } from '@/types';
 
-// Procesos del bodyshop (Chapería / Preparación / Pintura).
+// Procesos del bodyshop (Chapería / Preparación / Pintura). PERITO es un rol
+// más de esta lista — al elegirlo se le crea/vincula una cuenta de Usuario
+// con rol 'perito' (ver isPerito más abajo).
 const BODYSHOP_SPECIALTIES: { value: string; label: string }[] = [
   { value: 'CHAPERIA',      label: 'Chapería' },
   { value: 'PREPARACION',   label: 'Preparación' },
   { value: 'PINTURA',       label: 'Pintura' },
   { value: 'POLISH',        label: 'Pulido' },
   { value: 'FINAL_CONTROL', label: 'Control Final' },
+  { value: 'PERITO',        label: 'Perito' },
 ];
+const PERITO_ROLE_VALUE = 'PERITO';
 
 // Roles predefinidos para talleres de mecánica.
 const MECHANIC_ROLES: { value: string; label: string }[] = [
@@ -44,7 +48,6 @@ export function TechnicianCreateDialog({
   const [roleSelect, setRoleSelect] = useState('');
   const [specialty,  setSpecialty]  = useState('');
   const [box,        setBox]        = useState('');
-  const [isPerito,   setIsPerito]   = useState(false);
   const [email,      setEmail]      = useState('');
 
   const allBoxes = useMemo(() => {
@@ -54,9 +57,10 @@ export function TechnicianCreateDialog({
   }, [technicians]);
 
   const effectiveSpecialty = roleSelect && roleSelect !== OTHER_ROLE ? roleSelect : specialty;
+  const isPerito = effectiveSpecialty === PERITO_ROLE_VALUE;
 
   function reset() {
-    setName(''); setHours('8'); setRoleSelect(''); setSpecialty(''); setBox(''); setIsPerito(false); setEmail('');
+    setName(''); setHours('8'); setRoleSelect(''); setSpecialty(''); setBox(''); setEmail('');
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -124,15 +128,12 @@ export function TechnicianCreateDialog({
             </Select>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer w-fit">
-              <input type="checkbox" checked={isPerito} onChange={e => setIsPerito(e.target.checked)} className="rounded border-slate-300" />
-              Es perito también (agenda citas de presupuesto)
-            </label>
-            {isPerito && (
-              <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email para su cuenta de acceso" required />
-            )}
-          </div>
+          {isPerito && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-indigo-700">Email (para su cuenta de acceso)</label>
+              <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="perito@condor.com.py" required />
+            </div>
+          )}
 
           <div className="flex gap-2 justify-end pt-1">
             <Button type="button" size="sm" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
