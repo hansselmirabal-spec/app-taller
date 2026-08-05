@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
 import {
   ChevronLeft, ChevronRight, Plus, FileText, Calculator,
   Clock, CheckCircle2, XCircle, AlertCircle, RefreshCw, Search, BookOpen,
@@ -92,7 +94,13 @@ function BudgetCard({ appt, onClick }: { appt: BudgetAppointment; onClick: () =>
 
 const GRID_START_HOUR = 8;
 const GRID_END_HOUR   = 18;
-const HOUR_HEIGHT      = 64; // px
+const HOUR_HEIGHT      = 72; // px
+
+// El backend manda time como HH:MM:SS (columna `time` de Postgres) — solo se
+// muestra HH:MM.
+function fmtHM(time: string): string {
+  return time.slice(0, 5);
+}
 
 const GRID_STATUS_STYLE: Record<BudgetAppointment['status'], string> = {
   pending:   'bg-yellow-50 border-yellow-300 text-yellow-900',
@@ -149,15 +157,15 @@ function AgendaGrid({ appts, onClick }: { appts: BudgetAppointment[]; onClick: (
   const layout = layoutDayAppointments(appts);
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
       <div className="flex">
         {/* Columna de horas */}
         <div className="w-14 flex-shrink-0 border-r border-slate-100 relative" style={{ height: totalHeight }}>
           {hours.map((h, i) => (
             <span
               key={h}
-              className="absolute right-2 text-[11px] text-slate-400 -translate-y-1/2"
-              style={{ top: i * HOUR_HEIGHT }}
+              className="absolute right-2 text-[11px] text-slate-400"
+              style={{ top: i === 0 ? 4 : i * HOUR_HEIGHT - 7 }}
             >
               {String(h).padStart(2, '0')}:00
             </span>
@@ -197,7 +205,7 @@ function AgendaGrid({ appts, onClick }: { appts: BudgetAppointment[]; onClick: (
                   width: `calc(${widthPct}% - 8px)`,
                 }}
               >
-                <p className="text-[10px] font-bold leading-none">{a.timeStart}–{a.timeEnd}</p>
+                <p className="text-[10px] font-bold leading-none">{fmtHM(a.timeStart)}–{fmtHM(a.timeEnd)}</p>
                 <p className="text-xs font-semibold truncate leading-tight mt-0.5">{a.plate} · {a.customerName}</p>
                 {a.perito && <p className="text-[10px] opacity-70 truncate leading-tight">{a.perito.name}</p>}
               </button>
@@ -333,7 +341,10 @@ export default function PresupuestoPage() {
         {isLoading ? (
           <MotivationalLoader />
         ) : view === 'grid' ? (
-          <div className="max-w-3xl mx-auto">
+          <div className="max-w-3xl">
+            <p className="text-sm font-semibold text-slate-700 mb-3 capitalize">
+              {format(new Date(date + 'T12:00:00'), "EEEE d 'de' MMMM", { locale: es })}
+            </p>
             <AgendaGrid appts={appts} onClick={id => router.push(`/presupuesto/${id}`)} />
           </div>
         ) : appts.length === 0 ? (
