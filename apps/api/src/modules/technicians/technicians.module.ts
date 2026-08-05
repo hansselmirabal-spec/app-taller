@@ -4,9 +4,10 @@ import { Technician } from './technician.entity';
 import { TechniciansService } from './technicians.service';
 import { TechniciansController } from './technicians.controller';
 import { WorkshopsModule } from '../workshops/workshops.module';
+import { UsersModule } from '../users/users.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Technician]), WorkshopsModule],
+  imports: [TypeOrmModule.forFeature([Technician]), WorkshopsModule, UsersModule],
   providers: [TechniciansService],
   controllers: [TechniciansController],
   exports: [TechniciansService],

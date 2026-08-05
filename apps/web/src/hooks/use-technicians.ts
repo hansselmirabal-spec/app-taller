@@ -19,7 +19,7 @@ export function useCreateTechnician() {
   const { workshop } = useActiveWorkshop();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name: string; dailyHours?: number; specialty?: string | null; box?: string | null; dmsAdvisorCode?: string | null }) =>
+    mutationFn: (data: { name: string; dailyHours?: number; specialty?: string | null; box?: string | null; dmsAdvisorCode?: string | null; email?: string | null; isPerito?: boolean }) =>
       createTechnician(workshopId, data, workshop?.name),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['technicians', workshopId] }),
   });

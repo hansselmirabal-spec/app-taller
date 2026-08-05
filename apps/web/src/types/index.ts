@@ -158,6 +158,9 @@ export interface Technician {
   workshopName?: string | null;
   monthlyTargetHours?: number;
   dmsAdvisorCode?: string | null;
+  email?: string | null;
+  isPerito?: boolean;
+  userId?: string | null;
 }
 
 // ─── Service Types (MECHANIC) ────────────────────────────────────────────────

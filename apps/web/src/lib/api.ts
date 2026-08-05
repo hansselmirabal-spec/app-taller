@@ -171,7 +171,7 @@ export async function getTechnicians(workshopId: string, workshopName?: string, 
 
 export async function createTechnician(
   workshopId: string,
-  data: { name: string; dailyHours?: number; specialty?: string | null; box?: string | null; dmsAdvisorCode?: string | null },
+  data: { name: string; dailyHours?: number; specialty?: string | null; box?: string | null; dmsAdvisorCode?: string | null; email?: string | null; isPerito?: boolean },
   workshopName?: string,
 ): Promise<Technician> {
   if (MOCK) {

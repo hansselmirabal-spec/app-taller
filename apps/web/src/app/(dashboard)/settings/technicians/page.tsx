@@ -82,6 +82,8 @@ export default function TechniciansSettingsPage() {
   const [newRoleSelect, setNewRoleSelect] = useState('');  // selector de rol predefinido
   const [newBox, setNewBox] = useState('');
   const [newDmsAdvisorCode, setNewDmsAdvisorCode] = useState('');
+  const [newIsPerito, setNewIsPerito] = useState(false);
+  const [newEmail, setNewEmail] = useState('');
 
   // El specialty efectivo: si hay rol predefinido seleccionado, ese; si no, el texto libre.
   const newEffectiveSpecialty = newRoleSelect && newRoleSelect !== OTHER_ROLE
@@ -115,20 +117,31 @@ export default function TechniciansSettingsPage() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!newName.trim()) return;
+    if (newIsPerito && !newEmail.trim()) {
+      alert('El email es obligatorio para marcar un técnico como perito.');
+      return;
+    }
     await create.mutateAsync({
       name: newName.trim(),
       dailyHours: parseFloat(newHours) || 8,
       specialty: newEffectiveSpecialty || null,
       box: newBox || null,
       dmsAdvisorCode: newEffectiveSpecialty === 'ASESOR' ? (newDmsAdvisorCode || null) : null,
+      email: newEmail.trim() || null,
+      isPerito: newIsPerito,
     });
     setNewName(''); setNewHours('8'); setNewSpecialty(''); setNewRoleSelect(''); setNewBox(''); setNewDmsAdvisorCode('');
+    setNewIsPerito(false); setNewEmail('');
     setShowForm(false);
   }
 
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
     if (!editing) return;
+    if (editing.isPerito && !editing.email?.trim()) {
+      alert('El email es obligatorio para marcar un técnico como perito.');
+      return;
+    }
     await update.mutateAsync({
       id: editing.id,
       data: {
@@ -138,6 +151,8 @@ export default function TechniciansSettingsPage() {
         box: editing.box || null,
         active: editing.active,
         dmsAdvisorCode: editing.dmsAdvisorCode || null,
+        email: editing.email || null,
+        isPerito: editing.isPerito ?? false,
       },
     });
     setEditing(null);
@@ -247,9 +262,27 @@ export default function TechniciansSettingsPage() {
             </div>
           )}
 
+          {/* Es perito también — crea/vincula una cuenta de Usuario con rol perito */}
+          <div className="space-y-1.5">
+            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer w-fit">
+              <input type="checkbox" checked={newIsPerito} onChange={e => setNewIsPerito(e.target.checked)} className="rounded border-slate-300" />
+              Es perito también (agenda citas de presupuesto)
+            </label>
+            {newIsPerito && (
+              <Input
+                type="email"
+                value={newEmail}
+                onChange={e => setNewEmail(e.target.value)}
+                placeholder="Email para su cuenta de acceso"
+                className="max-w-xs"
+                required
+              />
+            )}
+          </div>
+
           <div className="flex gap-2 justify-end">
             <Button type="submit" size="sm" disabled={create.isPending}>Guardar</Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => { setShowForm(false); setNewRoleSelect(''); setNewDmsAdvisorCode(''); }}>Cancelar</Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => { setShowForm(false); setNewRoleSelect(''); setNewDmsAdvisorCode(''); setNewIsPerito(false); setNewEmail(''); }}>Cancelar</Button>
           </div>
         </form>
       )}
@@ -416,11 +449,40 @@ export default function TechniciansSettingsPage() {
                               )}
                             </div>
                           )}
+
+                          {/* Es perito también — crea/vincula una cuenta de Usuario con rol perito */}
+                          <div className="flex items-center gap-2">
+                            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer whitespace-nowrap">
+                              <input
+                                type="checkbox"
+                                checked={editing.isPerito ?? false}
+                                onChange={e => setEditing({ ...editing, isPerito: e.target.checked })}
+                                className="rounded border-slate-300"
+                              />
+                              Es perito también
+                            </label>
+                            {editing.isPerito && (
+                              <Input
+                                type="email"
+                                value={editing.email ?? ''}
+                                onChange={e => setEditing({ ...editing, email: e.target.value })}
+                                placeholder="Email para su cuenta de acceso"
+                                className="max-w-xs"
+                              />
+                            )}
+                          </div>
                         </form>
                       </td>
                     ) : (
                       <>
-                        <td className="px-4 py-3 font-medium text-slate-900">{tech.name}</td>
+                        <td className="px-4 py-3 font-medium text-slate-900">
+                          {tech.name}
+                          {tech.isPerito && (
+                            <span className="ml-1.5 text-[10px] font-semibold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded-full align-middle">
+                              Perito
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-3">
                           {tech.specialty ? (
                             <SpecialtyBadge value={tech.specialty} />

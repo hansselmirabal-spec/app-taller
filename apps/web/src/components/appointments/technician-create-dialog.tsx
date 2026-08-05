@@ -44,6 +44,8 @@ export function TechnicianCreateDialog({
   const [roleSelect, setRoleSelect] = useState('');
   const [specialty,  setSpecialty]  = useState('');
   const [box,        setBox]        = useState('');
+  const [isPerito,   setIsPerito]   = useState(false);
+  const [email,      setEmail]      = useState('');
 
   const allBoxes = useMemo(() => {
     const set = new Set<string>();
@@ -54,17 +56,20 @@ export function TechnicianCreateDialog({
   const effectiveSpecialty = roleSelect && roleSelect !== OTHER_ROLE ? roleSelect : specialty;
 
   function reset() {
-    setName(''); setHours('8'); setRoleSelect(''); setSpecialty(''); setBox('');
+    setName(''); setHours('8'); setRoleSelect(''); setSpecialty(''); setBox(''); setIsPerito(false); setEmail('');
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
+    if (isPerito && !email.trim()) return;
     const created = await create.mutateAsync({
       name: name.trim(),
       dailyHours: parseFloat(hours) || 8,
       specialty: effectiveSpecialty || null,
       box: box || null,
+      email: email.trim() || null,
+      isPerito,
     });
     reset();
     onOpenChange(false);
@@ -117,6 +122,16 @@ export function TechnicianCreateDialog({
                 {allBoxes.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer w-fit">
+              <input type="checkbox" checked={isPerito} onChange={e => setIsPerito(e.target.checked)} className="rounded border-slate-300" />
+              Es perito también (agenda citas de presupuesto)
+            </label>
+            {isPerito && (
+              <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email para su cuenta de acceso" required />
+            )}
           </div>
 
           <div className="flex gap-2 justify-end pt-1">
