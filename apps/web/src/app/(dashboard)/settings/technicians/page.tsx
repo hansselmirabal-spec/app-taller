@@ -12,14 +12,19 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { Technician } from '@/types';
 
-// Procesos del bodyshop (Chapería / Preparación / Pintura).
+// Procesos del bodyshop (Chapería / Preparación / Pintura). PERITO es un rol
+// más de esta lista (no un flag aparte) — igual que un técnico es Chapista o
+// Pintor, puede ser Perito. Al elegirlo se le crea/vincula una cuenta de
+// Usuario con rol 'perito' (ver PERITO_ROLE_VALUE más abajo).
 const BODYSHOP_SPECIALTIES: { value: string; label: string }[] = [
   { value: 'CHAPERIA',      label: 'Chapería' },
   { value: 'PREPARACION',   label: 'Preparación' },
   { value: 'PINTURA',       label: 'Pintura' },
   { value: 'POLISH',        label: 'Pulido' },
   { value: 'FINAL_CONTROL', label: 'Control Final' },
+  { value: 'PERITO',        label: 'Perito' },
 ];
+const PERITO_ROLE_VALUE = 'PERITO';
 
 // Roles predefinidos para talleres de mecánica.
 // ASESOR = persona que recibe/entrega vehículos, su disponibilidad viene del DMS.
@@ -38,6 +43,7 @@ function specialtyToText(value: string | null | undefined): string {
   if (v === 'PINTURA' || v === 'PAINT')                          return 'Pintura';
   if (v === 'POLISH' || v === 'PULIDO' || v === 'PULIDOR')       return 'Pulido';
   if (v === 'FINAL_CONTROL' || v === 'CONTROL_FINAL')            return 'Control Final';
+  if (v === 'PERITO')                                            return 'Perito';
   return value;
 }
 const NO_BOX  = '__none__';
@@ -82,13 +88,13 @@ export default function TechniciansSettingsPage() {
   const [newRoleSelect, setNewRoleSelect] = useState('');  // selector de rol predefinido
   const [newBox, setNewBox] = useState('');
   const [newDmsAdvisorCode, setNewDmsAdvisorCode] = useState('');
-  const [newIsPerito, setNewIsPerito] = useState(false);
   const [newEmail, setNewEmail] = useState('');
 
   // El specialty efectivo: si hay rol predefinido seleccionado, ese; si no, el texto libre.
   const newEffectiveSpecialty = newRoleSelect && newRoleSelect !== OTHER_ROLE
     ? newRoleSelect
     : newSpecialty;
+  const newIsPerito = newEffectiveSpecialty === PERITO_ROLE_VALUE;
 
   const filtered = useMemo(() => {
     return technicians.filter(t => {
@@ -131,15 +137,16 @@ export default function TechniciansSettingsPage() {
       isPerito: newIsPerito,
     });
     setNewName(''); setNewHours('8'); setNewSpecialty(''); setNewRoleSelect(''); setNewBox(''); setNewDmsAdvisorCode('');
-    setNewIsPerito(false); setNewEmail('');
+    setNewEmail('');
     setShowForm(false);
   }
 
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
     if (!editing) return;
-    if (editing.isPerito && !editing.email?.trim()) {
-      alert('El email es obligatorio para marcar un técnico como perito.');
+    const editingIsPerito = editing.specialty?.trim().toUpperCase() === PERITO_ROLE_VALUE;
+    if (editingIsPerito && !editing.email?.trim()) {
+      alert('El email es obligatorio para el rol de perito.');
       return;
     }
     await update.mutateAsync({
@@ -152,7 +159,7 @@ export default function TechniciansSettingsPage() {
         active: editing.active,
         dmsAdvisorCode: editing.dmsAdvisorCode || null,
         email: editing.email || null,
-        isPerito: editing.isPerito ?? false,
+        isPerito: editingIsPerito,
       },
     });
     setEditing(null);
@@ -262,27 +269,23 @@ export default function TechniciansSettingsPage() {
             </div>
           )}
 
-          {/* Es perito también — crea/vincula una cuenta de Usuario con rol perito */}
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer w-fit">
-              <input type="checkbox" checked={newIsPerito} onChange={e => setNewIsPerito(e.target.checked)} className="rounded border-slate-300" />
-              Es perito también (agenda citas de presupuesto)
-            </label>
-            {newIsPerito && (
+          {/* Perito — rol como cualquier otro; al elegirlo se crea/vincula su cuenta de acceso */}
+          {newIsPerito && (
+            <div className="max-w-xs space-y-1.5">
+              <label className="text-xs font-medium text-indigo-700">Email (para su cuenta de acceso)</label>
               <Input
                 type="email"
                 value={newEmail}
                 onChange={e => setNewEmail(e.target.value)}
-                placeholder="Email para su cuenta de acceso"
-                className="max-w-xs"
+                placeholder="perito@condor.com.py"
                 required
               />
-            )}
-          </div>
+            </div>
+          )}
 
           <div className="flex gap-2 justify-end">
             <Button type="submit" size="sm" disabled={create.isPending}>Guardar</Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => { setShowForm(false); setNewRoleSelect(''); setNewDmsAdvisorCode(''); setNewIsPerito(false); setNewEmail(''); }}>Cancelar</Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => { setShowForm(false); setNewRoleSelect(''); setNewDmsAdvisorCode(''); setNewEmail(''); }}>Cancelar</Button>
           </div>
         </form>
       )}
@@ -450,39 +453,24 @@ export default function TechniciansSettingsPage() {
                             </div>
                           )}
 
-                          {/* Es perito también — crea/vincula una cuenta de Usuario con rol perito */}
-                          <div className="flex items-center gap-2">
-                            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer whitespace-nowrap">
-                              <input
-                                type="checkbox"
-                                checked={editing.isPerito ?? false}
-                                onChange={e => setEditing({ ...editing, isPerito: e.target.checked })}
-                                className="rounded border-slate-300"
-                              />
-                              Es perito también
-                            </label>
-                            {editing.isPerito && (
+                          {/* Perito — rol como cualquier otro (seleccionado arriba); pide email para su cuenta */}
+                          {editing.specialty?.trim().toUpperCase() === PERITO_ROLE_VALUE && (
+                            <div className="flex items-center gap-2">
+                              <label className="text-xs font-medium text-indigo-700 whitespace-nowrap">Email (cuenta de acceso):</label>
                               <Input
                                 type="email"
                                 value={editing.email ?? ''}
                                 onChange={e => setEditing({ ...editing, email: e.target.value })}
-                                placeholder="Email para su cuenta de acceso"
+                                placeholder="perito@condor.com.py"
                                 className="max-w-xs"
                               />
-                            )}
-                          </div>
+                            </div>
+                          )}
                         </form>
                       </td>
                     ) : (
                       <>
-                        <td className="px-4 py-3 font-medium text-slate-900">
-                          {tech.name}
-                          {tech.isPerito && (
-                            <span className="ml-1.5 text-[10px] font-semibold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded-full align-middle">
-                              Perito
-                            </span>
-                          )}
-                        </td>
+                        <td className="px-4 py-3 font-medium text-slate-900">{tech.name}</td>
                         <td className="px-4 py-3">
                           {tech.specialty ? (
                             <SpecialtyBadge value={tech.specialty} />
@@ -563,11 +551,13 @@ function SpecialtyBadge({ value }: { value: string }) {
   const isPaint        = v === 'PINTURA' || v === 'PAINT';
   const isPolish       = v === 'POLISH' || v === 'PULIDO' || v === 'PULIDOR';
   const isFinalControl = v === 'FINAL_CONTROL' || v === 'CONTROL_FINAL';
+  const isPerito       = v === PERITO_ROLE_VALUE;
   const cls = isBodywork     ? 'bg-blue-50 text-blue-700'
             : isPrep         ? 'bg-amber-50 text-amber-700'
             : isPaint        ? 'bg-purple-50 text-purple-700'
             : isPolish       ? 'bg-teal-50 text-teal-700'
             : isFinalControl ? 'bg-rose-50 text-rose-700'
+            : isPerito       ? 'bg-indigo-50 text-indigo-700'
             :                  'bg-slate-100 text-slate-700';
   return (
     <span className={`text-xs px-2 py-1 rounded-full font-medium ${cls}`}>
