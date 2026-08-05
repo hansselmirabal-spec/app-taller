@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Wrench, Eye, EyeOff } from 'lucide-react';
@@ -8,7 +8,17 @@ import { storeAuth, mustChangePassword } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
+// useSearchParams() opta out del prerender estático salvo que esté envuelto
+// en Suspense — sin esto, `next build` falla en /login (missing-suspense-with-csr-bailout).
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const expired = params.get('expired') === '1';
