@@ -84,7 +84,7 @@ export default function NuevaCitaPresupuestoPage() {
       });
       router.push(`/presupuesto/${result.id}`);
     } catch (err: any) {
-      setError(err.message ?? 'Error al crear el presupuesto');
+      setError(err.message ?? 'Error al agendar la cita');
     }
   }
 
@@ -101,7 +101,10 @@ export default function NuevaCitaPresupuestoPage() {
             <ArrowLeft className="h-4 w-4 text-slate-500" />
           </button>
           <FileText className="h-5 w-5 text-slate-400" />
-          <h1 className="text-base font-semibold text-slate-900">Nuevo Presupuesto</h1>
+          <div>
+            <h1 className="text-base font-semibold text-slate-900">Agendar Cita de Presupuesto</h1>
+            <p className="text-xs text-slate-400">Solo reservás el horario — el presupuesto se carga después, cuando el perito ve el auto.</p>
+          </div>
         </div>
       </div>
 
@@ -276,9 +279,9 @@ export default function NuevaCitaPresupuestoPage() {
               className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               {createMutation.isPending ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> Creando...</>
+                <><Loader2 className="h-4 w-4 animate-spin" /> Agendando...</>
               ) : (
-                'Crear presupuesto'
+                'Agendar cita'
               )}
             </button>
           </div>
