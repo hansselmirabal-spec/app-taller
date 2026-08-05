@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   ChevronLeft, ChevronRight, Plus, FileText, Calculator,
   Clock, CheckCircle2, XCircle, AlertCircle, RefreshCw, Search, BookOpen,
+  LayoutList, CalendarClock,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { useBudgetAppointments } from '@/hooks/use-budget-appointments';
@@ -87,11 +88,133 @@ function BudgetCard({ appt, onClick }: { appt: BudgetAppointment; onClick: () =>
   );
 }
 
+// ─── Vista Agenda — grilla horaria (08:00–18:00) ──────────────────────────────
+
+const GRID_START_HOUR = 8;
+const GRID_END_HOUR   = 18;
+const HOUR_HEIGHT      = 64; // px
+
+const GRID_STATUS_STYLE: Record<BudgetAppointment['status'], string> = {
+  pending:   'bg-yellow-50 border-yellow-300 text-yellow-900',
+  approved:  'bg-emerald-50 border-emerald-300 text-emerald-900',
+  rejected:  'bg-slate-100 border-slate-300 text-slate-400 line-through opacity-70',
+  cancelled: 'bg-slate-100 border-slate-300 text-slate-400 line-through opacity-70',
+};
+
+function timeToMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function timeOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
+  return aStart < bEnd && bStart < aEnd;
+}
+
+// Asigna columnas a citas que se solapan en horario, para que ninguna quede
+// tapada por otra (2 peritos agendados a la misma hora, por ejemplo).
+function layoutDayAppointments(appts: BudgetAppointment[]): Map<string, { col: number; totalCols: number }> {
+  const sorted = [...appts].sort((a, b) => a.timeStart.localeCompare(b.timeStart) || a.timeEnd.localeCompare(b.timeEnd));
+  const cols: number[] = [];
+  const result = new Map<string, { col: number; totalCols: number }>();
+
+  sorted.forEach((a, i) => {
+    const usedCols = new Set<number>();
+    for (let j = 0; j < i; j++) {
+      if (timeOverlap(a.timeStart, a.timeEnd, sorted[j].timeStart, sorted[j].timeEnd)) {
+        usedCols.add(cols[j]);
+      }
+    }
+    let col = 0;
+    while (usedCols.has(col)) col++;
+    cols.push(col);
+  });
+
+  sorted.forEach((a, i) => {
+    let maxCol = cols[i];
+    sorted.forEach((b, j) => {
+      if (i !== j && timeOverlap(a.timeStart, a.timeEnd, b.timeStart, b.timeEnd)) {
+        maxCol = Math.max(maxCol, cols[j]);
+      }
+    });
+    result.set(a.id, { col: cols[i], totalCols: maxCol + 1 });
+  });
+
+  return result;
+}
+
+function AgendaGrid({ appts, onClick }: { appts: BudgetAppointment[]; onClick: (id: string) => void }) {
+  const hours = Array.from({ length: GRID_END_HOUR - GRID_START_HOUR + 1 }, (_, i) => GRID_START_HOUR + i);
+  const totalHeight = (GRID_END_HOUR - GRID_START_HOUR) * HOUR_HEIGHT;
+  const gridStartMin = GRID_START_HOUR * 60;
+  const layout = layoutDayAppointments(appts);
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="flex">
+        {/* Columna de horas */}
+        <div className="w-14 flex-shrink-0 border-r border-slate-100 relative" style={{ height: totalHeight }}>
+          {hours.map((h, i) => (
+            <span
+              key={h}
+              className="absolute right-2 text-[11px] text-slate-400 -translate-y-1/2"
+              style={{ top: i * HOUR_HEIGHT }}
+            >
+              {String(h).padStart(2, '0')}:00
+            </span>
+          ))}
+        </div>
+
+        {/* Grilla */}
+        <div className="flex-1 relative" style={{ height: totalHeight }}>
+          {hours.map((h, i) => (
+            <div key={h} className="absolute left-0 right-0 border-t border-slate-100" style={{ top: i * HOUR_HEIGHT }} />
+          ))}
+
+          {appts.length === 0 && (
+            <p className="absolute inset-0 flex items-center justify-center text-sm text-slate-300">
+              Sin citas para este día
+            </p>
+          )}
+
+          {appts.map(a => {
+            const { col, totalCols } = layout.get(a.id) ?? { col: 0, totalCols: 1 };
+            const startMin = Math.max(gridStartMin, timeToMinutes(a.timeStart));
+            const endMin   = Math.min(GRID_END_HOUR * 60, Math.max(startMin + 20, timeToMinutes(a.timeEnd)));
+            const top    = ((startMin - gridStartMin) / 60) * HOUR_HEIGHT;
+            const height = Math.max(26, ((endMin - startMin) / 60) * HOUR_HEIGHT - 2);
+            const widthPct = 100 / totalCols;
+
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => onClick(a.id)}
+                className={`absolute rounded-lg border px-2 py-1 text-left overflow-hidden hover:shadow-md hover:z-10 transition-shadow ${GRID_STATUS_STYLE[a.status]}`}
+                style={{
+                  top,
+                  height,
+                  left: `calc(${col * widthPct}% + 4px)`,
+                  width: `calc(${widthPct}% - 8px)`,
+                }}
+              >
+                <p className="text-[10px] font-bold leading-none">{a.timeStart}–{a.timeEnd}</p>
+                <p className="text-xs font-semibold truncate leading-tight mt-0.5">{a.plate} · {a.customerName}</p>
+                {a.perito && <p className="text-[10px] opacity-70 truncate leading-tight">{a.perito.name}</p>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PresupuestoPage() {
   const router     = useRouter();
   const workshopId = useWorkshopId();
   const [date, setDate]           = useState(formatDate(new Date()));
   const [searchOpen, setSearchOpen] = useState(false);
+  const [view, setView] = useState<'grid' | 'list'>('grid');
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -138,6 +261,24 @@ export default function PresupuestoPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <div className="flex bg-slate-100 rounded-lg p-0.5">
+              <button
+                type="button"
+                onClick={() => setView('grid')}
+                title="Vista agenda (por hora)"
+                className={`p-1.5 rounded-md transition-colors ${view === 'grid' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                <CalendarClock className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('list')}
+                title="Vista lista"
+                className={`p-1.5 rounded-md transition-colors ${view === 'list' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                <LayoutList className="h-3.5 w-3.5" />
+              </button>
+            </div>
             <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
               <button type="button" onClick={prevDay} className="p-1 rounded hover:bg-white transition-colors">
                 <ChevronLeft className="h-4 w-4 text-slate-600" />
@@ -191,6 +332,10 @@ export default function PresupuestoPage() {
       <div className="flex-1 overflow-y-auto p-6">
         {isLoading ? (
           <MotivationalLoader />
+        ) : view === 'grid' ? (
+          <div className="max-w-3xl mx-auto">
+            <AgendaGrid appts={appts} onClick={id => router.push(`/presupuesto/${id}`)} />
+          </div>
         ) : appts.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 gap-3 text-slate-400">
             <FileText className="h-10 w-10 opacity-30" />
