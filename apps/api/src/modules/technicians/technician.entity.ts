@@ -32,6 +32,18 @@ export class Technician {
   @Column({ name: 'dms_advisor_code', type: 'varchar', length: 30, nullable: true })
   dmsAdvisorCode: string | null;
 
+  // Un técnico puede ser TAMBIÉN perito (agenda cita de presupuesto). isPerito
+  // controla si tiene una cuenta de Usuario vinculada (userId) con rol
+  // 'perito' — ver TechniciansService.syncPeritoAccount().
+  @Column({ type: 'varchar', nullable: true, length: 150 })
+  email: string | null;
+
+  @Column({ name: 'is_perito', default: false })
+  isPerito: boolean;
+
+  @Column({ name: 'user_id', type: 'uuid', nullable: true })
+  userId: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }
