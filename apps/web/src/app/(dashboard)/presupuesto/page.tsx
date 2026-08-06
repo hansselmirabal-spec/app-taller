@@ -90,11 +90,9 @@ function BudgetCard({ appt, onClick }: { appt: BudgetAppointment; onClick: () =>
   );
 }
 
-// ─── Vista Agenda — grilla horaria (08:00–18:00) ──────────────────────────────
-
-const GRID_START_HOUR = 8;
-const GRID_END_HOUR   = 18;
-const HOUR_HEIGHT      = 72; // px
+// ─── Vista Agenda — timeline condensado ───────────────────────────────────
+// El alto de la página lo define la cantidad real de citas, no un rango de
+// horas fijo — evita la caja de 700px casi vacía que tenía la grilla horaria.
 
 // El backend manda time como HH:MM:SS (columna `time` de Postgres) — solo se
 // muestra HH:MM.
@@ -102,117 +100,75 @@ function fmtHM(time: string): string {
   return time.slice(0, 5);
 }
 
-const GRID_STATUS_STYLE: Record<BudgetAppointment['status'], string> = {
-  pending:   'bg-yellow-50 border-yellow-300 text-yellow-900',
-  approved:  'bg-emerald-50 border-emerald-300 text-emerald-900',
-  rejected:  'bg-slate-100 border-slate-300 text-slate-400 line-through opacity-70',
-  cancelled: 'bg-slate-100 border-slate-300 text-slate-400 line-through opacity-70',
+// Solo la primera letra en mayúscula ("Jueves 6 de agosto") — la clase
+// Tailwind `capitalize` capitaliza CADA palabra ("Jueves 6 De Agosto").
+function capitalizeFirst(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+const TIMELINE_DOT: Record<BudgetAppointment['status'], string> = {
+  pending:   'bg-yellow-400',
+  approved:  'bg-emerald-400',
+  rejected:  'bg-slate-300',
+  cancelled: 'bg-slate-300',
 };
 
-function timeToMinutes(time: string): number {
-  const [h, m] = time.split(':').map(Number);
-  return h * 60 + m;
+// Hueco libre entre el fin de una cita y el inicio de la siguiente — solo se
+// muestra si es de al menos una hora, para no ensuciar la vista con huecos
+// de 5-10 minutos entre citas seguidas.
+function gapLabel(prevEndHM: string, nextStartHM: string): string | null {
+  const [ph, pm] = prevEndHM.split(':').map(Number);
+  const [nh, nm] = nextStartHM.split(':').map(Number);
+  const minutes = (nh * 60 + nm) - (ph * 60 + pm);
+  if (minutes < 60) return null;
+  const hours = Math.round((minutes / 60) * 10) / 10;
+  return `${hours}h libres`;
 }
 
-function timeOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
-  return aStart < bEnd && bStart < aEnd;
-}
+function AgendaTimeline({ appts, onClick }: { appts: BudgetAppointment[]; onClick: (id: string) => void }) {
+  const sorted = [...appts].sort((a, b) => a.timeStart.localeCompare(b.timeStart));
 
-// Asigna columnas a citas que se solapan en horario, para que ninguna quede
-// tapada por otra (2 peritos agendados a la misma hora, por ejemplo).
-function layoutDayAppointments(appts: BudgetAppointment[]): Map<string, { col: number; totalCols: number }> {
-  const sorted = [...appts].sort((a, b) => a.timeStart.localeCompare(b.timeStart) || a.timeEnd.localeCompare(b.timeEnd));
-  const cols: number[] = [];
-  const result = new Map<string, { col: number; totalCols: number }>();
-
-  sorted.forEach((a, i) => {
-    const usedCols = new Set<number>();
-    for (let j = 0; j < i; j++) {
-      if (timeOverlap(a.timeStart, a.timeEnd, sorted[j].timeStart, sorted[j].timeEnd)) {
-        usedCols.add(cols[j]);
-      }
-    }
-    let col = 0;
-    while (usedCols.has(col)) col++;
-    cols.push(col);
-  });
-
-  sorted.forEach((a, i) => {
-    let maxCol = cols[i];
-    sorted.forEach((b, j) => {
-      if (i !== j && timeOverlap(a.timeStart, a.timeEnd, b.timeStart, b.timeEnd)) {
-        maxCol = Math.max(maxCol, cols[j]);
-      }
-    });
-    result.set(a.id, { col: cols[i], totalCols: maxCol + 1 });
-  });
-
-  return result;
-}
-
-function AgendaGrid({ appts, onClick }: { appts: BudgetAppointment[]; onClick: (id: string) => void }) {
-  const hours = Array.from({ length: GRID_END_HOUR - GRID_START_HOUR + 1 }, (_, i) => GRID_START_HOUR + i);
-  const totalHeight = (GRID_END_HOUR - GRID_START_HOUR) * HOUR_HEIGHT;
-  const gridStartMin = GRID_START_HOUR * 60;
-  const layout = layoutDayAppointments(appts);
+  if (sorted.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm text-slate-400">
+        Sin citas agendadas para este día
+      </div>
+    );
+  }
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-      <div className="flex">
-        {/* Columna de horas */}
-        <div className="w-14 flex-shrink-0 border-r border-slate-100 relative" style={{ height: totalHeight }}>
-          {hours.map((h, i) => (
-            <span
-              key={h}
-              className="absolute right-2 text-[11px] text-slate-400"
-              style={{ top: i === 0 ? 4 : i * HOUR_HEIGHT - 7 }}
-            >
-              {String(h).padStart(2, '0')}:00
-            </span>
-          ))}
-        </div>
-
-        {/* Grilla */}
-        <div className="flex-1 relative" style={{ height: totalHeight }}>
-          {hours.map((h, i) => (
-            <div key={h} className="absolute left-0 right-0 border-t border-slate-100" style={{ top: i * HOUR_HEIGHT }} />
-          ))}
-
-          {appts.length === 0 && (
-            <p className="absolute inset-0 flex items-center justify-center text-sm text-slate-300">
-              Sin citas para este día
-            </p>
-          )}
-
-          {appts.map(a => {
-            const { col, totalCols } = layout.get(a.id) ?? { col: 0, totalCols: 1 };
-            const startMin = Math.max(gridStartMin, timeToMinutes(a.timeStart));
-            const endMin   = Math.min(GRID_END_HOUR * 60, Math.max(startMin + 20, timeToMinutes(a.timeEnd)));
-            const top    = ((startMin - gridStartMin) / 60) * HOUR_HEIGHT;
-            const height = Math.max(26, ((endMin - startMin) / 60) * HOUR_HEIGHT - 2);
-            const widthPct = 100 / totalCols;
-
-            return (
+    <div className="relative pl-[62px]">
+      <div className="absolute left-[52px] top-1 bottom-1 w-px bg-slate-200" />
+      {sorted.map((a, i) => {
+        const cfg = STATUS_CONFIG[a.status];
+        const isCancelled = a.status === 'cancelled' || a.status === 'rejected';
+        const gap = i > 0 ? gapLabel(fmtHM(sorted[i - 1].timeEnd), fmtHM(a.timeStart)) : null;
+        return (
+          <div key={a.id}>
+            {gap && <p className="text-[11px] text-slate-400 pl-1 mb-2 -mt-1">— {gap} —</p>}
+            <div className="relative mb-3.5 last:mb-0">
+              <span className="absolute -left-[62px] top-1 w-12 text-right text-[11.5px] font-bold text-slate-600 tabular-nums">
+                {fmtHM(a.timeStart)}
+              </span>
+              <span className={`absolute -left-[6px] top-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-slate-50 ${TIMELINE_DOT[a.status]}`} />
               <button
-                key={a.id}
                 type="button"
                 onClick={() => onClick(a.id)}
-                className={`absolute rounded-lg border px-2 py-1 text-left overflow-hidden hover:shadow-md hover:z-10 transition-shadow ${GRID_STATUS_STYLE[a.status]}`}
-                style={{
-                  top,
-                  height,
-                  left: `calc(${col * widthPct}% + 4px)`,
-                  width: `calc(${widthPct}% - 8px)`,
-                }}
+                className={`w-full flex items-center gap-3 rounded-xl border bg-white px-3.5 py-2.5 text-left hover:shadow-md hover:-translate-y-0.5 transition-all ${isCancelled ? 'opacity-60 border-slate-200' : 'border-slate-200'}`}
               >
-                <p className="text-[10px] font-bold leading-none">{fmtHM(a.timeStart)}–{fmtHM(a.timeEnd)}</p>
-                <p className="text-xs font-semibold truncate leading-tight mt-0.5">{a.plate} · {a.customerName}</p>
-                {a.perito && <p className="text-[10px] opacity-70 truncate leading-tight">{a.perito.name}</p>}
+                <div className="flex-1 min-w-0">
+                  <span className="font-bold text-sm text-slate-900 tracking-wide">{a.plate}</span>
+                  <span className="text-slate-400 text-xs"> · </span>
+                  <span className="text-sm text-slate-600 truncate">{a.customerName}</span>
+                </div>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${cfg.badge}`}>
+                  {cfg.label}
+                </span>
               </button>
-            );
-          })}
-        </div>
-      </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -341,11 +297,11 @@ export default function PresupuestoPage() {
         {isLoading ? (
           <MotivationalLoader />
         ) : view === 'grid' ? (
-          <div className="max-w-3xl">
-            <p className="text-sm font-semibold text-slate-700 mb-3 capitalize">
-              {format(new Date(date + 'T12:00:00'), "EEEE d 'de' MMMM", { locale: es })}
+          <div className="max-w-2xl">
+            <p className="text-sm font-semibold text-slate-700 mb-4">
+              {capitalizeFirst(format(new Date(date + 'T12:00:00'), "EEEE d 'de' MMMM", { locale: es }))}
             </p>
-            <AgendaGrid appts={appts} onClick={id => router.push(`/presupuesto/${id}`)} />
+            <AgendaTimeline appts={appts} onClick={id => router.push(`/presupuesto/${id}`)} />
           </div>
         ) : appts.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 gap-3 text-slate-400">
