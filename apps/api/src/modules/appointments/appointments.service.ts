@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { IsString, IsEnum, IsOptional, Matches } from 'class-validator';
 import { Appointment } from './appointment.entity';
 import { BodyshopEntry } from '../bodyshop/bodyshop-entry.entity';
@@ -60,6 +60,7 @@ export class AppointmentsService {
     private workshopsService: WorkshopsService,
     private dmsSyncService: DmsSyncService,
     private trackingService: TrackingService,
+    @InjectDataSource() private dataSource: DataSource,
   ) {}
 
   // Búsqueda global de turnos/ingresos agendados.
@@ -174,17 +175,7 @@ export class AppointmentsService {
 
   async create(dto: CreateAppointmentDto, userId: string) {
     const today = new Date().toISOString().split('T')[0];
-    const existingActive = await this.repo
-      .createQueryBuilder('a')
-      .where('UPPER(a.plate) = UPPER(:plate)', { plate: dto.plate.trim() })
-      .andWhere('a.status NOT IN (:...statuses)', { statuses: ['done', 'cancelled'] })
-      .andWhere('a.date >= :today', { today })
-      .getOne();
-    if (existingActive) {
-      throw new BadRequestException(
-        `Ya existe un turno activo para la patente ${dto.plate.trim().toUpperCase()} · ${existingActive.customerName}`,
-      );
-    }
+    const plate = dto.plate.trim();
 
     const serviceType = await this.serviceTypesService.findOne(dto.serviceTypeId);
     const durationMinutes = Math.round(Number(serviceType.durationHours) * 60);
@@ -195,8 +186,36 @@ export class AppointmentsService {
     await this.checkCapacity(dto.technicianId, dto.date, Number(serviceType.durationHours));
     await this.checkLunchBreak(dto.technicianId, dto.timeStart, timeEnd);
 
-    const appointment = this.repo.create({ ...dto, timeEnd, createdBy: userId, status: 'scheduled' });
-    const saved = await this.repo.save(appointment);
+    // El chequeo de "patente duplicada" corría afuera de cualquier transacción
+    // (check-then-act puro) — dos POST casi simultáneos para la misma patente
+    // podían pasar ambos (auditoría pre-producción 2026-08-13, BE-02/A-4). Ahora
+    // va detrás de un advisory lock por patente; el índice único parcial de la
+    // migración 012 es el respaldo final a nivel DB.
+    let saved: Appointment;
+    try {
+      saved = await this.dataSource.transaction(async manager => {
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [plate.toUpperCase()]);
+
+        const existingActive = await manager.createQueryBuilder(Appointment, 'a')
+          .where('UPPER(a.plate) = UPPER(:plate)', { plate })
+          .andWhere('a.status NOT IN (:...statuses)', { statuses: ['done', 'cancelled'] })
+          .andWhere('a.date >= :today', { today })
+          .getOne();
+        if (existingActive) {
+          throw new BadRequestException(
+            `Ya existe un turno activo para la patente ${plate.toUpperCase()} · ${existingActive.customerName}`,
+          );
+        }
+
+        const appointment = manager.create(Appointment, { ...dto, timeEnd, createdBy: userId, status: 'scheduled' });
+        return manager.save(Appointment, appointment);
+      });
+    } catch (err: any) {
+      if (err?.code === '23505' && err?.constraint === 'appointments_one_active_per_plate') {
+        throw new BadRequestException(`Ya existe un turno activo para la patente ${plate.toUpperCase()}.`);
+      }
+      throw err;
+    }
 
     void this.trackingService
       .initForMechanic(saved.id, serviceType.name, Number(serviceType.durationHours))

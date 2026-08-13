@@ -209,23 +209,32 @@ export class BodyshopService {
       ...(dto.extraProcesses ?? []).filter(p => p.hours > 0),
     ];
 
-    // Bloquear patente duplicada: no permitir dos trabajos activos para el mismo vehículo
-    const existingActive = await this.entryRepo
-      .createQueryBuilder('e')
-      .where('e.workshopId = :wsId', { wsId: dto.workshopId })
-      .andWhere('UPPER(e.plate) = UPPER(:plate)', { plate: dto.plate.trim() })
-      .andWhere('e.status NOT IN (:...statuses)', { statuses: ['done', 'cancelled'] })
-      .getOne();
-    if (existingActive) {
-      throw new BadRequestException(
-        `Ya existe un trabajo activo para la patente ${dto.plate.trim().toUpperCase()} · ${existingActive.customerName}`
-      );
-    }
-
     // entry + slots + asignación de técnicos se escriben atómicamente: si cualquiera
     // de los 3 falla, no debe quedar un ingreso a medio crear (sin slots o sin técnico).
     // Tracking init y push a DMS quedan afuera, como side-effects post-commit.
-    const saved = await this.dataSource.transaction(async manager => {
+    //
+    // El chequeo de "patente duplicada" vive DENTRO de esta transacción (detrás
+    // de un advisory lock por workshop+patente) — antes corría afuera, check-then-act,
+    // así que dos creaciones casi simultáneas para la misma patente podían pasar
+    // ambas (auditoría pre-producción 2026-08-13, hallazgo BE-02/A-4). El índice
+    // único parcial de la migración 012 es el respaldo final a nivel DB.
+    let saved: BodyshopEntry;
+    try {
+      saved = await this.dataSource.transaction(async manager => {
+      const plate = dto.plate.trim();
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [`${dto.workshopId}:${plate.toUpperCase()}`]);
+
+      const existingActive = await manager.createQueryBuilder(BodyshopEntry, 'e')
+        .where('e.workshopId = :wsId', { wsId: dto.workshopId })
+        .andWhere('UPPER(e.plate) = UPPER(:plate)', { plate })
+        .andWhere('e.status NOT IN (:...statuses)', { statuses: ['done', 'cancelled'] })
+        .getOne();
+      if (existingActive) {
+        throw new BadRequestException(
+          `Ya existe un trabajo activo para la patente ${plate.toUpperCase()} · ${existingActive.customerName}`
+        );
+      }
+
       const entry = manager.create(BodyshopEntry, {
         workshopId:          dto.workshopId,
         date:                dto.date,
@@ -317,7 +326,13 @@ export class BodyshopService {
       }
 
       return savedEntry;
-    });
+      });
+    } catch (err: any) {
+      if (err?.code === '23505' && err?.constraint === 'bodyshop_entries_one_active_per_plate') {
+        throw new BadRequestException(`Ya existe un trabajo activo para la patente ${dto.plate.trim().toUpperCase()}.`);
+      }
+      throw err;
+    }
 
     const hoursByCode: Record<string, number> = allProcesses.reduce<Record<string, number>>(
       (acc, p) => ({ ...acc, [p.code]: p.hours }), {},
@@ -773,10 +788,31 @@ export class BodyshopService {
     }
 
     const occupiedByProcess: Record<BalanceProcess, number> = { BODYWORK: 0, PREP: 0, PAINT: 0, POLISH: 0, FINAL_CONTROL: 0 };
+    // Horas que cuentan en occupiedByProcess pero no tienen técnico dueño en
+    // byTechnician (presupuesto pendiente sin asignar, o técnico desactivado
+    // sin reemplazo) — antes desaparecían sin dejar rastro (ID-02).
+    const unassignedByProcess: Record<BalanceProcess, number> = { BODYWORK: 0, PREP: 0, PAINT: 0, POLISH: 0, FINAL_CONTROL: 0 };
+    const techHoursMap = new Map<string, number>();
+    // Detalle de a qué ingresos corresponden esas horas — para el popup de
+    // "trabajos del técnico" en el frontend (Calendario de Capacidad → click
+    // en celda de operario). No confundir con dayCap.entries (todos los
+    // ingresos del día): acá es por técnico, con la porción de horas de ESE
+    // técnico en ESE proceso ese día puntual.
+    const techJobsMap = new Map<string, { entryId: string; plate: string; processCode: BalanceProcess; processLabel: string; hours: number }[]>();
+    const addTechJob = (technicianId: string, entryId: string, plate: string, code: BalanceProcess, hours: number) => {
+      if (!techJobsMap.has(technicianId)) techJobsMap.set(technicianId, []);
+      techJobsMap.get(technicianId)!.push({ entryId, plate, processCode: code, processLabel: PROCESS_LABEL[code], hours: round2(hours) });
+    };
 
-    // Modelo secuencial de 5 fases: Chapería→Prep→Pintura→Pulida→Control Final.
-    // Las horas por proceso vienen de entryHoursByProcess() (jsonb con fallback
-    // legacy — ver decisión de diseño 3), NO de columnas nuevas.
+    // Auditoría pre-producción 2026-08-13 (ID-02, P0): el detalle por técnico
+    // (byTechnician) no sumaba al total del proceso (byProcess) porque vivían
+    // en dos loops con lógicas distintas — este reparte horas/stayDays parejo
+    // en TODOS los días de la estadía, mientras occupiedByProcess sí respeta
+    // la ventana real del proceso (cursor/windows, más abajo). Unificados en
+    // un solo pase: se computan las ventanas UNA vez por ingreso y tanto el
+    // total del proceso como el detalle por técnico usan la MISMA ventana y
+    // el MISMO share (horas del proceso / días de esa ventana) — así nunca
+    // pueden divergir para la misma fecha/proceso.
     for (const e of entriesInShop) {
       const hoursByProc = this.entryHoursByProcess(e);
 
@@ -798,8 +834,35 @@ export class BodyshopService {
       if (dayIndex < 0 || dayIndex >= totalDays) continue;
 
       const win = windows.find(w => dayIndex >= w.start && dayIndex < w.start + w.days);
-      if (win) {
-        occupiedByProcess[win.proc] += win.days > 0 ? hoursByProc[win.proc] / win.days : 0;
+      if (!win) continue;
+
+      const dailyShare = win.days > 0 ? hoursByProc[win.proc] / win.days : 0;
+      occupiedByProcess[win.proc] += dailyShare;
+      if (dailyShare <= 0) continue;
+
+      const assigned = ((e as any).processTechsList ?? []).find(
+        (pt: any) => pt.process === win.proc && pt.technicianId,
+      );
+
+      if (assigned) {
+        techHoursMap.set(assigned.technicianId, (techHoursMap.get(assigned.technicianId) ?? 0) + dailyShare);
+        addTechJob(assigned.technicianId, e.id, e.plate, win.proc, dailyShare);
+      } else {
+        // Técnico desactivado con asignación activa, o nunca asignado: las
+        // horas siguen contando en el total del proceso (occupiedByProcess,
+        // arriba) — antes desaparecían silenciosamente de byTechnician acá.
+        // Ahora quedan explícitas en unassignedByProcess (expuesto en
+        // byProcess[proc].unassignedHours) en vez de perderse.
+        const procTechs = activeTechs.filter(t => techProcess(t.specialty) === win.proc);
+        if (procTechs.length > 0) {
+          const share = dailyShare / procTechs.length;
+          for (const tech of procTechs) {
+            techHoursMap.set(tech.id, (techHoursMap.get(tech.id) ?? 0) + share);
+            addTechJob(tech.id, e.id, e.plate, win.proc, share);
+          }
+        } else {
+          unassignedByProcess[win.proc] += dailyShare;
+        }
       }
     }
 
@@ -807,50 +870,12 @@ export class BodyshopService {
       const procs: BudgetProcess[] = budget.processes ?? [];
       for (const p of procs) {
         if ((BALANCE_PROCESSES as string[]).includes(p.code)) {
-          occupiedByProcess[p.code as BalanceProcess] += Number(p.hours);
-        }
-      }
-    }
-
-    const techHoursMap = new Map<string, number>();
-    // Detalle de a qué ingresos corresponden esas horas — para el popup de
-    // "trabajos del técnico" en el frontend (Calendario de Capacidad → click
-    // en celda de operario). No confundir con dayCap.entries (todos los
-    // ingresos del día): acá es por técnico, con la porción de horas de ESE
-    // técnico en ESE proceso ese día puntual.
-    const techJobsMap = new Map<string, { entryId: string; plate: string; processCode: BalanceProcess; processLabel: string; hours: number }[]>();
-    const addTechJob = (technicianId: string, entryId: string, plate: string, code: BalanceProcess, hours: number) => {
-      if (!techJobsMap.has(technicianId)) techJobsMap.set(technicianId, []);
-      techJobsMap.get(technicianId)!.push({ entryId, plate, processCode: code, processLabel: PROCESS_LABEL[code], hours: round2(hours) });
-    };
-    for (const e of entriesInShop) {
-      const stayDays = Math.max(Number((e as any).stayDays) || 1, 1);
-
-      const hoursByProc = this.entryHoursByProcess(e);
-      const processDefs: Array<{ code: BalanceProcess; hours: number }> = BALANCE_PROCESSES.map(code => ({
-        code, hours: hoursByProc[code],
-      }));
-
-      for (const { code, hours } of processDefs) {
-        if (hours <= 0) continue;
-        const dailyShare = hours / stayDays;
-
-        const assigned = ((e as any).processTechsList ?? []).find(
-          (pt: any) => pt.process === code && pt.technicianId,
-        );
-
-        if (assigned) {
-          techHoursMap.set(assigned.technicianId, (techHoursMap.get(assigned.technicianId) ?? 0) + dailyShare);
-          addTechJob(assigned.technicianId, e.id, e.plate, code, dailyShare);
-        } else {
-          const procTechs = activeTechs.filter(t => techProcess(t.specialty) === code);
-          if (procTechs.length > 0) {
-            const share = dailyShare / procTechs.length;
-            for (const tech of procTechs) {
-              techHoursMap.set(tech.id, (techHoursMap.get(tech.id) ?? 0) + share);
-              addTechJob(tech.id, e.id, e.plate, code, share);
-            }
-          }
+          // Presupuestos pendientes de aprobar todavía no tienen técnico
+          // asignado (no hay processTechsList) — cuentan en el total del
+          // proceso pero no pueden tener un dueño en byTechnician, así que
+          // van al mismo bucket "sin técnico" que los ingresos huérfanos.
+          occupiedByProcess[p.code as BalanceProcess]    += Number(p.hours);
+          unassignedByProcess[p.code as BalanceProcess]  += Number(p.hours);
         }
       }
     }
@@ -888,6 +913,10 @@ export class BodyshopService {
         label: PROCESS_LABEL[proc],
         commercializableHours: comm,
         occupiedHours: occ,
+        // occupiedHours = Σ byTechnician[].usedHours (mismo proceso/fecha) + unassignedHours.
+        // Antes de ID-02 esta identidad no se podía verificar porque los dos
+        // lados salían de loops distintos con lógicas distintas.
+        unassignedHours: round2(unassignedByProcess[proc]),
         availableHours: avail,
         occupancyRate: rate,
         status: capacityStatus(rate),

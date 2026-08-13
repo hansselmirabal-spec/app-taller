@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AppointmentsService, UpdateAppointmentDto } from '../modules/appointments/appointments.service';
 import { Appointment } from '../modules/appointments/appointment.entity';
@@ -52,6 +52,12 @@ describe('AppointmentsService', () => {
       createQueryBuilder: jest.fn(),
     };
 
+    // create() está cubierto en detalle por appointments-create.service.spec.ts
+    // (incluida la patente duplicada, auditoría 2026-08-13 BE-02/A-4). Acá solo
+    // hace falta que el módulo resuelva DataSource — ningún test de este
+    // archivo ejercita create().
+    const dataSource = { transaction: jest.fn() };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AppointmentsService,
@@ -63,6 +69,7 @@ describe('AppointmentsService', () => {
         { provide: WorkshopsService,   useValue: { findOne: jest.fn(), findByName: jest.fn() } },
         { provide: DmsSyncService,  useValue: { pushToAgendamiento: jest.fn().mockResolvedValue(undefined) } },
         { provide: TrackingService, useValue: { initForMechanic: jest.fn().mockResolvedValue(undefined) } },
+        { provide: getDataSourceToken(), useValue: dataSource },
       ],
     }).compile();
 

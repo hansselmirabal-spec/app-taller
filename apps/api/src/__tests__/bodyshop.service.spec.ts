@@ -201,6 +201,13 @@ function makeManager(entryRepo: any, slotRepo: any, ptRepo: any) {
       if (tag) return repoFor(tag).save(a);
       throw new Error('makeManager.save: no se pudo determinar la entidad target');
     },
+    // El chequeo de patente duplicada (auditoría 2026-08-13, BE-02/A-4) ahora
+    // corre como manager.createQueryBuilder(BodyshopEntry, 'e')...getOne()
+    // dentro de la transacción — enruta al mismo mock de entryRepo para que
+    // los tests que configuran su secuencia de getOne() (duplicado + recarga)
+    // sigan viendo la misma instancia de query builder.
+    createQueryBuilder: (entity: any, alias: string) => repoFor(entity).createQueryBuilder(alias),
+    query: async (_sql: string, _params?: any[]) => [],
   };
 }
 
@@ -647,6 +654,56 @@ describe('BodyshopService', () => {
       expect(dia2.byProcess.BODYWORK.occupiedHours).toBe(0);
       expect(dia2.byProcess.PREP.occupiedHours).toBe(0);
       expect(dia2.byProcess.PAINT.occupiedHours).toBe(6);
+    });
+
+    // Auditoría pre-producción 2026-08-13 (ID-02, P0): antes de este fix,
+    // byTechnician repartía horas/stayDays parejo en TODOS los días de la
+    // estadía sin importar la ventana real del proceso — el técnico de
+    // Pintura mostraba usedHours>0 el día de Chapería, aunque
+    // byProcess.PAINT.occupiedHours ya daba 0 ese mismo día.
+    it('byTechnician.usedHours coincide con byProcess.occupiedHours — no suma horas fuera de la ventana real del proceso', async () => {
+      const entryWithTech = {
+        ...MOCK_ENTRY,
+        bodyworkHours: 8, prepHours: 0, paintHours: 8, stayDays: 2,
+        processTechsList: [{ process: 'PAINT', technicianId: TECH_PAINT }],
+      };
+      const qb = makeQb([entryWithTech]);
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
+      await build({ entryRepo });
+
+      // Día 0: fase Chapería. El técnico de Pintura NO debe tener horas — ni
+      // en el proceso (ya lo cubría el test anterior) ni en su propia fila.
+      const dia0 = await service.getDayCapacity(WS_ID, '2026-06-10');
+      expect(dia0.byProcess.PAINT.occupiedHours).toBe(0);
+      const paintTechDia0 = dia0.byTechnician.find((t: any) => t.technicianId === TECH_PAINT);
+      expect(paintTechDia0).toBeDefined();
+      expect(paintTechDia0!.usedHours).toBe(0);
+      expect(paintTechDia0!.jobs).toEqual([]);
+
+      // Día 1: fase Pintura. Ahora sí — y ambos lados deben coincidir exacto.
+      const dia1 = await service.getDayCapacity(WS_ID, '2026-06-11');
+      expect(dia1.byProcess.PAINT.occupiedHours).toBe(8);
+      const paintTechDia1 = dia1.byTechnician.find((t: any) => t.technicianId === TECH_PAINT);
+      expect(paintTechDia1).toBeDefined();
+      expect(paintTechDia1!.usedHours).toBe(8);
+      expect(paintTechDia1!.jobs).toHaveLength(1);
+      expect(paintTechDia1!.jobs[0]).toMatchObject({ processCode: 'PAINT', hours: 8 });
+    });
+
+    it('presupuesto pendiente sin técnico asignado: cuenta en occupiedHours y queda visible en unassignedHours (no desaparece)', async () => {
+      const qb = makeQb([]); // sin entries activos, solo el presupuesto pendiente
+      entryRepo = makeEntryRepo({ createQueryBuilder: jest.fn().mockReturnValue(qb) });
+      const budgetApptRepo = {
+        find: jest.fn().mockResolvedValue([
+          { id: 'budget-1', processes: [{ code: 'PAINT', hours: 3 }] },
+        ]),
+        findOne: jest.fn().mockResolvedValue(null),
+      };
+      await build({ entryRepo, budgetApptRepo });
+
+      const result = await service.getDayCapacity(WS_ID, '2026-06-10');
+      expect(result.byProcess.PAINT.occupiedHours).toBe(3);
+      expect(result.byProcess.PAINT.unassignedHours).toBe(3);
     });
 
     it('status RISK cuando occupancyRate >= 0.8', async () => {
