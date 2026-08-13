@@ -25,6 +25,8 @@ Cómo reproducir: revisar el directorio de backups en el servidor, está vacío.
 Impacto: si se corrompe la base o hay un error humano/migración destructiva, **no hay forma de restaurar** — pérdida total de datos.
 Severidad: **P0**
 Recomendación: agregar backup automático diario (cron o step de CI antes del deploy) con retención y, como mínimo, una prueba real de restore en ambiente aislado antes de dar por válida la estrategia de backup (ver sección 15 del pedido original — "backup no probado = backup no validado").
+
+**Actualización 2026-08-13 (resuelto el mismo día):** agregado `/opt/stacks/app-taller/scripts/backup/backup-cron.sh` (pg_dump comprimido de PROD y QAS, retención 14 días) + cron diario 03:00 (`crontab -l` del usuario `grafana`). Corrido manualmente una vez: generó `prod_20260813_182837.sql.gz` (31KB) y `qas_20260813_182837.sql.gz` (8.5MB). Prueba de restore real ejecutada contra el propio servidor: `DROP/CREATE DATABASE restore_test` + `psql < prod_....sql.gz` descomprimido → 30 tablas restauradas en 4s, conteo de filas verificado idéntico entre origen y restaurado en `technicians` (0=0) y `bodyshop_processes` (4=4, tabla de catálogo/seed). Base temporal eliminada al terminar. RPO ≈ 24h (backup diario), RTO ≈ segundos dado el tamaño actual de la base. Bloqueante cerrado.
 Esfuerzo: **S** (automatizar el cron) + **M** (prueba de restore)
 Bloquea producción: **Sí**
 
@@ -80,12 +82,12 @@ Bloquea producción: No (pero es parte del gate final recomendado antes de aprob
 
 ## Backup y recuperación (sección 15 del pedido)
 
-- Backup automatizado: **NO existe** en el pipeline real (ver DEVOPS-02).
-- Prueba de restore: **NO se realizó nunca** — no hay evidencia de un restore real ejecutado.
-- RPO/RTO: **no definidos**, no se puede estimar sin backups reales.
-- Conclusión: **Backup = NO VALIDADO**, tal como indica explícitamente el criterio del pedido de auditoría ("si nunca se probó restauración, considerar backup como NO VALIDADO").
+- Backup automatizado: **✅ Resuelto 2026-08-13** — cron diario 03:00 en el servidor, PROD y QAS, retención 14 días (ver DEVOPS-02).
+- Prueba de restore: **✅ Realizada 2026-08-13** — restore real de PROD contra base temporal, 30 tablas, conteos de filas verificados idénticos, 4s.
+- RPO/RTO: RPO ≈ 24h (frecuencia del cron), RTO ≈ segundos con el tamaño actual de la base — reevaluar cuando haya volumen de datos real.
+- Conclusión: **Backup = VALIDADO** (2026-08-13).
 
 ## Score
 
-- DevOps/Infraestructura: **35/100**
-- Recomendación de dominio: **NO-GO** hasta resolver DEVOPS-01, DEVOPS-02 y DEVOPS-03 (los tres son P0 con evidencia directa y reproducible).
+- DevOps/Infraestructura: **35/100** (score original de la auditoría — no recalculado tras el fix de backup; ver actualización en DEVOPS-02)
+- Recomendación de dominio original: **NO-GO** hasta resolver DEVOPS-01, DEVOPS-02 y DEVOPS-03. **Actualización 2026-08-13:** DEVOPS-02 (backup) cerrado. DEVOPS-01 (TLS) y DEVOPS-03 (SMTP) siguen abiertos, pendientes de decisión/credenciales del usuario.

@@ -2,7 +2,7 @@
 
 Basado en la sección 23 ("Gate final") del pedido original de auditoría. Estado real ya conocido por los 9 informes de dominio (`docs/audit/02` a `docs/audit/11`) — nada de esto se re-ejecutó en esta pasada de consolidación.
 
-**Actualización 2026-08-13:** los 4 bloqueantes P0 de código (BE-01/A-3, BE-02/A-4, A-2, ID-02, FE-16) ya se corrigieron y desplegaron a QAS el mismo día (PR #50, #51, #52) — ver detalle en `12-REMEDIATION-PLAN.md`. Los 4 P0 de infraestructura/decisión de negocio (TLS, SMTP, backup/restore, deriva de PROD) siguen pendientes.
+**Actualización 2026-08-13:** los 4 bloqueantes P0 de código (BE-01/A-3, BE-02/A-4, A-2, ID-02, FE-16) ya se corrigieron y desplegaron a QAS el mismo día (PR #50, #51, #52), y el backup/restore de PROD+QAS quedó automatizado y probado (cron + restore real validado) — ver detalle en `12-REMEDIATION-PLAN.md`. Quedan pendientes TLS, SMTP y aclarar la deriva de PROD, todos por decisión/credenciales del usuario.
 
 ---
 
@@ -21,7 +21,7 @@ Basado en la sección 23 ("Gate final") del pedido original de auditoría. Estad
 | Integration tests | ✅ Cubiertos como parte de la suite Jest arriba | Cobertura sólida en cálculo de capacidad y transiciones de `TrackingLog`; gaps puntuales en duplicidad de vehículo (QA-03) y `RolesGuard` (QA-04) — `07-QA-AUDIT.md` |
 | E2E críticos | ⚠️ Parcial | Existe `apps/web/e2e/auth.spec.ts` (Playwright) pero no se ejecutó en esta auditoría (requiere servidor vivo, fuera del alcance de `pnpm test`) — `07-QA-AUDIT.md`. Ver los 10 casos E2E de negocio abajo, ninguno ejecutado en esta pasada. |
 | Migraciones desde base de datos limpia | ⚠️ No probado | No se ejecutó "correr todas las migraciones desde Postgres vacío" en esta auditoría; migraciones existen y están numeradas secuencialmente (001-010) pero su reproducibilidad end-to-end no tiene evidencia directa (DEVOPS-07) |
-| Prueba de backup/restore | ❌ Nunca ejecutado | Directorio de backups en el servidor vacío (solo el script `backup.sh`, cero `.sql`); sin cron ni systemd timer; pipeline real de deploy no tiene step de `pg_dump`. Backup = **NO VALIDADO** por criterio explícito del pedido de auditoría (DEVOPS-02) |
+| Prueba de backup/restore | ✅ Resuelto 2026-08-13 | Cron diario 03:00 (PROD+QAS, retención 14d) instalado en el servidor; restore real ejecutado contra base temporal (30 tablas, conteos de filas verificados idénticos, 4s), base temporal eliminada al terminar. RPO≈24h, RTO≈segundos. Backup = **VALIDADO** (DEVOPS-02) |
 | Smoke test del deployment | ⚠️ Parcial | El pipeline de PROD sí tiene rollback automático a última imagen sana si el healthcheck post-deploy falla (DEVOPS-05, aspecto positivo), pero no cubre incompatibilidad de schema tras rollback de imagen. No hay evidencia de un smoke test manual explícito post-deploy en esta pasada. |
 | Estado real de PROD vs. QAS | ❌ Divergente | PROD 5 migraciones atrás, 0 filas en todas las tablas operativas, imagen ~3 semanas más vieja que QAS (A-1) — contradice la premisa de "producción activa"; requiere aclarar con el equipo si este es el ambiente productivo real |
 | TLS en el compose real de producción | ❌ No configurado | `docker-compose.portainer.yml` (el que efectivamente se despliega) sirve por HTTP plano; `docker-compose.prod.yml` (con TLS/certbot) existe en el repo pero nunca se usa (SEC-01, DEVOPS-01) |
