@@ -54,7 +54,7 @@ export class TrackingLog {
   @Column({ name: 'process_type', type: 'varchar', length: 10, default: 'MOTHER' })
   processType: 'MOTHER' | 'PARALLEL';
 
-  @Column({ name: 'technician_id', type: 'varchar', length: 100, nullable: true })
+  @Column({ name: 'technician_id', type: 'uuid', nullable: true })
   technicianId: string | null;
 
   @Column({ name: 'technician_name', type: 'varchar', length: 100, nullable: true })
