@@ -3,6 +3,8 @@
 **Fecha:** 2026-08-13
 **Alcance:** consolidación de 9 auditorías de dominio (funcional, backend, frontend, base de datos, seguridad, QA, performance, DevOps, SaaS readiness) + riesgos DMS documentados por separado. Este documento no re-audita nada — sintetiza los 9 informes ya escritos en `docs/audit/02` a `docs/audit/11`.
 
+> **Actualización 2026-08-13 (mismo día, post-auditoría):** de los 9 bloqueantes P0, **5 ya se cerraron**: los 4 de código (BE-01/A-3, BE-02/A-4, A-2, ID-02, FE-16 — PR #50/#51/#52, en QAS) más backup/restore de PROD (DEVOPS-02, automatizado y probado con éxito). Además, el usuario confirmó que **PROD no está en uso real hoy** (todo lo probado pasa por QAS) — la "deriva de schema en PROD" (A-1) deja de ser un bloqueante urgente y pasa a ser un paso del checklist de go-live (correr el deploy a PROD recién cuando se decida ir a producción real). Quedan 2 P0 abiertos, ambos por decisión/credenciales del usuario: **TLS** y **SMTP** en PROD. Ver estado detallado en `12-REMEDIATION-PLAN.md`.
+
 ---
 
 ## 1. Decisión: **NO-GO** (hasta cerrar un set acotado de P0)
