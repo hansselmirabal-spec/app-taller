@@ -238,11 +238,17 @@ export interface BodyshopEntry {
   // Técnico global (lead / fallback)
   technicianId?: string;
   technician?: Technician;
+  // Horas de Pulida/Control Final (y paralelos) — no viven en columnas propias,
+  // solo acá. Antes formatEntry() del backend no lo mandaba (auditoría
+  // pre-producción 2026-08-13, FE-16) y quedaba siempre undefined en el front.
+  processes?: { code: string; name: string; hours: number }[] | null;
   // Técnico por proceso — un técnico responsable por cada proceso
   processTechs?: {
-    BODYWORK?: ProcessTechAssignment;
-    PREP?:     ProcessTechAssignment;
-    PAINT?:    ProcessTechAssignment;
+    BODYWORK?:      ProcessTechAssignment;
+    PREP?:          ProcessTechAssignment;
+    PAINT?:         ProcessTechAssignment;
+    POLISH?:        ProcessTechAssignment;
+    FINAL_CONTROL?: ProcessTechAssignment;
   };
   // Resultado del push al DMS Condor (sólo presente en la respuesta de creación)
   dmsSync?: { success: boolean; dmsId?: string; error?: string };

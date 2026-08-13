@@ -779,7 +779,7 @@ export async function assignBodyshopTechnician(
 export async function assignBodyshopProcessTechnician(
   workshopId: string,
   entryId: string,
-  process: 'BODYWORK' | 'PREP' | 'PAINT',
+  process: BodyshopBalanceProcess,
   technicianId: string | null,
 ): Promise<BodyshopEntry> {
   if (MOCK) {

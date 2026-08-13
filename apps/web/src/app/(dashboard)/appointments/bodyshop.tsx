@@ -14,13 +14,14 @@ import { useSetExitDate } from '@/hooks/use-tracking';
 import { useModulePermission } from '@/hooks/use-module-permission';
 import { useTechnicians } from '@/hooks/use-technicians';
 import { useDailyCapacity } from '@/hooks/use-capacity';
-import { formatDate, sumBodyshopHours, sumBodyshopHoursWithExtras } from '@/lib/utils';
+import { formatDate, sumBodyshopHoursWithExtras } from '@/lib/utils';
 import { getWeekDays, entriesOnDay } from '@/lib/bodyshop-calendar';
+import { BODYSHOP_PROCESSES, entryProcessHours } from '@/lib/bodyshop-processes';
 import { ActivitiesPanel } from '@/components/kanban/activities-panel';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { TechnicianCreateDialog } from '@/components/appointments/technician-create-dialog';
 import { CitaTypeDialog } from '@/components/appointments/cita-type-dialog';
-import type { BodyshopEntry, CapacityStatus, Technician } from '@/types';
+import type { BodyshopEntry, BodyshopBalanceProcess, CapacityStatus, Technician } from '@/types';
 import { InfoButton } from '@/components/ui/info-button';
 import { MotivationalLoader } from '@/components/ui/motivational-loader';
 
@@ -521,11 +522,11 @@ function HoursPill({ hours, label, className }: { hours: number; label: string; 
 
 // ─── EntryPopup ───────────────────────────────────────────────────────────────
 
-const PROCESS_CFG = [
-  { key: 'bodywork' as const, label: 'Chapería',    color: '#3b82f6', field: 'bodyworkHours' as const },
-  { key: 'prep'     as const, label: 'Preparación', color: '#8b5cf6', field: 'prepHours'     as const },
-  { key: 'paint'    as const, label: 'Pintura',     color: '#f97316', field: 'paintHours'    as const },
-];
+// Catálogo canónico de 5 procesos — ver lib/bodyshop-processes.ts (auditoría
+// pre-producción 2026-08-13, FE-16: Pulida y Control Final no aparecían acá
+// porque no viven en columnas propias de BodyshopEntry, solo en
+// entry.processes — hoy resuelto vía entryProcessHours()).
+const PROCESS_CFG = BODYSHOP_PROCESSES;
 
 function TechnicianAssigner({
   entry,
@@ -734,10 +735,6 @@ function TechnicianAssigner({
 // ─── ProcessTechRow ───────────────────────────────────────────────────────────
 // Muestra el técnico asignado a un proceso específico con opción de cambiar.
 
-const PROCESS_PROCESS_KEY: Record<string, 'BODYWORK' | 'PREP' | 'PAINT'> = {
-  Chapería: 'BODYWORK', Preparación: 'PREP', Pintura: 'PAINT',
-};
-
 function ProcessTechRow({
   entry,
   processKey,
@@ -747,7 +744,7 @@ function ProcessTechRow({
   compact = false,
 }: {
   entry: BodyshopEntry;
-  processKey: 'BODYWORK' | 'PREP' | 'PAINT';
+  processKey: BodyshopBalanceProcess;
   processLabel: string;
   processColor: string;
   hours: number;
@@ -774,12 +771,15 @@ function ProcessTechRow({
     return 'text-emerald-600';
   }
 
-  // Candidatos: misma especialidad, solo activos
+  // Candidatos: misma especialidad, solo activos. Mismos alias que
+  // settings/technicians (PULIDO/PULIDOR → POLISH, CONTROL_FINAL → FINAL_CONTROL).
   const candidates = allTechs.filter(t => {
     const spec = t.specialty?.toLowerCase() ?? '';
-    if (processKey === 'BODYWORK') return spec.includes('chap');
-    if (processKey === 'PREP')     return spec.includes('prep');
-    if (processKey === 'PAINT')    return spec.includes('pint') || spec.includes('paint');
+    if (processKey === 'BODYWORK')      return spec.includes('chap');
+    if (processKey === 'PREP')          return spec.includes('prep');
+    if (processKey === 'PAINT')         return spec.includes('pint') || spec.includes('paint');
+    if (processKey === 'POLISH')        return spec.includes('pulid') || spec.includes('polish');
+    if (processKey === 'FINAL_CONTROL') return spec.includes('control');
     return true;
   });
 
@@ -1142,13 +1142,12 @@ function EntryPopup({
                 <Wrench className="h-3.5 w-3.5" /> Procesos y técnicos
               </p>
               <div className="space-y-3">
-                {PROCESS_CFG.map(({ label, color, field }) => {
-                  const h   = entry[field];
+                {PROCESS_CFG.map(({ code, label, color }) => {
+                  const h   = entryProcessHours(entry, code);
                   if (h === 0) return null;
                   const pct = totalHours > 0 ? (h / totalHours) * 100 : 0;
-                  const pk  = PROCESS_PROCESS_KEY[label] ?? 'BODYWORK';
                   return (
-                    <div key={field} className="bg-slate-50 rounded-xl p-3 space-y-2">
+                    <div key={code} className="bg-slate-50 rounded-xl p-3 space-y-2">
                       {/* Barra + horas */}
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-semibold w-20 flex-shrink-0" style={{ color }}>{label}</span>
@@ -1160,7 +1159,7 @@ function EntryPopup({
                       {/* Técnico del proceso */}
                       <ProcessTechRow
                         entry={entry}
-                        processKey={pk}
+                        processKey={code}
                         processLabel={label}
                         processColor={color}
                         hours={h}
@@ -1593,26 +1592,23 @@ function BodyshopCalendar({
             </button>
           </div>
 
-          {/* Capacity strip for selected day */}
+          {/* Capacity strip for selected day — 5 procesos reales (auditoría
+              pre-producción 2026-08-13, FE-16: antes solo mostraba 3). */}
           {weekCap?.[selectedDate] && (
             <div className="mb-4 grid grid-cols-3 gap-2">
-              {([
-                { key: 'BODYWORK', label: 'Chapería',    badge: 'bg-blue-100 text-blue-700',    bar: 'bg-blue-400'   },
-                { key: 'PREP',     label: 'Preparación', badge: 'bg-violet-100 text-violet-700', bar: 'bg-violet-400' },
-                { key: 'PAINT',    label: 'Pintura',     badge: 'bg-orange-100 text-orange-700', bar: 'bg-orange-400' },
-              ] as const).map(({ key, label, badge, bar }) => {
-                const proc = weekCap[selectedDate].byProcess[key];
+              {BODYSHOP_PROCESSES.map(({ code, label, color }) => {
+                const proc = weekCap[selectedDate].byProcess[code];
                 return (
-                  <div key={key} className="bg-slate-50 rounded-lg border border-slate-100 px-2.5 py-2">
+                  <div key={code} className="bg-slate-50 rounded-lg border border-slate-100 px-2.5 py-2">
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${badge}`}>{label}</span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${color}1a`, color }}>{label}</span>
                       <span className="text-[10px] font-bold text-slate-600">
                         {Math.round(proc.occupancyRate * 100)}%
                       </span>
                     </div>
                     <div className="h-1 bg-slate-200 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full ${bar}`}
-                        style={{ width: `${Math.min(proc.occupancyRate * 100, 100)}%` }} />
+                      <div className="h-full rounded-full"
+                        style={{ width: `${Math.min(proc.occupancyRate * 100, 100)}%`, background: color }} />
                     </div>
                     <p className="text-[9px] text-slate-400 mt-1">
                       {proc.availableHours.toFixed(1)}h libres / {proc.commercializableHours.toFixed(1)}h tot.
@@ -1631,14 +1627,14 @@ function BodyshopCalendar({
           ) : (
             <div className="space-y-3">
               {dayEntries.map(e => {
-                const totalHours = sumBodyshopHours(e);
+                const totalHours = sumBodyshopHoursWithExtras(e);
                 const startDate  = parseISO(e.date + 'T12:00:00');
                 const endDate    = addDays(startDate, e.stayDays - 1);
-                const processes  = [
-                  { label: 'Chapería', hours: e.bodyworkHours, color: '#3b82f6', pk: 'BODYWORK' as const },
-                  { label: 'Prep.',    hours: e.prepHours,     color: '#8b5cf6', pk: 'PREP'     as const },
-                  { label: 'Pintura',  hours: e.paintHours,    color: '#f97316', pk: 'PAINT'    as const },
-                ];
+                // 5 procesos reales (auditoría pre-producción 2026-08-13,
+                // FE-16) — Pulida/Control Final vienen de entry.processes.
+                const processes  = BODYSHOP_PROCESSES.map(({ code, label, color }) => ({
+                  label, color, pk: code, hours: entryProcessHours(e, code),
+                }));
 
                 return (
                   <div key={e.id}
