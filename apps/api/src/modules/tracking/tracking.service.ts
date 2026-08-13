@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, Repository, In } from 'typeorm';
+import { DataSource, Repository, In, EntityManager } from 'typeorm';
 import { TrackingLog } from './tracking-log.entity';
 import { Appointment } from '../appointments/appointment.entity';
 import { BodyshopEntry } from '../bodyshop/bodyshop-entry.entity';
@@ -310,6 +310,28 @@ export class TrackingService {
 
   // ── Acciones ────────────────────────────────────────────────────────────────
 
+  // Serializa cualquier sección crítica de un técnico (chequeo de conflicto +
+  // escritura) contra llamadas concurrentes al mismo técnico, incluso entre
+  // instancias distintas del backend — pg_advisory_xact_lock es a nivel DB, no
+  // en memoria del proceso Node. Se libera solo al terminar la transacción
+  // (commit o rollback), nunca hay que soltarlo a mano.
+  private async withTechnicianLock<T>(technicianId: string, fn: (manager: EntityManager) => Promise<T>): Promise<T> {
+    try {
+      return await this.dataSource.transaction(async manager => {
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [technicianId]);
+        return fn(manager);
+      });
+    } catch (err: any) {
+      // Red de seguridad a nivel DB (índice único parcial en tracking_logs,
+      // migración 011): si por lo que sea dos transacciones lo esquivan, el
+      // constraint devuelve 23505 en vez de dejar pasar el duplicado.
+      if (err?.code === '23505' && err?.constraint === 'tracking_logs_one_in_progress_per_technician') {
+        throw new BadRequestException('Ese técnico ya está trabajando en otro vehículo. Hay que pausarlo o completarlo antes de continuar.');
+      }
+      throw err;
+    }
+  }
+
   async startProcess(logId: string, technicianId?: string, technicianName?: string): Promise<TrackingLog> {
     const log = await this.logRepo.findOne({ where: { id: logId } });
     if (!log) throw new NotFoundException('Proceso no encontrado');
@@ -334,8 +356,52 @@ export class TrackingService {
       }
     }
 
-    if (effectiveTechnicianId) {
-      const conflict = await this.logRepo.findOne({
+    const applyStart = async (manager: EntityManager) => {
+      if (log.processType === 'PARALLEL') {
+        // Un paralelo (ej. Mecánica) se hace afuera de Chapería: no consume
+        // técnicos del taller, pero mientras está en curso el vehículo no se
+        // puede seguir trabajando adentro. Al arrancarlo, pausamos el proceso
+        // madre activo (mismo mecanismo que blockProcess) con motivo = el
+        // nombre del paralelo, para que quede contado en el reloj de pausas y
+        // el operario deba reanudar explícitamente (con confirmación de
+        // técnico) cuando el paralelo termine. Confirmado con negocio 2026-07-31.
+        const activeMother = await manager.findOne(TrackingLog, {
+          where: { sourceType: log.sourceType, sourceId: log.sourceId, status: 'in_progress', processType: 'MOTHER' } as any,
+        });
+        if (activeMother) {
+          await this.pauseLog(activeMother, log.processName);
+          await this.setPauseStatus(log.sourceType, log.sourceId, true);
+        }
+      } else {
+        // MOTHER: solo un proceso madre in_progress por source a la vez.
+        // Se cambia a 'pending' pero se preserva startedAt para no corromper
+        // el cálculo de horas reales ni los semáforos de tiempo.
+        await manager
+          .createQueryBuilder()
+          .update(TrackingLog)
+          .set({ status: 'pending' })
+          .where('source_type = :st AND source_id = :si AND status = :s AND process_type = :pt', {
+            st: log.sourceType, si: log.sourceId, s: 'in_progress', pt: 'MOTHER',
+          })
+          .execute();
+      }
+
+      log.status = 'in_progress';
+      log.startedAt = new Date();
+      log.completedAt = null;
+      // Persistir el técnico resuelto (aunque haya venido del fallback, no de un
+      // parámetro explícito) para que quede consistente de acá en más: futuros
+      // chequeos de conflicto, reportes de productividad y la tarjeta del kanban.
+      if (effectiveTechnicianId)   log.technicianId   = effectiveTechnicianId;
+      if (effectiveTechnicianName) log.technicianName = effectiveTechnicianName;
+      return manager.save(TrackingLog, log);
+    };
+
+    // Sin técnico resuelto no hay conflicto posible que serializar.
+    if (!effectiveTechnicianId) return applyStart(this.logRepo.manager);
+
+    return this.withTechnicianLock(effectiveTechnicianId, async manager => {
+      const conflict = await manager.findOne(TrackingLog, {
         where: { technicianId: effectiveTechnicianId, status: 'in_progress' },
       });
       if (conflict && conflict.id !== logId && conflict.sourceId !== log.sourceId) {
@@ -343,46 +409,8 @@ export class TrackingService {
           `${conflict.technicianName || effectiveTechnicianName || 'El técnico'} ya está trabajando en otro vehículo (proceso "${conflict.processName}"). Hay que pausarlo o completarlo antes de iniciar este.`,
         );
       }
-    }
-
-    if (log.processType === 'PARALLEL') {
-      // Un paralelo (ej. Mecánica) se hace afuera de Chapería: no consume
-      // técnicos del taller, pero mientras está en curso el vehículo no se
-      // puede seguir trabajando adentro. Al arrancarlo, pausamos el proceso
-      // madre activo (mismo mecanismo que blockProcess) con motivo = el
-      // nombre del paralelo, para que quede contado en el reloj de pausas y
-      // el operario deba reanudar explícitamente (con confirmación de
-      // técnico) cuando el paralelo termine. Confirmado con negocio 2026-07-31.
-      const activeMother = await this.logRepo.findOne({
-        where: { sourceType: log.sourceType, sourceId: log.sourceId, status: 'in_progress', processType: 'MOTHER' } as any,
-      });
-      if (activeMother) {
-        await this.pauseLog(activeMother, log.processName);
-        await this.setPauseStatus(log.sourceType, log.sourceId, true);
-      }
-    } else {
-      // MOTHER: solo un proceso madre in_progress por source a la vez.
-      // Se cambia a 'pending' pero se preserva startedAt para no corromper
-      // el cálculo de horas reales ni los semáforos de tiempo.
-      await this.logRepo
-        .createQueryBuilder()
-        .update(TrackingLog)
-        .set({ status: 'pending' })
-        .where('source_type = :st AND source_id = :si AND status = :s AND process_type = :pt', {
-          st: log.sourceType, si: log.sourceId, s: 'in_progress', pt: 'MOTHER',
-        })
-        .execute();
-    }
-
-    log.status = 'in_progress';
-    log.startedAt = new Date();
-    log.completedAt = null;
-    // Persistir el técnico resuelto (aunque haya venido del fallback, no de un
-    // parámetro explícito) para que quede consistente de acá en más: futuros
-    // chequeos de conflicto, reportes de productividad y la tarjeta del kanban.
-    if (effectiveTechnicianId)   log.technicianId   = effectiveTechnicianId;
-    if (effectiveTechnicianName) log.technicianName = effectiveTechnicianName;
-    return this.logRepo.save(log);
+      return applyStart(manager);
+    });
   }
 
   // Snapshotea técnico + marca 'blocked' + libera bodyshop_process_techs.
@@ -461,43 +489,52 @@ export class TrackingService {
     const effectiveTechnicianId   = technicianId ?? log.technicianId ?? undefined;
     const effectiveTechnicianName = technicianName ?? log.technicianName ?? undefined;
 
-    if (effectiveTechnicianId) {
-      const conflict = await this.findTechnicianConflict(effectiveTechnicianId, logId);
-      if (conflict) {
-        throw new BadRequestException(
-          `${conflict.technicianName || effectiveTechnicianName || 'El técnico'} ya está trabajando en otro vehículo (proceso "${conflict.processName}"). Hay que pausarlo o completarlo antes de reanudar este.`,
-        );
+    const applyUnblock = async (manager: EntityManager) => {
+      log.status = log.startedAt ? 'in_progress' : 'pending';
+      log.blockedReason = null;
+      if (log.pausedAt) {
+        const deltaMins = (Date.now() - log.pausedAt.getTime()) / 60_000;
+        log.pausedDurationMinutes = (log.pausedDurationMinutes ?? 0) + deltaMins;
+        log.pausedAt = null;
       }
-    }
+      if (effectiveTechnicianId)   log.technicianId   = effectiveTechnicianId;
+      if (effectiveTechnicianName) log.technicianName = effectiveTechnicianName;
+      const saved = await manager.save(TrackingLog, log);
 
-    log.status = log.startedAt ? 'in_progress' : 'pending';
-    log.blockedReason = null;
-    if (log.pausedAt) {
-      const deltaMins = (Date.now() - log.pausedAt.getTime()) / 60_000;
-      log.pausedDurationMinutes = (log.pausedDurationMinutes ?? 0) + deltaMins;
-      log.pausedAt = null;
-    }
-    if (effectiveTechnicianId)   log.technicianId   = effectiveTechnicianId;
-    if (effectiveTechnicianName) log.technicianName = effectiveTechnicianName;
-    const saved = await this.logRepo.save(log);
-
-    // Recrea la fila de bodyshop_process_techs borrada en blockProcess — vuelve
-    // a sumar horas ocupadas del técnico confirmado. Upsert por unique key
-    // (entryId, process), mismo patrón que assignProcessTechnician en
-    // bodyshop.service.ts.
-    if (log.sourceType === 'bodyshop' && effectiveTechnicianId) {
-      const existing = await this.processTechRepo.findOne({
-        where: { entryId: log.sourceId, process: log.processCode },
-      });
-      if (existing) {
-        existing.technicianId = effectiveTechnicianId;
-        await this.processTechRepo.save(existing);
-      } else {
-        await this.processTechRepo.save(
-          this.processTechRepo.create({ entryId: log.sourceId, process: log.processCode, technicianId: effectiveTechnicianId }),
-        );
+      // Recrea la fila de bodyshop_process_techs borrada en blockProcess — vuelve
+      // a sumar horas ocupadas del técnico confirmado. Upsert por unique key
+      // (entryId, process), mismo patrón que assignProcessTechnician en
+      // bodyshop.service.ts.
+      if (log.sourceType === 'bodyshop' && effectiveTechnicianId) {
+        const existing = await manager.findOne(BodyshopProcessTech, {
+          where: { entryId: log.sourceId, process: log.processCode },
+        });
+        if (existing) {
+          existing.technicianId = effectiveTechnicianId;
+          await manager.save(BodyshopProcessTech, existing);
+        } else {
+          await manager.save(BodyshopProcessTech,
+            manager.create(BodyshopProcessTech, { entryId: log.sourceId, process: log.processCode, technicianId: effectiveTechnicianId }),
+          );
+        }
       }
-    }
+
+      return saved;
+    };
+
+    const saved = effectiveTechnicianId
+      ? await this.withTechnicianLock(effectiveTechnicianId, async manager => {
+          const conflict = await manager.findOne(TrackingLog, {
+            where: { technicianId: effectiveTechnicianId, status: 'in_progress' },
+          });
+          if (conflict && conflict.id !== logId) {
+            throw new BadRequestException(
+              `${conflict.technicianName || effectiveTechnicianName || 'El técnico'} ya está trabajando en otro vehículo (proceso "${conflict.processName}"). Hay que pausarlo o completarlo antes de reanudar este.`,
+            );
+          }
+          return applyUnblock(manager);
+        })
+      : await applyUnblock(this.logRepo.manager);
 
     // Solo restaurar si no hay otros procesos bloqueados para el mismo origen
     const otherBlocked = await this.logRepo.findOne({

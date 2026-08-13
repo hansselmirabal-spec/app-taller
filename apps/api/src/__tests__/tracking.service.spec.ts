@@ -143,17 +143,48 @@ function makeProcessTechRepo(overrides: any = {}) {
 // bodyshop.service.spec.ts) y permite simular el fallo de UNO de los dos writes
 // para probar que el otro nunca "confirma" (rollback).
 
-function makeManager(opts: { failOn?: 'log' | 'entry' } = {}) {
+// withTechnicianLock (startProcess/unblockProcess) también corre dentro de
+// dataSource.transaction(manager => ...) desde la auditoría 2026-08-13 (fix
+// BE-01/A-3). El manager mockeado enruta find/save/create por clase de
+// entidad hacia el repo mock real ya configurado por cada test (mismo objeto
+// jest.fn(), así las aserciones sobre logRepo.save/processTechRepo.save
+// siguen funcionando igual que antes de que esas llamadas quedaran adentro
+// de una transacción) — salvo `query` (el advisory lock), no-op acá, y el
+// fallback de TrackingLog nuevo sin logRepo explícito, usado por
+// addProcessToBodyshop.
+function makeManager(opts: {
+  failOn?: 'log' | 'entry';
+  logRepo?: any; processTechRepo?: any; entryRepo?: any;
+} = {}) {
   const saved: { entity: any; data: any }[] = [];
+  const repoFor = (entity: any) => {
+    if (entity === TrackingLog)         return opts.logRepo;
+    if (entity === BodyshopProcessTech) return opts.processTechRepo;
+    if (entity === BodyshopEntry)       return opts.entryRepo;
+    return undefined;
+  };
   const manager = {
-    create: (_entity: any, data: any) => ({ ...data }),
+    create: (entity: any, data: any) => {
+      const repo = repoFor(entity);
+      return repo?.create ? repo.create(data) : { ...data };
+    },
     save: async (entity: any, data: any) => {
       if (entity === TrackingLog && opts.failOn === 'log') throw new Error('DB down (log)');
       if (entity === BodyshopEntry && opts.failOn === 'entry') throw new Error('DB down (entry)');
       saved.push({ entity, data });
+      const repo = repoFor(entity);
+      if (repo?.save) return repo.save(data);
       if (entity === TrackingLog) return { id: 'log-new-001', ...data };
       return data;
     },
+    findOne: async (entity: any, findOpts: any) => {
+      const repo = repoFor(entity);
+      return repo?.findOne ? repo.findOne(findOpts) : null;
+    },
+    // Solo usado por startProcess (rama MOTHER) para el UPDATE masivo de
+    // hermanos in_progress→pending — siempre sobre TrackingLog.
+    createQueryBuilder: () => opts.logRepo?.createQueryBuilder?.() ?? makeQb(),
+    query: async (_sql: string, _params?: any[]) => [],
   };
   return { manager, saved };
 }
@@ -173,8 +204,13 @@ async function build(repos: {
   const entryRepo       = repos.entryRepo       ?? makeEntryRepo();
   const workshopRepo    = repos.workshopRepo    ?? makeWorkshopRepo();
   const processTechRepo = repos.processTechRepo ?? makeProcessTechRepo();
-  const { manager, saved } = repos.managerBundle ?? makeManager();
+  const { manager, saved } = repos.managerBundle ?? makeManager({ logRepo, processTechRepo, entryRepo });
   const dataSource      = makeDataSource(manager);
+  // TrackingService usa `this.logRepo.manager` como manager "sin lock" cuando
+  // no hay técnico que serializar (real: Repository.manager es la misma
+  // EntityManager compartida por toda la conexión) — acá lo apuntamos al
+  // mismo manager mockeado para que las rutas sin técnico también funcionen.
+  if (!logRepo.manager) logRepo.manager = manager;
 
   const mod = await Test.createTestingModule({
     providers: [
