@@ -17,7 +17,7 @@ export type {
   BodyshopSchedule, BodyshopScheduleEntry, BodyshopProcessWindow, BodyshopScheduleKpis,
 } from '@/lib/api';
 import { useWorkshopId } from '@/context/workshop-context';
-import type { BodyshopEntry } from '@/types';
+import type { BodyshopEntry, BodyshopBalanceProcess } from '@/types';
 export type { TechMonthlyRow } from '@/lib/api';
 
 
@@ -114,7 +114,7 @@ export function useAssignBodyshopProcessTechnician() {
   return useMutation({
     mutationFn: ({ entryId, process, technicianId }: {
       entryId: string;
-      process: 'BODYWORK' | 'PREP' | 'PAINT';
+      process: BodyshopBalanceProcess;
       technicianId: string | null;
     }) => assignBodyshopProcessTechnician(workshopId, entryId, process, technicianId),
     onSuccess: () => {

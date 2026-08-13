@@ -1367,6 +1367,11 @@ export class BodyshopService {
       technician:          e.technician,
       budgetNumber:        e.budgetNumber ?? null,
       estimatedFinishDate: e.estimatedFinishDate ?? null,
+      // Horas de Pulida/Control Final (y cualquier paralelo) viven acá, NO en
+      // columnas propias — sin este campo el frontend no puede mostrarlas
+      // (auditoría pre-producción 2026-08-13, FE-16; sumBodyshopHoursWithExtras
+      // en apps/web/src/lib/utils.ts ya esperaba este campo pero nunca llegaba).
+      processes:           e.processes ?? null,
       processTechs:        Object.keys(processTechs).length > 0 ? processTechs : undefined,
       createdBy:           e.createdBy,
       createdAt:           e.createdAt,

@@ -22,6 +22,7 @@ import { useWorkTypes } from '@/hooks/use-work-types';
 import { formatDate, round1 } from '@/lib/utils';
 import type { BodyshopDayCapacity, BodyshopEntry } from '@/types';
 import { InfoButton } from '@/components/ui/info-button';
+import { BODYSHOP_PROCESS_COLORS, BODYSHOP_PROCESS_LABELS } from '@/lib/bodyshop-processes';
 
 import 'react-grid-layout/css/styles.css';
 
@@ -46,12 +47,11 @@ const CHANNEL_LABELS: Record<string, string> = {
 const CHANNEL_COLORS: Record<string, string> = {
   walk_in: '#3b82f6', phone: '#8b5cf6', online: '#22c55e', insurance: '#f59e0b',
 };
-const PROCESS_COLORS: Record<string, string> = {
-  BODYWORK: '#3b82f6', PREP: '#8b5cf6', PAINT: '#f97316',
-};
-const PROCESS_LABELS: Record<string, string> = {
-  BODYWORK: 'Chapería', PREP: 'Preparación', PAINT: 'Pintura',
-};
+// Catálogo canónico de 5 procesos — ver lib/bodyshop-processes.ts (auditoría
+// pre-producción 2026-08-13, FE-16: antes solo tenía 3 de 5, Pulida y
+// Control Final desaparecían de estos gráficos).
+const PROCESS_COLORS = BODYSHOP_PROCESS_COLORS;
+const PROCESS_LABELS = BODYSHOP_PROCESS_LABELS;
 const STATUS_LABELS: Record<string, string> = {
   scheduled: 'Agendado', in_progress: 'En Proceso', done: 'Listo', cancelled: 'Cancelado',
 };
@@ -703,11 +703,10 @@ function TablaWidget({ data, variant = 'table' }: { data: BodyshopEntry[]; varia
 
 // ─── TechLoadWidget ───────────────────────────────────────────────────────────
 
-const PROCESS_BADGE: Record<string, { label: string; color: string }> = {
-  BODYWORK: { label: 'Chapería',    color: '#3b82f6' },
-  PREP:     { label: 'Preparación', color: '#8b5cf6' },
-  PAINT:    { label: 'Pintura',     color: '#f97316' },
-};
+// Catálogo canónico de 5 procesos — ver lib/bodyshop-processes.ts (FE-16).
+const PROCESS_BADGE: Record<string, { label: string; color: string }> = Object.fromEntries(
+  Object.entries(BODYSHOP_PROCESS_LABELS).map(([code, label]) => [code, { label, color: BODYSHOP_PROCESS_COLORS[code as keyof typeof BODYSHOP_PROCESS_COLORS] }]),
+);
 
 function ComplianceBadge({ pct }: { pct: number }) {
   const bg = pct >= 90 ? '#dcfce7' : pct >= 60 ? '#fef9c3' : '#fee2e2';
