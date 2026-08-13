@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { BadRequestException } from '@nestjs/common';
 import { AppointmentsService, CreateAppointmentDto } from '../modules/appointments/appointments.service';
 import { Appointment } from '../modules/appointments/appointment.entity';
@@ -77,6 +77,21 @@ describe('AppointmentsService — create()', () => {
     capacityService     = { getDailyCapacity: jest.fn().mockResolvedValue(fullCapacity) };
     serviceTypesService = { findOne: jest.fn().mockResolvedValue(mockServiceType) };
 
+    // create() (auditoría 2026-08-13, fix BE-02/A-4) corre el chequeo de
+    // patente duplicada + el alta dentro de dataSource.transaction(manager =>
+    // ...) — el manager mockeado enruta al mismo `repo` para que las
+    // aserciones existentes (repo.save, repo.createQueryBuilder) sigan
+    // funcionando igual que antes de que create() quedara envuelto en una
+    // transacción.
+    const dataSource = {
+      transaction: jest.fn().mockImplementation(async (cb: any) => cb({
+        query: jest.fn().mockResolvedValue([]),
+        createQueryBuilder: (_entity: any, alias: string) => repo.createQueryBuilder(alias),
+        create: (_entity: any, data: any) => repo.create(data),
+        save:   (_entity: any, data: any) => repo.save(data),
+      })),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AppointmentsService,
@@ -95,10 +110,22 @@ describe('AppointmentsService — create()', () => {
         } },
         { provide: DmsSyncService,  useValue: { pushToAgendamiento: jest.fn().mockResolvedValue(undefined) } },
         { provide: TrackingService, useValue: { initForMechanic: jest.fn().mockResolvedValue(undefined) } },
+        { provide: getDataSourceToken(), useValue: dataSource },
       ],
     }).compile();
 
     service = module.get<AppointmentsService>(AppointmentsService);
+  });
+
+  // ── Patente duplicada (auditoría 2026-08-13, BE-02/A-4) ────────────────────
+
+  it('rechaza cuando ya hay un turno activo para la misma patente', async () => {
+    const dupQb = makeQb(0);
+    dupQb.getOne = jest.fn().mockResolvedValue({ id: 'other-appt', customerName: 'Otro Cliente' });
+    repo.createQueryBuilder.mockReturnValue(dupQb);
+
+    await expect(service.create(baseDto, USER_ID)).rejects.toThrow(/ABC 123.*Otro Cliente/);
+    expect(repo.save).not.toHaveBeenCalled();
   });
 
   // ── Creación exitosa ────────────────────────────────────────────────────────
