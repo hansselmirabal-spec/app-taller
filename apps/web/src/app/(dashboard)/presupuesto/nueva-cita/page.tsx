@@ -55,7 +55,11 @@ export default function NuevaCitaPresupuestoPage() {
     setPlateSearchError('');
     const data = await lookup(value);
     if (data) {
-      if (!customerName.trim()) setCustomerName(data.customerName);
+      // Siempre pisa el nombre con el de la chapa buscada — si no, buscar una
+      // chapa distinta después de otra deja el nombre del cliente anterior
+      // (reportado por el usuario 2026-08-14). Mismo criterio que
+      // appointments/new/page.tsx (Nuevo Ingreso), que nunca tuvo este guard.
+      setCustomerName(data.customerName);
     } else {
       setPlateSearchError('Vehículo no encontrado en DMS');
     }
