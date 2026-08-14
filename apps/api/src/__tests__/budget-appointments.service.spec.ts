@@ -38,17 +38,41 @@ function makeAppt(overrides: Record<string, any> = {}) {
   };
 }
 
+function makeQb(getOneResult: any = null) {
+  const qb: any = {};
+  ['where', 'andWhere'].forEach(m => { qb[m] = jest.fn().mockReturnValue(qb); });
+  qb.getOne = jest.fn().mockResolvedValue(getOneResult);
+  return qb;
+}
+
 function makeRepo(appt: any) {
   return {
     findOne: jest.fn().mockResolvedValue(appt),
     save: jest.fn().mockImplementation((a: any) => Promise.resolve(a)),
     find: jest.fn().mockResolvedValue([]),
+    create: jest.fn().mockImplementation((d: any) => d),
+    createQueryBuilder: jest.fn().mockReturnValue(makeQb(null)),
   };
 }
 
 function makeBodyshopService() {
   return {
     create: jest.fn().mockResolvedValue({ id: 'entry-001' }),
+  };
+}
+
+// create() (reporte de usuario 2026-08-14: agenda permitía duplicar
+// patente+horario) corre dentro de dataSource.transaction(manager => ...). El
+// manager mockeado enruta al mismo `repo` para que las aserciones existentes
+// sigan funcionando igual.
+function makeDataSource(repo: any) {
+  return {
+    transaction: jest.fn().mockImplementation(async (cb: any) => cb({
+      query: jest.fn().mockResolvedValue([]),
+      createQueryBuilder: (_entity: any, alias: string) => repo.createQueryBuilder(alias),
+      create: (_entity: any, data: any) => repo.create(data),
+      save:   (_entity: any, data: any) => repo.save(data),
+    })),
   };
 }
 
@@ -61,7 +85,7 @@ describe('BudgetAppointmentsService.approve — pieceCount', () => {
     const appt = makeAppt({ pieces });
     const repo = makeRepo(appt);
     const bodyshopService = makeBodyshopService();
-    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any);
+    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any, makeDataSource(repo) as any);
 
     await service.approve(APPT_ID, USER_ID);
 
@@ -75,7 +99,7 @@ describe('BudgetAppointmentsService.approve — pieceCount', () => {
     const appt = makeAppt({ pieces: null });
     const repo = makeRepo(appt);
     const bodyshopService = makeBodyshopService();
-    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any);
+    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any, makeDataSource(repo) as any);
 
     await service.approve(APPT_ID, USER_ID);
 
@@ -95,7 +119,7 @@ describe('BudgetAppointmentsService.approve — pieceCount', () => {
     });
     const repo = makeRepo(appt);
     const bodyshopService = makeBodyshopService();
-    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any);
+    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any, makeDataSource(repo) as any);
 
     await service.approve(APPT_ID, USER_ID);
 
@@ -113,7 +137,7 @@ describe('BudgetAppointmentsService.approve — pieceCount', () => {
     const appt = makeAppt({ processes: originalProcesses, pieces: [] });
     const repo = makeRepo(appt);
     const bodyshopService = makeBodyshopService();
-    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any);
+    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any, makeDataSource(repo) as any);
 
     const { budget } = await service.approve(APPT_ID, USER_ID);
 
@@ -125,7 +149,7 @@ describe('BudgetAppointmentsService.findByPlate', () => {
   it('busca por workshopId + chapa normalizada (mayúsculas, sin espacios extra) y excluye linkedEntryId', async () => {
     const repo = makeRepo(null);
     const bodyshopService = makeBodyshopService();
-    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any);
+    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any, makeDataSource(repo) as any);
 
     await service.findByPlate(WS_ID, '  tst 001  ');
 
@@ -145,10 +169,45 @@ describe('BudgetAppointmentsService.findByPlate', () => {
     const repo = makeRepo(null);
     repo.find = jest.fn().mockResolvedValue(found);
     const bodyshopService = makeBodyshopService();
-    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any);
+    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any, makeDataSource(repo) as any);
 
     const result = await service.findByPlate(WS_ID, 'TST 001');
 
     expect(result).toEqual(found);
+  });
+});
+
+// Reporte de usuario 2026-08-14 (con evidencia): la Agenda de Presupuestos
+// dejaba agendar la misma patente al mismo horario dos veces — create() no
+// tenía ningún chequeo. Mismo patrón de fix que bodyshop/appointments.
+describe('BudgetAppointmentsService.create — patente duplicada en el mismo horario', () => {
+  const dto = {
+    workshopId: WS_ID, date: '2026-08-14', timeStart: '09:00', timeEnd: '09:30',
+    customerName: 'Juan Zavala', plate: 'wzak466',
+  } as any;
+
+  it('rechaza cuando ya hay una cita activa para la misma patente+horario', async () => {
+    const repo = makeRepo(null);
+    repo.createQueryBuilder = jest.fn().mockReturnValue(
+      makeQb({ id: 'appt-existing', customerName: 'Juan Zavala' }),
+    );
+    const bodyshopService = makeBodyshopService();
+    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any, makeDataSource(repo) as any);
+
+    await expect(service.create(dto, USER_ID)).rejects.toThrow(/WZAK466.*09:00/);
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+
+  it('crea la cita cuando el horario está libre', async () => {
+    const repo = makeRepo(null);
+    repo.createQueryBuilder = jest.fn().mockReturnValue(makeQb(null));
+    repo.save = jest.fn().mockImplementation((a: any) => Promise.resolve({ id: 'appt-new', ...a }));
+    const bodyshopService = makeBodyshopService();
+    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any, makeDataSource(repo) as any);
+
+    const result = await service.create(dto, USER_ID);
+
+    expect(result).toHaveProperty('id', 'appt-new');
+    expect(repo.save).toHaveBeenCalled();
   });
 });
