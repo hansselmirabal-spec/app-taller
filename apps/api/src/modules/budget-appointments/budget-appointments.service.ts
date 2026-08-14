@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import {
   IsString, IsOptional, IsArray, IsNumber,
   ValidateNested, Matches, Min,
@@ -101,25 +101,63 @@ export class BudgetAppointmentsService {
     @InjectRepository(BudgetAppointment)
     private readonly repo: Repository<BudgetAppointment>,
     private readonly bodyshopService: BodyshopService,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
 
+  // Reportado por el usuario 2026-08-14: la Agenda de Presupuestos dejaba
+  // agendar la misma patente al mismo horario dos veces — create() no tenía
+  // NINGÚN chequeo de duplicado (mismo patrón BE-02/A-4 de la auditoría
+  // pre-producción 2026-08-13, pero en este service no estaba cubierto).
+  // Mismo patrón de fix que bodyshop/appointments: chequeo dentro de un
+  // advisory lock transaccional + índice único parcial (migración 013) como
+  // respaldo final a nivel DB.
   async create(dto: CreateBudgetAppointmentDto, userId: string): Promise<BudgetAppointment> {
-    const appt = this.repo.create({
-      workshopId:   dto.workshopId,
-      date:         dto.date,
-      timeStart:    dto.timeStart,
-      timeEnd:      dto.timeEnd,
-      peritoId:     dto.peritoId ?? userId,
-      customerName: dto.customerName,
-      plate:        dto.plate.toUpperCase().trim(),
-      phone:        dto.phone ?? null,
-      notes:        dto.notes ?? null,
-      budgetNumber: dto.budgetNumber ?? null,
-      insuranceCompany: dto.insuranceCompany ?? null,
-      status:       'pending',
-      createdBy:    userId,
-    });
-    return this.repo.save(appt);
+    const plate = dto.plate.toUpperCase().trim();
+
+    try {
+      return await this.dataSource.transaction(async manager => {
+        await manager.query(
+          'SELECT pg_advisory_xact_lock(hashtext($1)::bigint)',
+          [`${dto.workshopId}:${dto.date}:${dto.timeStart}:${plate}`],
+        );
+
+        const existingActive = await manager.createQueryBuilder(BudgetAppointment, 'b')
+          .where('b.workshopId = :wsId', { wsId: dto.workshopId })
+          .andWhere('b.date = :date', { date: dto.date })
+          .andWhere('b.timeStart = :timeStart', { timeStart: dto.timeStart })
+          .andWhere('UPPER(b.plate) = :plate', { plate })
+          .andWhere('b.status NOT IN (:...statuses)', { statuses: ['rejected', 'cancelled'] })
+          .getOne();
+        if (existingActive) {
+          throw new BadRequestException(
+            `Ya hay una cita agendada para la patente ${plate} a las ${dto.timeStart} ese día · ${existingActive.customerName}`,
+          );
+        }
+
+        const appt = manager.create(BudgetAppointment, {
+          workshopId:   dto.workshopId,
+          date:         dto.date,
+          timeStart:    dto.timeStart,
+          timeEnd:      dto.timeEnd,
+          peritoId:     dto.peritoId ?? userId,
+          customerName: dto.customerName,
+          plate,
+          phone:        dto.phone ?? null,
+          notes:        dto.notes ?? null,
+          budgetNumber: dto.budgetNumber ?? null,
+          insuranceCompany: dto.insuranceCompany ?? null,
+          status:       'pending',
+          createdBy:    userId,
+        });
+        return manager.save(BudgetAppointment, appt);
+      });
+    } catch (err: any) {
+      if (err?.code === '23505' && err?.constraint === 'budget_appointments_one_active_per_slot') {
+        throw new BadRequestException(`Ya hay una cita agendada para la patente ${plate} a ese horario.`);
+      }
+      throw err;
+    }
   }
 
   async findByDate(workshopId: string, date: string, callerId?: string, callerRole?: string): Promise<BudgetAppointment[]> {

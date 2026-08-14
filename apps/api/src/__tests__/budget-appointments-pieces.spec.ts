@@ -45,7 +45,7 @@ describe('BudgetAppointmentsService.updateProcesses — pieces', () => {
       findOne: jest.fn().mockResolvedValue(appt),
       save:    jest.fn().mockImplementation((e: any) => Promise.resolve(e)),
     };
-    const service = new BudgetAppointmentsService(repo as any, {} as any);
+    const service = new BudgetAppointmentsService(repo as any, {} as any, {} as any);
     return { service, repo, appt };
   }
 
