@@ -94,7 +94,9 @@ export default function SimuladorPresupuestoPage() {
     setPlateSearchError('');
     const data = await lookup(value);
     if (data) {
-      if (!customerName.trim()) setCustomerName(data.customerName);
+      // Siempre pisa el nombre con el de la chapa buscada — mismo fix que
+      // presupuesto/nueva-cita (reportado por el usuario 2026-08-14).
+      setCustomerName(data.customerName);
     } else {
       setPlateSearchError('Vehículo no encontrado en DMS');
     }
