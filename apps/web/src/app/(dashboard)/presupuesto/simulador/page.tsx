@@ -3,21 +3,12 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Calculator, Loader2, CheckCircle2, FileDown, MessageCircle } from 'lucide-react';
-import dynamic from 'next/dynamic';
-
-const BudgetPdfLink = dynamic(
-  () => import('@/components/budget/budget-pdf-link').then(m => m.BudgetPdfLink),
-  { ssr: false, loading: () => (
-    <button disabled className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-300 text-sm font-semibold cursor-not-allowed">
-      <FileDown className="h-4 w-4" /> PDF
-    </button>
-  )},
-);
 import { useWorkshopId } from '@/context/workshop-context';
 import { formatDate } from '@/lib/utils';
 import { useCreateBudgetAppointment, useUpdateBudgetProcesses } from '@/hooks/use-budget-appointments';
-import { useSimulatorForm } from './_shared/use-simulator-form';
+import { useSimulatorForm, estimateToBudgetPayload } from './_shared/use-simulator-form';
 import { SimulatorForm, EstimateSummaryBar } from './_shared/simulator-form';
+import { LazyBudgetPdfLink } from './_shared/budget-pdf-link-lazy';
 
 export default function SimuladorPresupuestoPage() {
   const router     = useRouter();
@@ -72,18 +63,7 @@ export default function SimuladorPresupuestoPage() {
       } as any);
 
       if (estimate) {
-        const processes = [
-          ...(estimate.bodyworkHours > 0 ? [{ code: 'BODYWORK', name: 'Chapería',    hours: estimate.bodyworkHours }] : []),
-          ...(estimate.prepHours    > 0 ? [{ code: 'PREP',     name: 'Preparación', hours: estimate.prepHours    }] : []),
-          ...(estimate.paintHours   > 0 ? [{ code: 'PAINT',    name: 'Pintura',     hours: estimate.paintHours   }] : []),
-        ];
-        const pieces = estimate.lines.map(l => ({
-          pieza:       l.pieza,
-          damageLevel: l.damageLevel,
-          qty:         l.qty,
-          breakdown:   l.breakdown,
-          totalHoras:  l.totalHoras,
-        }));
+        const { processes, pieces } = estimateToBudgetPayload(estimate);
         if (processes.length > 0) {
           await updateProcesses.mutateAsync({ id: result.id, processes, pieces });
         }
@@ -162,7 +142,7 @@ export default function SimuladorPresupuestoPage() {
 
           {/* PDF */}
           {estimate ? (
-            <BudgetPdfLink
+            <LazyBudgetPdfLink
               plate={plate}
               customerName={customerName}
               phone={phone}

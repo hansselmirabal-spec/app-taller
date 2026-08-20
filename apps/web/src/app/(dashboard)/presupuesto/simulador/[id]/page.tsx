@@ -3,21 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { ArrowLeft, Calculator, Loader2, FileDown, FileX, MessageCircle } from 'lucide-react';
-import dynamic from 'next/dynamic';
-
-const BudgetPdfLink = dynamic(
-  () => import('@/components/budget/budget-pdf-link').then(m => m.BudgetPdfLink),
-  { ssr: false, loading: () => (
-    <button disabled className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-300 text-sm font-semibold cursor-not-allowed">
-      <FileDown className="h-4 w-4" /> PDF
-    </button>
-  )},
-);
 import { randomId } from '@/lib/utils';
 import { useBudgetAppointment, useUpdateBudgetProcesses } from '@/hooks/use-budget-appointments';
 import type { DamageLevel } from '@/lib/api';
-import { useSimulatorForm } from '../_shared/use-simulator-form';
+import { useSimulatorForm, estimateToBudgetPayload } from '../_shared/use-simulator-form';
 import { SimulatorForm, EstimateSummaryBar } from '../_shared/simulator-form';
+import { LazyBudgetPdfLink } from '../_shared/budget-pdf-link-lazy';
 
 /**
  * Edit mode of the Simulator, opened from a scheduled `pending` budget
@@ -52,12 +43,24 @@ export default function EditarSimuladorPresupuestoPage() {
   const [saveError, setSaveError] = useState('');
   const [isSaving, setIsSaving]   = useState(false);
 
-  // Guards the one-time hydration from `appt.pieces` so a background
-  // refetch (focus/invalidate) never wipes items the user is mid-editing.
+  // Drives the screen render, set once from the first resolved load — never
+  // recomputed from live query data, so a background refetch (focus/
+  // invalidate) can't yank the user out of an in-progress edit or strand the
+  // screen in limbo if `appt.status` changes under them mid-edit. If the
+  // status does change before Guardar, the mutation still fails safely:
+  // updateProcesses() re-checks status server-side and surfaces a clear
+  // saveError instead of a silent redirect.
+  const [screenState, setScreenState] = useState<'loading' | 'notfound' | 'ready'>('loading');
   const hydratedRef = useRef(false);
 
   useEffect(() => {
-    if (!appt) return;
+    if (hydratedRef.current || isLoading) return;
+    hydratedRef.current = true;
+
+    if (!appt) {
+      setScreenState('notfound');
+      return;
+    }
 
     // A stale/duplicate tab must never allow editing a non-pending budget —
     // redirect before hydrating or letting the debounced estimate run.
@@ -65,9 +68,6 @@ export default function EditarSimuladorPresupuestoPage() {
       router.replace(`/presupuesto/${appt.id}?readonly=1`);
       return;
     }
-
-    if (hydratedRef.current) return;
-    hydratedRef.current = true;
 
     setPlate(appt.plate);
     setCustomerName(appt.customerName);
@@ -83,19 +83,16 @@ export default function EditarSimuladorPresupuestoPage() {
       })));
     }
     // pieces null/empty → keep the hook's default single empty item
+    setScreenState('ready');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appt]);
+  }, [appt, isLoading]);
 
   async function handleSave() {
     if (!appt) return;
     if (!plate.trim())        { setSaveError('La chapa es obligatoria'); return; }
     if (!customerName.trim()) { setSaveError('El nombre del cliente es obligatorio'); return; }
 
-    const processes = estimate ? [
-      ...(estimate.bodyworkHours > 0 ? [{ code: 'BODYWORK', name: 'Chapería',    hours: estimate.bodyworkHours }] : []),
-      ...(estimate.prepHours    > 0 ? [{ code: 'PREP',     name: 'Preparación', hours: estimate.prepHours    }] : []),
-      ...(estimate.paintHours   > 0 ? [{ code: 'PAINT',    name: 'Pintura',     hours: estimate.paintHours   }] : []),
-    ] : [];
+    const { processes, pieces } = estimate ? estimateToBudgetPayload(estimate) : { processes: [], pieces: [] };
 
     // A PATCH with an empty processes array would wipe the previously saved
     // breakdown — block instead of silently erasing it.
@@ -103,14 +100,6 @@ export default function EditarSimuladorPresupuestoPage() {
       setSaveError('Cargá al menos un panel con estimación antes de guardar — un guardado vacío borraría el desglose ya guardado.');
       return;
     }
-
-    const pieces = estimate!.lines.map(l => ({
-      pieza:       l.pieza,
-      damageLevel: l.damageLevel,
-      qty:         l.qty,
-      breakdown:   l.breakdown,
-      totalHoras:  l.totalHoras,
-    }));
 
     setSaveError('');
     setIsSaving(true);
@@ -123,9 +112,6 @@ export default function EditarSimuladorPresupuestoPage() {
       setIsSaving(false);
     }
   }
-
-  const notFound = !isLoading && !appt;
-  const isReady  = !isLoading && !!appt && appt.status === 'pending';
 
   return (
     <div className="h-screen flex flex-col bg-slate-50">
@@ -146,7 +132,7 @@ export default function EditarSimuladorPresupuestoPage() {
         </div>
       </div>
 
-      {notFound ? (
+      {screenState === 'notfound' ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-400">
           <FileX className="h-10 w-10 opacity-40" />
           <p className="text-sm">Presupuesto no encontrado</p>
@@ -158,7 +144,7 @@ export default function EditarSimuladorPresupuestoPage() {
             Volver a Presupuestos
           </button>
         </div>
-      ) : !isReady ? (
+      ) : screenState === 'loading' ? (
         // Covers: loading, and the transient frame before the non-pending
         // redirect above completes — never render a partial form.
         <div className="flex-1 flex items-center justify-center">
@@ -201,7 +187,7 @@ export default function EditarSimuladorPresupuestoPage() {
 
             <div className="flex gap-2 px-4 py-3">
               {estimate ? (
-                <BudgetPdfLink
+                <LazyBudgetPdfLink
                   plate={plate}
                   customerName={customerName}
                   phone={phone}
