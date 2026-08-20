@@ -17,6 +17,7 @@ interface SimulatorFormProps {
   onPlateChange: (value: string) => void;
   onPlateLookup: () => void;
   isLookingUpPlate: boolean;
+  vehicleFound: boolean;
   vehicleModel?: string;
   plateSearchError: string;
 
@@ -51,7 +52,7 @@ interface SimulatorFormProps {
  * `useSimulatorForm`, this component only renders it.
  */
 export function SimulatorForm({
-  plate, onPlateChange, onPlateLookup, isLookingUpPlate, vehicleModel, plateSearchError,
+  plate, onPlateChange, onPlateLookup, isLookingUpPlate, vehicleFound, vehicleModel, plateSearchError,
   budgetNumber, onBudgetNumberChange,
   customerName, onCustomerNameChange,
   phone, onPhoneChange,
@@ -69,7 +70,7 @@ export function SimulatorForm({
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1.5">
               Chapa o Chasis *
-              {vehicleModel && (
+              {vehicleFound && (
                 <span className="ml-2 text-emerald-500 font-normal normal-case">{vehicleModel}</span>
               )}
             </label>

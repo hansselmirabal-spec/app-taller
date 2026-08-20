@@ -167,6 +167,7 @@ export default function SimuladorPresupuestoPage() {
           onPlateChange={value => { setPlate(value); setPlateSearchError(''); }}
           onPlateLookup={handlePlateLookup}
           isLookingUpPlate={isLooking}
+          vehicleFound={!!vehicleData}
           vehicleModel={vehicleData?.model}
           plateSearchError={plateSearchError}
           budgetNumber={budgetNumber}
