@@ -3,6 +3,7 @@ import {
   UseGuards, BadRequestException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { WorkshopAccessGuard } from '../../common/guards/workshop-access.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import {
   BudgetAppointmentsService,
@@ -23,6 +24,7 @@ export class BudgetAppointmentsController {
   // cambios) y `from`+`to` (rango semanal, nuevo — alimenta el board de
   // /presupuesto). Mirror de appointments.controller.ts:26-45.
   @Get()
+  @UseGuards(WorkshopAccessGuard)
   async find(
     @Query('workshopId') workshopId: string,
     @Query('date') date?: string,
@@ -44,6 +46,7 @@ export class BudgetAppointmentsController {
   }
 
   @Get('by-plate/:plate')
+  @UseGuards(WorkshopAccessGuard)
   async findByPlate(
     @Param('plate') plate: string,
     @Query('workshopId') workshopId: string,
@@ -58,6 +61,7 @@ export class BudgetAppointmentsController {
   }
 
   @Post()
+  @UseGuards(WorkshopAccessGuard)
   async create(
     @Body() dto: CreateBudgetAppointmentDto,
     @CurrentUser() user: any,

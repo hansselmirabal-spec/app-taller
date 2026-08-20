@@ -1,6 +1,7 @@
 import { Controller, Get, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import { BodyshopService } from './bodyshop.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { WorkshopAccessGuard } from '../../common/guards/workshop-access.guard';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const wrap = (data: any) => ({ data, meta: { timestamp: new Date().toISOString() } });
@@ -11,6 +12,7 @@ export class BodyshopCapacityController {
   constructor(private service: BodyshopService) {}
 
   @Get('week')
+  @UseGuards(WorkshopAccessGuard)
   async getWeek(
     @Query('workshopId') workshopId: string,
     @Query('from') from: string,
@@ -23,6 +25,7 @@ export class BodyshopCapacityController {
   }
 
   @Get()
+  @UseGuards(WorkshopAccessGuard)
   async getDay(
     @Query('workshopId') workshopId: string,
     @Query('date') date: string,

@@ -1,9 +1,9 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { WorkshopAccessGuard } from '../common/guards/workshop-access.guard';
 
-function makeContext(user: any, query: any = {}, body: any = {}): ExecutionContext {
+function makeContext(user: any, query: any = {}, body: any = {}, params: any = {}): ExecutionContext {
   return {
-    switchToHttp: () => ({ getRequest: () => ({ user, query, body }) }),
+    switchToHttp: () => ({ getRequest: () => ({ user, query, body, params }) }),
     getHandler: () => () => undefined,
     getClass: () => function StubClass() { /* stub */ },
   } as unknown as ExecutionContext;
@@ -81,5 +81,29 @@ describe('WorkshopAccessGuard', () => {
     expect(loggedMessage).not.toContain('ws-1');
     expect(loggedMessage).not.toContain('ws-3');
     expect(loggedMessage).not.toContain('user@taller.com');
+  });
+
+  // PR2 — rutas con `workshopId` como route param (ej. seed-workshop/:workshopId)
+  // no eran cubiertas: el guard solo leía query/body. Ver design.md "Open Questions".
+  it('lee workshopId de route params cuando no está en query/body y permite si está en la lista', () => {
+    const ctx = makeContext(
+      { id: 'u1', role: 'receptionist', allowedWorkshopIds: ['ws-1'] },
+      {},
+      {},
+      { workshopId: 'ws-1' },
+    );
+
+    expect(guard.canActivate(ctx)).toBe(true);
+  });
+
+  it('workshopId de route params fuera de la lista lanza ForbiddenException', () => {
+    const ctx = makeContext(
+      { id: 'u1', role: 'receptionist', allowedWorkshopIds: ['ws-1'] },
+      {},
+      {},
+      { workshopId: 'ws-2' },
+    );
+
+    expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
   });
 });
