@@ -56,6 +56,17 @@ const TIMELINE_DOT: Record<BudgetAppointment['status'], string> = {
   cancelled: 'bg-slate-300',
 };
 
+// Board column header dot — unlike TIMELINE_DOT (which deliberately mutes
+// rejected/cancelled together for the agenda's chronological accent line),
+// each of the 4 status columns needs to read apart at a glance, so this
+// mirrors STATUS_CONFIG's badge colors one-for-one.
+const STATUS_DOT: Record<BudgetAppointment['status'], string> = {
+  pending:   'bg-yellow-400',
+  approved:  'bg-emerald-400',
+  rejected:  'bg-red-400',
+  cancelled: 'bg-slate-400',
+};
+
 // Only `pending` budgets are editable in the Simulator — everything else is
 // read-only. Centralized here so every nav call site stays in sync.
 function budgetNavPath(appt: BudgetAppointment): string {
@@ -292,7 +303,7 @@ export default function PresupuestoPage() {
                   return (
                     <div key={status} className="flex flex-col min-h-0 rounded-xl border border-slate-200 bg-white">
                       <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-slate-200">
-                        <span className={`h-2 w-2 rounded-full ${TIMELINE_DOT[status]}`} />
+                        <span className={`h-2 w-2 rounded-full ${STATUS_DOT[status]}`} />
                         <span className="text-xs font-semibold text-slate-700">{cfg.label}</span>
                         <span className="ml-auto text-[11px] font-semibold text-slate-400">{items.length}</span>
                       </div>
