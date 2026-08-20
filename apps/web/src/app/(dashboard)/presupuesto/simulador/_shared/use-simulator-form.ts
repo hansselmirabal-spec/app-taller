@@ -24,6 +24,26 @@ export function newSimulatorItem(): SimulatorItem {
   return { id: randomId(), pieza: '', damageLevel: 'Leve', qty: 1 };
 }
 
+// Shared by create-mode save (simulador/page.tsx) and edit-mode save
+// (simulador/[id]/page.tsx) — both PATCH/POST the same processes/pieces
+// shape onto a BudgetAppointment, kept in one place so the process
+// codes/labels can't drift out of sync between the two save paths.
+export function estimateToBudgetPayload(estimate: SimulatorEstimateResult) {
+  const processes = [
+    ...(estimate.bodyworkHours > 0 ? [{ code: 'BODYWORK', name: 'Chapería',    hours: estimate.bodyworkHours }] : []),
+    ...(estimate.prepHours    > 0 ? [{ code: 'PREP',     name: 'Preparación', hours: estimate.prepHours    }] : []),
+    ...(estimate.paintHours   > 0 ? [{ code: 'PAINT',    name: 'Pintura',     hours: estimate.paintHours   }] : []),
+  ];
+  const pieces = estimate.lines.map(l => ({
+    pieza:       l.pieza,
+    damageLevel: l.damageLevel,
+    qty:         l.qty,
+    breakdown:   l.breakdown,
+    totalHoras:  l.totalHoras,
+  }));
+  return { processes, pieces };
+}
+
 /**
  * Shared vehicle-header + items-list + estimate state and logic used by both
  * the "create" Simulator (`simulador/page.tsx`) and, later, the "edit"

@@ -19,9 +19,17 @@ Chain strategy: stacked-to-main
 Design already resolved the 4-PR split and per-PR line estimates (see `design.md`
 Chained PR plan). Not reopened here.
 
-PR1 is open: https://github.com/hansselmirabal-spec/app-taller/pull/59 (branch
-`feat/budget-appointments-range-endpoint` → `main`, not yet merged). PR2 must
-NOT start until PR1 is merged.
+PR1 merged: https://github.com/hansselmirabal-spec/app-taller/pull/59 (branch
+`feat/budget-appointments-range-endpoint` → `main`, commit `721f044`).
+PR2 merged: https://github.com/hansselmirabal-spec/app-taller/pull/60 (branch
+`feat/simulador-extract-shared-form` → `main`, commit `dd955dd`; actual diff
+866 lines, over budget — see PR2 apply-progress note).
+PR3 open, not yet merged: https://github.com/hansselmirabal-spec/app-taller/pull/61
+(branch `feat/simulador-edit-route` → `main`; actual diff 411 changed lines,
+also over the 400-line budget — mostly the new `simulador/[id]/page.tsx`
+route, which needs distinct loading/not-found/hydration/save branches;
+flagged in the PR body, suggested lens `review-reliability`). PR4 must NOT
+start until PR3 is merged.
 
 ### Suggested Work Units
 
@@ -63,20 +71,20 @@ NOT start until PR1 is merged.
 
 ## Phase 5: PR3 — `simulador/[id]` edit route
 
-- [ ] 5.1 Create `apps/web/src/app/(dashboard)/presupuesto/simulador/[id]/page.tsx` using `use-simulator-form`/`simulator-form` from PR2, fetching via `useBudgetAppointment(id)`
-- [ ] 5.2 Loading state: full-screen `Loader2` spinner (mirror `[id]/page.tsx:56-62`); form not rendered until data resolves
-- [ ] 5.3 404/error state: terminal "Presupuesto no encontrado" + "Volver a Presupuestos" button, no auto-redirect
-- [ ] 5.4 Status gate: `appt.status !== 'pending'` → `router.replace('/presupuesto/{id}?readonly=1')`, fired after fetch and before hydration/estimate
-- [ ] 5.5 Hydration: seed `items` from `appt.pieces` exactly once via a `useRef` flag (not a `useEffect` dep on `appt`); `pieces` null/empty → `[newItem()]`
-- [ ] 5.6 Save handler: only `useUpdateBudgetProcesses({id, processes, pieces})`, never `useCreateBudgetAppointment`; block save when `processes.length === 0`; success → `router.push('/presupuesto')`; failure → inline error, stay on page
+- [x] 5.1 Create `apps/web/src/app/(dashboard)/presupuesto/simulador/[id]/page.tsx` using `use-simulator-form`/`simulator-form` from PR2, fetching via `useBudgetAppointment(id)`
+- [x] 5.2 Loading state: full-screen `Loader2` spinner (mirror `[id]/page.tsx:56-62`); form not rendered until data resolves
+- [x] 5.3 404/error state: terminal "Presupuesto no encontrado" + "Volver a Presupuestos" button, no auto-redirect
+- [x] 5.4 Status gate: `appt.status !== 'pending'` → `router.replace('/presupuesto/{id}?readonly=1')`, fired after fetch and before hydration/estimate
+- [x] 5.5 Hydration: seed `items` from `appt.pieces` exactly once via a `useRef` flag (not a `useEffect` dep on `appt`); `pieces` null/empty → `[newItem()]`
+- [x] 5.6 Save handler: only `useUpdateBudgetProcesses({id, processes, pieces})`, never `useCreateBudgetAppointment`; block save when `processes.length === 0`; success → `router.push('/presupuesto')`; failure → inline error, stay on page
 
 ## Phase 6: PR3 — Nav repoint + cleanup
 
-- [ ] 6.1 Add a small status-aware nav helper (e.g. `presupuesto/${id}` for non-pending, `presupuesto/simulador/${id}` for pending) and apply it to the 4 existing `router.push(\`/presupuesto/${a.id}\`)` call sites in `apps/web/src/app/(dashboard)/presupuesto/page.tsx` (lines 304, 330, 347, 364)
-- [ ] 6.2 Remove `handleEnterTaller`, the "Ingresar al taller" button/modal/state, and the `createBodyshopEntry` import from `apps/web/src/app/(dashboard)/presupuesto/simulador/page.tsx` (lines ~74-78, 225, 550-598)
-- [ ] 6.3 Add additive amber readonly banner to `apps/web/src/app/(dashboard)/presupuesto/[id]/page.tsx` when `?readonly=1` is present: "Este presupuesto ya no está pendiente — se abre en modo lectura. Solo los pendientes se editan en el Simulador."
-- [ ] 6.4 Manual QA: edit a pending appointment end-to-end (prefill, edit, save, redirect to `/presupuesto`); open a non-pending appointment via a repointed nav site → lands on `[id]?readonly=1` with banner; confirm no "Ingresar al taller" action exists anywhere in the Simulador
-- [ ] 6.5 `pnpm typecheck` (web) clean
+- [x] 6.1 Add a small status-aware nav helper (e.g. `presupuesto/${id}` for non-pending, `presupuesto/simulador/${id}` for pending) and apply it to the 4 existing `router.push(\`/presupuesto/${a.id}\`)` call sites in `apps/web/src/app/(dashboard)/presupuesto/page.tsx` (lines 304, 330, 347, 364)
+- [x] 6.2 Remove `handleEnterTaller`, the "Ingresar al taller" button/modal/state, and the `createBodyshopEntry` import from `apps/web/src/app/(dashboard)/presupuesto/simulador/page.tsx` (lines ~74-78, 225, 550-598)
+- [x] 6.3 Add additive amber readonly banner to `apps/web/src/app/(dashboard)/presupuesto/[id]/page.tsx` when `?readonly=1` is present: "Este presupuesto ya no está pendiente — se abre en modo lectura. Solo los pendientes se editan en el Simulador."
+- [x] 6.4 Manual QA: edit a pending appointment end-to-end (prefill, edit, save, redirect to `/presupuesto`); open a non-pending appointment via a repointed nav site → lands on `[id]?readonly=1` with banner; confirm no "Ingresar al taller" action exists anywhere in the Simulador — verified via code-path tracing (redirect effect runs before hydration; nav sites all route through `budgetNavPath`; no "Ingresar al taller" references remain in `simulador/page.tsx`); no live-browser QA available in this sandboxed environment, flagged as pre-merge follow-up in the PR body
+- [x] 6.5 `pnpm typecheck` (web) clean
 
 ## Phase 7: PR4 — Week data wiring
 

@@ -2,23 +2,13 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Calculator, Loader2, CheckCircle2, Wrench, FileDown, MessageCircle } from 'lucide-react';
-import dynamic from 'next/dynamic';
-
-const BudgetPdfLink = dynamic(
-  () => import('@/components/budget/budget-pdf-link').then(m => m.BudgetPdfLink),
-  { ssr: false, loading: () => (
-    <button disabled className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-300 text-sm font-semibold cursor-not-allowed">
-      <FileDown className="h-4 w-4" /> PDF
-    </button>
-  )},
-);
+import { ArrowLeft, Calculator, Loader2, CheckCircle2, FileDown, MessageCircle } from 'lucide-react';
 import { useWorkshopId } from '@/context/workshop-context';
 import { formatDate } from '@/lib/utils';
 import { useCreateBudgetAppointment, useUpdateBudgetProcesses } from '@/hooks/use-budget-appointments';
-import { createBodyshopEntry } from '@/lib/api';
-import { useSimulatorForm } from './_shared/use-simulator-form';
+import { useSimulatorForm, estimateToBudgetPayload } from './_shared/use-simulator-form';
 import { SimulatorForm, EstimateSummaryBar } from './_shared/simulator-form';
+import { LazyBudgetPdfLink } from './_shared/budget-pdf-link-lazy';
 
 export default function SimuladorPresupuestoPage() {
   const router     = useRouter();
@@ -48,12 +38,6 @@ export default function SimuladorPresupuestoPage() {
   const [isSaving, setIsSaving]           = useState(false);
   const [modalError, setModalError]       = useState('');
 
-  // Ingresar al taller modal
-  const [showEnterModal, setShowEnterModal] = useState(false);
-  const [enterDate, setEnterDate]           = useState(formatDate(new Date()));
-  const [isEntering, setIsEntering]         = useState(false);
-  const [enterError, setEnterError]         = useState('');
-
   const createMutation  = useCreateBudgetAppointment();
   const updateProcesses = useUpdateBudgetProcesses();
 
@@ -79,18 +63,7 @@ export default function SimuladorPresupuestoPage() {
       } as any);
 
       if (estimate) {
-        const processes = [
-          ...(estimate.bodyworkHours > 0 ? [{ code: 'BODYWORK', name: 'Chapería',    hours: estimate.bodyworkHours }] : []),
-          ...(estimate.prepHours    > 0 ? [{ code: 'PREP',     name: 'Preparación', hours: estimate.prepHours    }] : []),
-          ...(estimate.paintHours   > 0 ? [{ code: 'PAINT',    name: 'Pintura',     hours: estimate.paintHours   }] : []),
-        ];
-        const pieces = estimate.lines.map(l => ({
-          pieza:       l.pieza,
-          damageLevel: l.damageLevel,
-          qty:         l.qty,
-          breakdown:   l.breakdown,
-          totalHoras:  l.totalHoras,
-        }));
+        const { processes, pieces } = estimateToBudgetPayload(estimate);
         if (processes.length > 0) {
           await updateProcesses.mutateAsync({ id: result.id, processes, pieces });
         }
@@ -103,37 +76,6 @@ export default function SimuladorPresupuestoPage() {
       setIsSaving(false);
     }
   }
-
-  async function handleEnterTaller() {
-    if (!workshopId || !estimate) return;
-    if (!plate.trim())        { setEnterError('La chapa es obligatoria'); return; }
-    if (!customerName.trim()) { setEnterError('El nombre del cliente es obligatorio'); return; }
-
-    setEnterError('');
-    setIsEntering(true);
-    try {
-      const entry = await createBodyshopEntry(workshopId, {
-        workshopId,
-        date:          enterDate,
-        plate:         plate.toUpperCase().trim(),
-        customerName:  customerName.trim(),
-        bodyworkHours: estimate.bodyworkHours,
-        prepHours:     estimate.prepHours,
-        paintHours:    estimate.paintHours,
-        channel:       'direct',
-        notes:         notes.trim() || undefined,
-        budgetNumber:  budgetNumber.trim() || undefined,
-        status:        'scheduled',
-      } as any);
-      router.push(`/appointments?openId=${entry.id}`);
-    } catch (err: any) {
-      setEnterError(err.message ?? 'Error al ingresar al taller');
-    } finally {
-      setIsEntering(false);
-    }
-  }
-
-  const canEnter = !!(estimate && estimate.totalHoras > 0 && plate.trim() && customerName.trim());
 
   return (
     <div className="h-screen flex flex-col bg-slate-50">
@@ -200,7 +142,7 @@ export default function SimuladorPresupuestoPage() {
 
           {/* PDF */}
           {estimate ? (
-            <BudgetPdfLink
+            <LazyBudgetPdfLink
               plate={plate}
               customerName={customerName}
               phone={phone}
@@ -228,79 +170,12 @@ export default function SimuladorPresupuestoPage() {
           <button
             type="button"
             onClick={() => setShowSaveModal(true)}
-            className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50 transition-colors"
+            className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors"
           >
             Guardar
           </button>
-
-          <button
-            type="button"
-            disabled={!canEnter}
-            onClick={() => { setEnterDate(formatDate(new Date())); setEnterError(''); setShowEnterModal(true); }}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <Wrench className="h-4 w-4" />
-            Ingresar al taller
-          </button>
         </div>
       </div>
-
-      {/* Ingresar al taller modal */}
-      {showEnterModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
-          <div className="bg-white rounded-xl border border-slate-200 w-full max-w-sm p-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <Wrench className="h-5 w-5 text-blue-500" />
-              <h2 className="text-base font-semibold text-slate-900">Ingresar al taller</h2>
-            </div>
-
-            {estimate && (
-              <div className="bg-slate-50 rounded-lg px-3 py-2 text-xs text-slate-600 space-y-0.5">
-                <p className="font-semibold text-slate-800">{plate.toUpperCase()} · {customerName}</p>
-                <p>Chapería {estimate.bodyworkHours}h · Prep {estimate.prepHours}h · Pintura {estimate.paintHours}h</p>
-                <p className="font-semibold text-emerald-600">{estimate.totalHoras}h · {estimate.totalMdo.toLocaleString('es-PY')} {estimate.moneda}</p>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Fecha de ingreso</label>
-              <input
-                type="date"
-                value={enterDate}
-                min={formatDate(new Date())}
-                onChange={e => setEnterDate(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400"
-              />
-            </div>
-
-            {enterError && (
-              <div className="bg-red-50 text-red-600 rounded-lg px-3 py-2 text-sm">{enterError}</div>
-            )}
-
-            <div className="flex gap-3 pt-1">
-              <button
-                type="button"
-                onClick={() => setShowEnterModal(false)}
-                disabled={isEntering}
-                className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleEnterTaller}
-                disabled={isEntering || !enterDate}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
-              >
-                {isEntering
-                  ? <><Loader2 className="h-4 w-4 animate-spin" /> Ingresando...</>
-                  : <><Wrench className="h-4 w-4" /> Confirmar</>
-                }
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Save modal */}
       {showSaveModal && (
