@@ -90,12 +90,22 @@ Already resolved by design (not reopened): 3-PR split, stacked-to-main, per-PR l
 
 ### PR3 notes — deviation from literal task wording
 
-Tasks 8.3/9.3 as originally written imply `user` is a required parameter. That broke 9
-pre-existing internal call sites across `capacity`, `bodyshop`, `appointments`, and
-`technicians` that call `workshopsService.findAll()`/`findOne(id)` for lookups unrelated
-to a specific request's user (e.g. resolving a workshop's config by name during
-appointment validation). Making `user` optional — applying the access check only when
-it's supplied — fixes `GET /workshops` per spec without touching those 9 unrelated files,
-keeping PR3 scoped to its design boundary (`workshops.controller.ts`/`workshops.service.ts`
-only) and its line budget. Confirmed via `rg` audit before implementing; full suite +
-typecheck green after the change.
+Tasks 8.3/9.3 as originally written imply `user` is a required parameter. That broke 13
+pre-existing internal call sites across `capacity`, `bodyshop`, `bodyshop-schedule`,
+`appointments`, and `technicians` that call `workshopsService.findAll()`/`findOne(id)` for
+lookups unrelated to a specific request's user (e.g. resolving a workshop's config by name
+during appointment validation) — corrected from an initial miscount of 9. Making `user`
+optional — applying the access check only when it's supplied — fixes `GET /workshops` per
+spec without touching those 13 unrelated files, keeping PR3 scoped to its design boundary
+(`workshops.controller.ts`/`workshops.service.ts` only, plus the shared
+`isUnrestrictedWorkshopAccess()` helper extracted post-review into
+`common/guards/workshop-access.util.ts`, reused by `WorkshopAccessGuard`) and its line
+budget. Confirmed via `rg` audit before implementing; full suite + typecheck green after
+the change.
+
+**Post-review finding (out of scope for this PR, flagged for a follow-up)**: of those 13
+call sites, 3 are reached by HTTP routes that do NOT carry `WorkshopAccessGuard` on the same
+`workshopId` — `GET /bodyshop/tech-availability`, `POST /bodyshop/simulate-schedule`, and
+`GET /technicians?workshopName=` (bypasses the guard entirely since it only inspects
+`workshopId`, never `workshopName`). Pre-existing gaps, not introduced or worsened by PR1-3
+— none of those three controllers were touched by this change. Needs its own follow-up PR.

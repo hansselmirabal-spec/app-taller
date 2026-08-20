@@ -4,6 +4,7 @@ import { Repository, In } from 'typeorm';
 import { IsString, IsOptional, IsBoolean, IsIn, IsInt, Min, Max } from 'class-validator';
 import { Workshop } from './workshop.entity';
 import type { UserAccessContext } from '../users/users.service';
+import { isUnrestrictedWorkshopAccess } from '../../common/guards/workshop-access.util';
 
 export class CreateWorkshopDto {
   @IsString() name: string;
@@ -26,14 +27,6 @@ export class UpdateWorkshopDto {
   @IsOptional() config?: object;
 }
 
-// Mismo criterio de "sin restricción" que WorkshopAccessGuard: admin/admin_taller,
-// o allowedWorkshopIds null/undefined/vacío.
-function isUnrestricted(user: UserAccessContext): boolean {
-  if (user.role === 'admin' || user.role === 'admin_taller') return true;
-  const ids = user.allowedWorkshopIds;
-  return !Array.isArray(ids) || ids.length === 0;
-}
-
 @Injectable()
 export class WorkshopsService {
   constructor(@InjectRepository(Workshop) private repo: Repository<Workshop>) {}
@@ -42,7 +35,7 @@ export class WorkshopsService {
   // (p.ej. appointments.service resolviendo config por nombre de taller) no operan
   // sobre una request de un usuario específico y deben seguir viendo todos los talleres.
   findAll(user?: UserAccessContext) {
-    if (!user || isUnrestricted(user)) {
+    if (!user || isUnrestrictedWorkshopAccess(user)) {
       return this.repo.find({ where: { active: true }, order: { name: 'ASC' } });
     }
     return this.repo.find({
@@ -52,11 +45,15 @@ export class WorkshopsService {
   }
 
   // `user` es opcional a propósito: los consumidores internos (capacity, bodyshop,
-  // appointments, technicians) ya resuelven un workshopId validado por su propio guard
-  // de ruta y solo necesitan la entidad, sin re-chequear acceso. Solo el controller de
-  // `GET /workshops/:id` pasa `user` para aplicar el scoping por usuario.
+  // appointments, technicians) resuelven un workshopId y solo necesitan la entidad,
+  // sin re-chequear acceso acá. Solo el controller de `GET /workshops/:id` pasa
+  // `user` para aplicar el scoping. OJO: no todos esos consumidores están detrás de
+  // WorkshopAccessGuard en su propia ruta — `bodyshop.controller.ts` tech-availability,
+  // `bodyshop-schedule.controller.ts` simulate-schedule, y `technicians.controller.ts`
+  // vía `?workshopName=` NO lo están (hallado en revisión de este change, alcance de
+  // este PR es solo `GET /workshops` — pendiente un fix aparte).
   async findOne(id: string, user?: UserAccessContext) {
-    if (user && !isUnrestricted(user) && !(user.allowedWorkshopIds as string[]).includes(id)) {
+    if (user && !isUnrestrictedWorkshopAccess(user) && !(user.allowedWorkshopIds as string[]).includes(id)) {
       throw new ForbiddenException('No tenés acceso a este taller');
     }
     const w = await this.repo.findOne({ where: { id } });
