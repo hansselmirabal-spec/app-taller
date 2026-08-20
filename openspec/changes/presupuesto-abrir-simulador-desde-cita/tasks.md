@@ -88,18 +88,18 @@ start until PR3 is merged.
 
 ## Phase 7: PR4 — Week data wiring
 
-- [ ] 7.1 In `apps/web/src/app/(dashboard)/presupuesto/page.tsx`, replace the `date`-scoped query with `useBudgetAppointmentsRange(workshopId, from, to)` computed from `startOfWeek(new Date(), { weekStartsOn: 1 })` through Friday of that week
-- [ ] 7.2 Selected day state: defaults to today when Mon-Fri, else Friday of the anchor week; no persistence/localStorage
+- [x] 7.1 In `apps/web/src/app/(dashboard)/presupuesto/page.tsx`, replace the `date`-scoped query with `useBudgetAppointmentsRange(workshopId, from, to)` computed from `startOfWeek(new Date(), { weekStartsOn: 1 })` through Friday of that week
+- [x] 7.2 Selected day state: defaults to today when Mon-Fri, else Friday of the anchor week; no persistence/localStorage
 
 ## Phase 8: PR4 — Two-panel layout
 
-- [ ] 8.1 Remove the grid/list `view` toggle and its state from `presupuesto/page.tsx`
-- [ ] 8.2 Left panel: 5 day chips (Mon-Fri) with per-day appointment counts derived client-side from the week dataset (`countBy(date)`); selecting a chip filters the slot list to that day (time, customer, plate, motive/note, status pill)
-- [ ] 8.3 Right panel: 4 fixed status columns (`pending`/`approved`/`rejected`/`cancelled`), each with header count and independent scroll; empty scope renders an explicit empty-state string (e.g. "Sin rechazados esta semana"), never blank; reuse `STATUS_CONFIG` colors unchanged
-- [ ] 8.4 Wire both panels' click targets (slot rows, cards) through the PR3 status-aware nav helper (pending → `simulador/[id]`, else → `[id]`)
+- [x] 8.1 Remove the grid/list `view` toggle and its state from `presupuesto/page.tsx`
+- [x] 8.2 Left panel: 5 day chips (Mon-Fri) with per-day appointment counts derived client-side from the week dataset (`countBy(date)`); selecting a chip filters the slot list to that day (time, customer, plate, motive/note, status pill)
+- [x] 8.3 Right panel: 4 fixed status columns (`pending`/`approved`/`rejected`/`cancelled`), each with header count and independent scroll; empty scope renders an explicit empty-state string (e.g. "Sin rechazados esta semana"), never blank; reuse `STATUS_CONFIG` colors unchanged
+- [x] 8.4 Wire both panels' click targets (slot rows, cards) through the PR3 status-aware nav helper (pending → `simulador/[id]`, else → `[id]`)
 
 ## Phase 9: PR4 — Verification
 
-- [ ] 9.1 Manual QA: landing on `/presupuesto` shows both panels, no toggle; day-chip counts match column totals for the week; all 4 columns render even when a status has zero appointments
-- [ ] 9.2 Manual QA: on Sat/Sun, week anchors to the week that just ended (not an empty upcoming week); selected day defaults to Friday
-- [ ] 9.3 `cd apps/api && pnpm test` full suite green (no regressions from PR1); `pnpm typecheck` (api+web) clean
+- [x] 9.1 Manual QA: landing on `/presupuesto` shows both panels, no toggle; day-chip counts match column totals for the week; all 4 columns render even when a status has zero appointments (verified via code-path tracing — no live-browser QA in this sandboxed environment, same disclosure as PR2/PR3)
+- [x] 9.2 Manual QA: on Sat/Sun, week anchors to the week that just ended (not an empty upcoming week); selected day defaults to Friday (verified via code-path tracing)
+- [x] 9.3 `cd apps/api && pnpm test` full suite green (23 suites / 306 passed, 2 pre-existing skipped — no regressions from PR1); `pnpm typecheck` (api+web) clean

@@ -1,16 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { format } from 'date-fns';
+import { format, startOfWeek, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
-  ChevronLeft, ChevronRight, Plus, FileText, Calculator,
-  Clock, CheckCircle2, XCircle, AlertCircle, RefreshCw, Search, BookOpen,
+  Plus, FileText, Calculator,
+  CheckCircle2, XCircle, AlertCircle, RefreshCw, Search, BookOpen,
   LayoutList, CalendarClock,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
-import { useBudgetAppointments } from '@/hooks/use-budget-appointments';
+import { useBudgetAppointmentsRange } from '@/hooks/use-budget-appointments';
 import { useWorkshopId } from '@/context/workshop-context';
 import { AppointmentSearchModal } from '@/components/ui/appointment-search';
 import { InfoButton } from '@/components/ui/info-button';
@@ -24,71 +24,14 @@ const STATUS_CONFIG = {
   cancelled: { label: 'Cancelado',  badge: 'bg-slate-100 text-slate-500',   icon: XCircle       },
 } as const;
 
-function BudgetCard({ appt, onClick }: { appt: BudgetAppointment; onClick: () => void }) {
-  const cfg = STATUS_CONFIG[appt.status];
-  const Icon = cfg.icon;
-  const totalHours = appt.processes?.reduce((s, p) => s + p.hours, 0) ?? 0;
-  const isCancelled = appt.status === 'cancelled' || appt.status === 'rejected';
-  const pendingTooLong = appt.status === 'pending'
-    && (!appt.processes || appt.processes.length === 0)
-    && (Date.now() - new Date(appt.createdAt).getTime()) > 2 * 3_600_000;
+const STATUS_ORDER: (keyof typeof STATUS_CONFIG)[] = ['pending', 'approved', 'rejected', 'cancelled'];
 
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onClick}
-      onKeyDown={e => e.key === 'Enter' && onClick()}
-      className={`rounded-xl border bg-white p-4 shadow-sm cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all space-y-2.5 ${isCancelled ? 'opacity-60' : ''} ${pendingTooLong ? 'border-orange-300 border-l-4 border-l-orange-400' : 'border-slate-200'}`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-base text-slate-900 tracking-wider">{appt.plate}</span>
-            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${cfg.badge}`}>
-              {cfg.label}
-            </span>
-            {pendingTooLong && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-orange-100 text-orange-700">
-                Sin procesos +2h
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-slate-500 mt-0.5">{appt.customerName}</p>
-        </div>
-        <Icon className={`h-4 w-4 flex-shrink-0 mt-0.5 ${cfg.badge.split(' ')[1]}`} />
-      </div>
-
-      <div className="flex items-center gap-3 text-xs text-slate-500">
-        <span className="flex items-center gap-1">
-          <Clock className="h-3 w-3" />
-          {appt.timeStart} – {appt.timeEnd}
-        </span>
-        {appt.perito && (
-          <span className="bg-slate-100 px-2 py-0.5 rounded-md">{appt.perito.name}</span>
-        )}
-        {appt.budgetNumber && (
-          <span className="text-slate-400">#{appt.budgetNumber}</span>
-        )}
-      </div>
-
-      {appt.processes && appt.processes.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {appt.processes.map(p => (
-            <span key={p.code} className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-medium">
-              {p.name} · {p.hours}h
-            </span>
-          ))}
-          <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-semibold">
-            Total: {totalHours}h
-          </span>
-        </div>
-      ) : (
-        <p className="text-[11px] text-slate-400 italic">Sin procesos cargados aún</p>
-      )}
-    </div>
-  );
-}
+const EMPTY_TEXT: Record<BudgetAppointment['status'], string> = {
+  pending:   'Sin pendientes esta semana',
+  approved:  'Sin aprobados esta semana',
+  rejected:  'Sin rechazados esta semana',
+  cancelled: 'Sin cancelados esta semana',
+};
 
 // ─── Vista Agenda — timeline condensado ───────────────────────────────────
 // El alto de la página lo define la cantidad real de citas, no un rango de
@@ -181,12 +124,45 @@ function AgendaTimeline({ appts, onClick }: { appts: BudgetAppointment[]; onClic
   );
 }
 
+// ─── Board de estados — card compacta ─────────────────────────────────────
+function BoardCard({ appt, onClick }: { appt: BudgetAppointment; onClick: () => void }) {
+  const isCancelled = appt.status === 'cancelled' || appt.status === 'rejected';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full text-left rounded-lg border bg-white px-3 py-2.5 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all space-y-1 ${isCancelled ? 'opacity-60 border-slate-200' : 'border-slate-200'}`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold text-sm text-slate-900 truncate">{appt.customerName}</span>
+        <span className="font-bold text-xs text-slate-500 tracking-wider flex-shrink-0">{appt.plate}</span>
+      </div>
+      <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+        <span>{capitalizeFirst(format(new Date(appt.date + 'T12:00:00'), "EEE d MMM", { locale: es }))} · {fmtHM(appt.timeStart)}</span>
+        <span className="truncate max-w-[45%]">{appt.insuranceCompany ?? 'Sin aseguradora'}</span>
+      </div>
+    </button>
+  );
+}
+
 export default function PresupuestoPage() {
   const router     = useRouter();
   const workshopId = useWorkshopId();
-  const [date, setDate]           = useState(formatDate(new Date()));
   const [searchOpen, setSearchOpen] = useState(false);
-  const [view, setView] = useState<'grid' | 'list'>('grid');
+
+  // Ancla de semana calculada una sola vez al montar — sin persistencia, sin
+  // navegación entre semanas (ver design.md Decision 4). Sáb/Dom ancla a la
+  // semana que recién terminó en vez de una semana futura vacía.
+  const [weekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
+  const weekDays = useMemo(() => Array.from({ length: 5 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+  const from = formatDate(weekDays[0]);
+  const to   = formatDate(weekDays[4]);
+
+  const [selectedDay, setSelectedDay] = useState(() => {
+    const today = new Date();
+    const dow = today.getDay();
+    return dow >= 1 && dow <= 5 ? formatDate(today) : formatDate(weekDays[4]);
+  });
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -199,22 +175,10 @@ export default function PresupuestoPage() {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  const { data: appts = [], isLoading, refetch } = useBudgetAppointments(workshopId ?? undefined, date);
+  const { data: weekAppts = [], isLoading, refetch } = useBudgetAppointmentsRange(workshopId ?? undefined, from, to);
 
-  function prevDay() {
-    const d = new Date(date + 'T12:00:00');
-    d.setDate(d.getDate() - 1);
-    setDate(formatDate(d));
-  }
-  function nextDay() {
-    const d = new Date(date + 'T12:00:00');
-    d.setDate(d.getDate() + 1);
-    setDate(formatDate(d));
-  }
-
-  const pending  = appts.filter(a => a.status === 'pending');
-  const approved = appts.filter(a => a.status === 'approved');
-  const others   = appts.filter(a => a.status === 'cancelled' || a.status === 'rejected');
+  const pendingCount = weekAppts.filter(a => a.status === 'pending').length;
+  const dayAppts     = weekAppts.filter(a => a.date === selectedDay);
 
   return (
     <div className="h-screen flex flex-col bg-slate-50">
@@ -225,46 +189,14 @@ export default function PresupuestoPage() {
             <FileText className="h-5 w-5 text-slate-400" />
             <h1 className="text-base font-semibold text-slate-900">Agenda de Presupuestos</h1>
             <InfoButton helpKey="presupuesto" />
-            {pending.length > 0 && (
+            {pendingCount > 0 && (
               <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-semibold">
-                {pending.length} pendiente{pending.length !== 1 ? 's' : ''}
+                {pendingCount} pendiente{pendingCount !== 1 ? 's' : ''}
               </span>
             )}
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex bg-slate-100 rounded-lg p-0.5">
-              <button
-                type="button"
-                onClick={() => setView('grid')}
-                title="Vista agenda (por hora)"
-                className={`p-1.5 rounded-md transition-colors ${view === 'grid' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                <CalendarClock className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setView('list')}
-                title="Vista lista"
-                className={`p-1.5 rounded-md transition-colors ${view === 'list' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                <LayoutList className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-              <button type="button" onClick={prevDay} className="p-1 rounded hover:bg-white transition-colors">
-                <ChevronLeft className="h-4 w-4 text-slate-600" />
-              </button>
-              <input
-                type="date"
-                value={date}
-                onChange={e => setDate(e.target.value)}
-                className="text-xs font-medium text-slate-700 bg-transparent border-none outline-none px-1"
-              />
-              <button type="button" onClick={nextDay} className="p-1 rounded hover:bg-white transition-colors">
-                <ChevronRight className="h-4 w-4 text-slate-600" />
-              </button>
-            </div>
             <button
               type="button"
               onClick={() => refetch()}
@@ -300,82 +232,85 @@ export default function PresupuestoPage() {
         </div>
       </div>
 
-      {/* Body */}
-      <div className="flex-1 overflow-y-auto p-6">
+      {/* Body — panel dual: agenda del día (izquierda) + board por estado (derecha) */}
+      <div className="flex-1 min-h-0 flex overflow-hidden">
         {isLoading ? (
-          <MotivationalLoader />
-        ) : view === 'grid' ? (
-          <div className="max-w-2xl">
-            <p className="text-sm font-semibold text-slate-700 mb-4">
-              {capitalizeFirst(format(new Date(date + 'T12:00:00'), "EEEE d 'de' MMMM", { locale: es }))}
-            </p>
-            <AgendaTimeline appts={appts} onClick={appt => router.push(budgetNavPath(appt))} />
-          </div>
-        ) : appts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-40 gap-3 text-slate-400">
-            <FileText className="h-10 w-10 opacity-30" />
-            <p className="text-sm">Sin presupuestos para este día</p>
-            <button
-              type="button"
-              onClick={() => router.push('/presupuesto/nueva-cita')}
-              className="text-xs font-medium text-blue-600 hover:underline"
-            >
-              Crear el primero
-            </button>
+          <div className="flex-1 flex items-center justify-center">
+            <MotivationalLoader />
           </div>
         ) : (
-          <div className="max-w-3xl mx-auto space-y-6">
-            {pending.length > 0 && (
-              <section>
-                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
-                  Pendientes ({pending.length})
-                </h2>
-                <div className="space-y-3">
-                  {pending.map(a => (
-                    <BudgetCard
-                      key={a.id}
-                      appt={a}
-                      onClick={() => router.push(budgetNavPath(a))}
-                    />
-                  ))}
+          <>
+            {/* Panel izquierdo — Agenda */}
+            <div className="w-1/2 border-r border-slate-200 flex flex-col min-h-0">
+              <div className="flex-shrink-0 flex items-center gap-2 px-4 pt-4">
+                <CalendarClock className="h-4 w-4 text-slate-400" />
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Agenda</h2>
+              </div>
+              <div className="flex-shrink-0 px-4 pt-3 pb-3">
+                <div className="grid grid-cols-5 gap-1.5">
+                  {weekDays.map(d => {
+                    const key = formatDate(d);
+                    const count = weekAppts.filter(a => a.date === key).length;
+                    const active = key === selectedDay;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setSelectedDay(key)}
+                        className={`flex flex-col items-center gap-0.5 rounded-lg px-1 py-2 transition-colors ${active ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      >
+                        <span className="text-[10px] font-semibold uppercase">{capitalizeFirst(format(d, 'EEE', { locale: es }))}</span>
+                        <span className="text-sm font-bold">{format(d, 'd')}</span>
+                        {count > 0 && (
+                          <span className={`text-[10px] font-semibold px-1.5 rounded-full ${active ? 'bg-white/20' : 'bg-slate-200 text-slate-500'}`}>
+                            {count}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
-              </section>
-            )}
+              </div>
+              <div className="flex-1 overflow-y-auto px-4 pb-4">
+                <p className="text-sm font-semibold text-slate-700 mb-4">
+                  {capitalizeFirst(format(new Date(selectedDay + 'T12:00:00'), "EEEE d 'de' MMMM", { locale: es }))}
+                </p>
+                <AgendaTimeline appts={dayAppts} onClick={appt => router.push(budgetNavPath(appt))} />
+              </div>
+            </div>
 
-            {approved.length > 0 && (
-              <section>
-                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
-                  Aprobados · en taller ({approved.length})
-                </h2>
-                <div className="space-y-3">
-                  {approved.map(a => (
-                    <BudgetCard
-                      key={a.id}
-                      appt={a}
-                      onClick={() => router.push(budgetNavPath(a))}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {others.length > 0 && (
-              <section>
-                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
-                  Cancelados / Rechazados
-                </h2>
-                <div className="space-y-3">
-                  {others.map(a => (
-                    <BudgetCard
-                      key={a.id}
-                      appt={a}
-                      onClick={() => router.push(budgetNavPath(a))}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
+            {/* Panel derecho — Presupuestos por estado */}
+            <div className="w-1/2 flex flex-col min-h-0 p-4 gap-3">
+              <div className="flex-shrink-0 flex items-center gap-2">
+                <LayoutList className="h-4 w-4 text-slate-400" />
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Presupuestos por estado</h2>
+              </div>
+              <div className="grid grid-cols-4 gap-3 flex-1 min-h-0">
+                {STATUS_ORDER.map(status => {
+                  const cfg = STATUS_CONFIG[status];
+                  const items = weekAppts.filter(a => a.status === status);
+                  return (
+                    <div key={status} className="flex flex-col min-h-0 rounded-xl border border-slate-200 bg-white">
+                      <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-slate-200">
+                        <span className={`h-2 w-2 rounded-full ${TIMELINE_DOT[status]}`} />
+                        <span className="text-xs font-semibold text-slate-700">{cfg.label}</span>
+                        <span className="ml-auto text-[11px] font-semibold text-slate-400">{items.length}</span>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
+                        {items.length === 0 ? (
+                          <p className="text-[11px] text-slate-400 italic px-1 py-2">{EMPTY_TEXT[status]}</p>
+                        ) : (
+                          items.map(a => (
+                            <BoardCard key={a.id} appt={a} onClick={() => router.push(budgetNavPath(a))} />
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
         )}
       </div>
 
