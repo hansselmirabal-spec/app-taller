@@ -4,32 +4,59 @@
 
 | Field | Value |
 |-------|-------|
-| Estimated changed lines | PR1 ~110 · PR2 ~300 · PR3 ~200 · PR4 ~370 |
-| 400-line budget risk | PR1 Low · PR2 Medium · PR3 Medium · PR4 High (at budget edge) |
+| Estimated changed lines | PR1 ~110 (actual: 110) · PR2 ~300 (actual: 866) · PR3 ~200 (actual: 411) · PR4 ~370 (actual: 335) |
+| 400-line budget risk | PR1 Low (on budget) · PR2 Medium (actual: High — over budget) · PR3 Medium (actual: High — over budget) · PR4 High forecast (actual: on budget, 335 lines) |
 | Chained PRs recommended | Yes |
 | Suggested split | PR1 (range endpoint) → PR2 (extract shared Simulator form, child of PR1) → PR3 (`simulador/[id]` edit route, child of PR2) → PR4 (two-panel board, child of PR1+PR3) |
 | Delivery strategy | ask-on-risk |
-| Chain strategy | stacked-to-main (resolved 2026-08-20 — each PR targets `main` directly) |
+| Chain strategy | stacked-to-main (resolved 2026-08-20 — each PR targets `main` directly, merged individually) |
 
 Decision needed before apply: No (resolved)
 Chained PRs recommended: Yes
 Chain strategy: stacked-to-main
-400-line budget risk: High
+400-line budget risk: High (forecast) — actuals: PR1 on-budget, PR2/PR3 over budget (flagged, mechanical/no-behavior-change), PR4 on-budget.
 
 Design already resolved the 4-PR split and per-PR line estimates (see `design.md`
 Chained PR plan). Not reopened here.
 
-PR1 merged: https://github.com/hansselmirabal-spec/app-taller/pull/59 (branch
+**ALL 4 PRs NOW MERGED TO MAIN.** PR1/PR2/PR3/PR4 all merged. Follow-up PR #63
+merged to fix the CRITICAL verification issue (motive/notes field in agenda panel).
+
+PR1 MERGED: https://github.com/hansselmirabal-spec/app-taller/pull/59 (branch
 `feat/budget-appointments-range-endpoint` → `main`, commit `721f044`).
-PR2 merged: https://github.com/hansselmirabal-spec/app-taller/pull/60 (branch
+
+PR2 MERGED: https://github.com/hansselmirabal-spec/app-taller/pull/60 (branch
 `feat/simulador-extract-shared-form` → `main`, commit `dd955dd`; actual diff
-866 lines, over budget — see PR2 apply-progress note).
-PR3 open, not yet merged: https://github.com/hansselmirabal-spec/app-taller/pull/61
-(branch `feat/simulador-edit-route` → `main`; actual diff 411 changed lines,
-also over the 400-line budget — mostly the new `simulador/[id]/page.tsx`
-route, which needs distinct loading/not-found/hydration/save branches;
-flagged in the PR body, suggested lens `review-reliability`). PR4 must NOT
-start until PR3 is merged.
+866 lines, over budget — git couldn't detect the JSX-move as a rename once
+prop names changed on every handler; mechanical, no behavior change). Post-merge
+direct fix on `main`: `SimulatorForm` gained an explicit `vehicleFound: boolean`
+prop (label now keys off `vehicleFound` instead of a truthy `vehicleModel` check).
+
+PR3 MERGED: https://github.com/hansselmirabal-spec/app-taller/pull/61 (branch
+`feat/simulador-edit-route` → `main`, commit `d76b486`; actual diff 411 changed
+lines, also over the 400-line budget — mostly the new `simulador/[id]/page.tsx`
+route, which needs distinct loading/not-found/hydration/save branches; flagged
+in the PR body, suggested lens `review-reliability`). Post-merge direct fixes on
+`main`: `[id]/page.tsx` render/status-gate now driven by a single `screenState:
+'loading'|'notfound'|'ready'` state set once (not derived per-render from live
+`appt`); two new reusable helpers added to `simulador/_shared/`:
+`estimateToBudgetPayload(estimate)` in `use-simulator-form.ts` and
+`LazyBudgetPdfLink` in `budget-pdf-link-lazy.tsx`.
+
+PR4 MERGED: https://github.com/hansselmirabal-spec/app-taller/pull/62
+(branch `feat/presupuesto-two-panel-board` → `main`, commit `07d2643`).
+Two-panel week board (day-agenda left + 4-column status board right) replaces
+the `view: 'grid'|'list'` toggle in `presupuesto/page.tsx`. Actual diff 335
+changed lines (`page.tsx` alone: 317 = 126 additions + 191 deletions) — first
+PR in this chain to land UNDER the 400-line budget.
+
+PR #63 (FOLLOW-UP): https://github.com/hansselmirabal-spec/app-taller/pull/63
+(commit `954389b3b2ccca67e78b54d3dc591cb89b28ae52`, merged post-verify).
+Fixes the CRITICAL verification issue: `AgendaTimeline` component now renders
+`notes` (motive/reason) in each slot row, an explicit MUST in the
+`budget-workspace-board` spec scenario. No other issues in the verification
+report were CRITICAL (color-token warning and lack of automated frontend tests
+are pre-existing repo constraints and already-reviewed deviations).
 
 ### Suggested Work Units
 
@@ -103,3 +130,9 @@ start until PR3 is merged.
 - [x] 9.1 Manual QA: landing on `/presupuesto` shows both panels, no toggle; day-chip counts match column totals for the week; all 4 columns render even when a status has zero appointments (verified via code-path tracing — no live-browser QA in this sandboxed environment, same disclosure as PR2/PR3)
 - [x] 9.2 Manual QA: on Sat/Sun, week anchors to the week that just ended (not an empty upcoming week); selected day defaults to Friday (verified via code-path tracing)
 - [x] 9.3 `cd apps/api && pnpm test` full suite green (23 suites / 306 passed, 2 pre-existing skipped — no regressions from PR1); `pnpm typecheck` (api+web) clean
+
+## ALL PHASES COMPLETE — 37/37 tasks. Change fully implemented and verified across PR1-PR4, with CRITICAL fix merged in PR #63.
+
+Also written to `openspec/changes/presupuesto-abrir-simulador-desde-cita/tasks.md`
+(hybrid mode) — this Engram record mirrors that file exactly as of archive completion,
+2026-08-20.
