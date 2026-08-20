@@ -1599,6 +1599,13 @@ export async function getBudgetAppointments(workshopId: string, date: string): P
   return http<BudgetAppointment[]>(`/budget-appointments?workshopId=${encodeURIComponent(workshopId)}&date=${date}`);
 }
 
+// Rango semanal — alimenta el board de dos paneles (Agenda + estados) de
+// /presupuesto con un solo request (design.md Decisión 1).
+export async function getBudgetAppointmentsRange(workshopId: string, from: string, to: string): Promise<BudgetAppointment[]> {
+  if (MOCK) return delay([]);
+  return http<BudgetAppointment[]>(`/budget-appointments?workshopId=${encodeURIComponent(workshopId)}&from=${from}&to=${to}`);
+}
+
 export async function getBudgetAppointment(id: string): Promise<BudgetAppointment> {
   if (MOCK) return delay({ id } as unknown as BudgetAppointment);
   return http<BudgetAppointment>(`/budget-appointments/${id}`);

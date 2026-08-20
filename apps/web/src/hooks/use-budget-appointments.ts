@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  getBudgetAppointments, getBudgetAppointment, getBudgetAppointmentsByPlate,
+  getBudgetAppointments, getBudgetAppointmentsRange, getBudgetAppointment, getBudgetAppointmentsByPlate,
   createBudgetAppointment, updateBudgetProcesses,
   cancelBudgetAppointment, approveBudgetAppointment,
   rejectBudgetAppointment,
@@ -14,6 +14,16 @@ export function useBudgetAppointments(workshopId: string | undefined, date: stri
     queryKey: [KEY, workshopId, date],
     queryFn:  () => getBudgetAppointments(workshopId!, date),
     enabled:  !!workshopId && !!date,
+    staleTime: 30_000,
+  });
+}
+
+// Rango semanal — futuro consumidor: board de dos paneles de /presupuesto (PR4).
+export function useBudgetAppointmentsRange(workshopId: string | undefined, from: string, to: string) {
+  return useQuery({
+    queryKey: [KEY, 'range', workshopId, from, to],
+    queryFn:  () => getBudgetAppointmentsRange(workshopId!, from, to),
+    enabled:  !!workshopId && !!from && !!to,
     staleTime: 30_000,
   });
 }

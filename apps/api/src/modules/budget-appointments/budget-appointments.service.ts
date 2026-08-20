@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import { Between, DataSource, IsNull, Repository } from 'typeorm';
 import {
   IsString, IsOptional, IsArray, IsNumber,
   ValidateNested, Matches, Min,
@@ -167,6 +167,21 @@ export class BudgetAppointmentsService {
       where,
       relations: ['perito'],
       order: { timeStart: 'ASC' },
+    });
+  }
+
+  // Rango semanal para el nuevo board de dos paneles (Agenda + estados) de
+  // /presupuesto — un solo request sirve ambos paneles. Reproduce EXACTAMENTE
+  // el scoping de rol de findByDate (línea de arriba): si se omite, un
+  // perito vería presupuestos de otros peritos en la semana. Ver design.md
+  // "Threat Matrix" — esta es la única superficie de autorización real del PR.
+  async findByRange(workshopId: string, from: string, to: string, callerId?: string, callerRole?: string): Promise<BudgetAppointment[]> {
+    const where: any = { workshopId, date: Between(from, to) };
+    if (callerRole === 'perito' && callerId) where.peritoId = callerId;
+    return this.repo.find({
+      where,
+      relations: ['perito'],
+      order: { date: 'ASC', timeStart: 'ASC' },
     });
   }
 
