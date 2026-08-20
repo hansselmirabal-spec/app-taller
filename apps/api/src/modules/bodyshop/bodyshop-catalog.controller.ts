@@ -120,8 +120,10 @@ export class BodyshopCatalogController {
     return this.catalogService.seedDefaults(workshopId);
   }
 
+  // Solo @Roles('admin') — WorkshopAccessGuard sería un no-op acá, admin ya
+  // hace bypass total del guard antes de llegar a leer params.workshopId.
   @Post('seed-workshop/:workshopId')
-  @UseGuards(RolesGuard, WorkshopAccessGuard) @Roles('admin')
+  @UseGuards(RolesGuard) @Roles('admin')
   seedWorkshop(@Param('workshopId') workshopId: string) {
     return this.catalogService.seedWorkshopMatrix(workshopId);
   }
