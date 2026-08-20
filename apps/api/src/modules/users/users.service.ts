@@ -31,6 +31,13 @@ function serializeUser(user: User) {
   return u;
 }
 
+export type UserAccessContext = {
+  id: string;
+  role: 'admin' | 'admin_taller' | 'receptionist' | 'perito';
+  allowedWorkshopIds: string[] | null;
+  active: boolean;
+};
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -49,6 +56,15 @@ export class UsersService {
     const user = await this.repo.findOne({ where: { id }, relations: ['customRole'] });
     if (user) await this.fillDefaultRole(user);
     return user;
+  }
+
+  // Consulta liviana para el hot path de auth: solo lo que WorkshopAccessGuard necesita.
+  // No usar findById() acá — trae customRole y puede disparar una query extra a roles.
+  async findAccessContext(id: string): Promise<UserAccessContext | null> {
+    return this.repo.findOne({
+      where: { id },
+      select: ['id', 'role', 'allowedWorkshopIds', 'active'],
+    }) as Promise<UserAccessContext | null>;
   }
 
   private async fillDefaultRole(user: User): Promise<void> {
@@ -73,7 +89,7 @@ export class UsersService {
       passwordHash: await bcrypt.hash(tempPassword, 10),
       role: dto.role,
       roleId: dto.roleId ?? null,
-      allowedWorkshopIds: dto.allowedWorkshopIds ?? null,
+      allowedWorkshopIds: dto.allowedWorkshopIds?.length ? dto.allowedWorkshopIds : null,
       mustChangePassword: true,
     });
     const saved = await this.repo.save(user);
@@ -92,7 +108,9 @@ export class UsersService {
     if (dto.active !== undefined) user.active = dto.active;
     if (dto.password) user.passwordHash = await bcrypt.hash(dto.password, 10);
     if ('roleId' in dto) user.roleId = dto.roleId ?? null;
-    if ('allowedWorkshopIds' in dto) user.allowedWorkshopIds = dto.allowedWorkshopIds ?? null;
+    if ('allowedWorkshopIds' in dto) {
+      user.allowedWorkshopIds = dto.allowedWorkshopIds?.length ? dto.allowedWorkshopIds : null;
+    }
 
     const saved = await this.repo.save(user);
     return serializeUser(await this.repo.findOne({ where: { id: saved.id }, relations: ['customRole'] }) as User);
