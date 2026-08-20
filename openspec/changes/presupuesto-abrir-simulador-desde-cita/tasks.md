@@ -9,16 +9,19 @@
 | Chained PRs recommended | Yes |
 | Suggested split | PR1 (range endpoint) → PR2 (extract shared Simulator form, child of PR1) → PR3 (`simulador/[id]` edit route, child of PR2) → PR4 (two-panel board, child of PR1+PR3) |
 | Delivery strategy | ask-on-risk |
-| Chain strategy | pending — orchestrator must ask before `sdd-apply` |
+| Chain strategy | stacked-to-main (resolved 2026-08-20 — each PR targets `main` directly) |
 
-Decision needed before apply: Yes
+Decision needed before apply: No (resolved)
 Chained PRs recommended: Yes
-Chain strategy: pending
+Chain strategy: stacked-to-main
 400-line budget risk: High
 
 Design already resolved the 4-PR split and per-PR line estimates (see `design.md`
-Chained PR plan). Not reopened here. Only the **stacked-to-main vs
-feature-branch-chain** choice is open — cache it once before `sdd-apply` starts PR1.
+Chained PR plan). Not reopened here.
+
+PR1 is open: https://github.com/hansselmirabal-spec/app-taller/pull/59 (branch
+`feat/budget-appointments-range-endpoint` → `main`, not yet merged). PR2 must
+NOT start until PR1 is merged.
 
 ### Suggested Work Units
 
@@ -31,24 +34,24 @@ feature-branch-chain** choice is open — cache it once before `sdd-apply` start
 
 ## Phase 1: PR1 — `findByRange` service (TDD)
 
-- [ ] 1.1 RED: `findByRange` — perito caller sees only own `peritoId` rows (mirror `findByDate`'s scoping test), in `apps/api/src/__tests__/budget-appointments.service.spec.ts`
-- [ ] 1.2 RED: `findByRange` — non-perito caller (admin/asesor) sees all rows in range, no `peritoId` filter applied
-- [ ] 1.3 RED: `findByRange` — results ordered `date ASC, timeStart ASC`, scoped to `workshopId` and `Between(from, to)`
-- [ ] 1.4 GREEN: implement `findByRange(workshopId, from, to, callerId?, callerRole?)` in `apps/api/src/modules/budget-appointments/budget-appointments.service.ts`, reusing the exact `callerRole === 'perito'` guard from `findByDate` (lines 163-171)
+- [x] 1.1 RED: `findByRange` — perito caller sees only own `peritoId` rows (mirror `findByDate`'s scoping test), in `apps/api/src/__tests__/budget-appointments.service.spec.ts`
+- [x] 1.2 RED: `findByRange` — non-perito caller (admin/asesor) sees all rows in range, no `peritoId` filter applied
+- [x] 1.3 RED: `findByRange` — results ordered `date ASC, timeStart ASC`, scoped to `workshopId` and `Between(from, to)`
+- [x] 1.4 GREEN: implement `findByRange(workshopId, from, to, callerId?, callerRole?)` in `apps/api/src/modules/budget-appointments/budget-appointments.service.ts`, reusing the exact `callerRole === 'perito'` guard from `findByDate` (lines 163-171)
 
 ## Phase 2: PR1 — Controller `from`/`to` branch (TDD)
 
-- [ ] 2.1 RED: `GET /budget-appointments?workshopId&from&to` (valid dates) → 200, calls `service.findByRange` with `user.id`/`user.role`, in `apps/api/src/__tests__/budget-appointments.controller.spec.ts` (new file — no controller spec exists yet for this module)
-- [ ] 2.2 RED: `from`/`to` with invalid `YYYY-MM-DD` format on either param → 400 (`DATE_RE` reused, not redefined)
-- [ ] 2.3 RED: existing `date` branch untouched — regression test proving `date` still routes to `findByDate`
-- [ ] 2.4 GREEN: add `@Query('from')`/`@Query('to')` params + branch in `find()`, `apps/api/src/modules/budget-appointments/budget-appointments.controller.ts` (pattern: `appointments.controller.ts:26-45`)
-- [ ] 2.5 REFACTOR: run full `apps/api` suite, confirm no regression in existing `findByDate`/`findByPlate` tests
+- [x] 2.1 RED: `GET /budget-appointments?workshopId&from&to` (valid dates) → 200, calls `service.findByRange` with `user.id`/`user.role`, in `apps/api/src/__tests__/budget-appointments.controller.spec.ts` (new file — no controller spec exists yet for this module)
+- [x] 2.2 RED: `from`/`to` with invalid `YYYY-MM-DD` format on either param → 400 (`DATE_RE` reused, not redefined)
+- [x] 2.3 RED: existing `date` branch untouched — regression test proving `date` still routes to `findByDate`
+- [x] 2.4 GREEN: add `@Query('from')`/`@Query('to')` params + branch in `find()`, `apps/api/src/modules/budget-appointments/budget-appointments.controller.ts` (pattern: `appointments.controller.ts:26-45`)
+- [x] 2.5 REFACTOR: run full `apps/api` suite, confirm no regression in existing `findByDate`/`findByPlate` tests
 
 ## Phase 3: PR1 — Web client + hook (no RED — thin wrapper, matches untested `getBudgetAppointments`/`useBudgetAppointments` precedent)
 
-- [ ] 3.1 [Frontend, no RED] add `getBudgetAppointmentsRange(workshopId, from, to)` next to `getBudgetAppointments`, `apps/web/src/lib/api.ts` (~L1597)
-- [ ] 3.2 [Frontend, no RED] add `useBudgetAppointmentsRange(workshopId, from, to)` in `apps/web/src/hooks/use-budget-appointments.ts`, key `[KEY, 'range', workshopId, from, to]`, `staleTime: 30_000`
-- [ ] 3.3 `cd apps/api && pnpm test` green (all PR1 tests) + `pnpm typecheck` (api+web) clean
+- [x] 3.1 [Frontend, no RED] add `getBudgetAppointmentsRange(workshopId, from, to)` next to `getBudgetAppointments`, `apps/web/src/lib/api.ts` (~L1597)
+- [x] 3.2 [Frontend, no RED] add `useBudgetAppointmentsRange(workshopId, from, to)` in `apps/web/src/hooks/use-budget-appointments.ts`, key `[KEY, 'range', workshopId, from, to]`, `staleTime: 30_000`
+- [x] 3.3 `cd apps/api && pnpm test` green (all PR1 tests) + `pnpm typecheck` (api+web) clean
 
 ## Phase 4: PR2 — Extract shared Simulator form
 
