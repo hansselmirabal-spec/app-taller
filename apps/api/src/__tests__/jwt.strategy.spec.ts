@@ -79,4 +79,15 @@ describe('JwtStrategy', () => {
     expect(usersService.findAccessContext).toHaveBeenCalledTimes(1);
     expect(usersService.findAccessContext).toHaveBeenCalledWith('u1');
   });
+
+  it('propaga un fallo de DB distinto del fail-closed de usuario inexistente/inactivo', async () => {
+    // Un timeout/error de conexión real NO debe convertirse en el mismo
+    // UnauthorizedException que un usuario legítimamente inexistente/inactivo
+    // — si no, un incidente de DB se vería igual que sesiones inválidas en
+    // los logs, en vez de como un 500 diagnosticable.
+    const dbError = new Error('connection timeout');
+    usersService.findAccessContext.mockRejectedValue(dbError);
+
+    await expect(strategy.validate(payload)).rejects.toBe(dbError);
+  });
 });

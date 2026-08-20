@@ -67,6 +67,14 @@ export class UsersService {
     }) as Promise<UserAccessContext | null>;
   }
 
+  // Un array vacío se guarda como null: el guard trata ambos como "sin
+  // restricción", así que dejar persistir [] sería un estado ambiguo — un
+  // admin que vacía la lista pensando que bloquea todo en realidad
+  // desbloquearía todo.
+  private normalizeAllowedWorkshopIds(ids: string[] | null | undefined): string[] | null {
+    return ids?.length ? ids : null;
+  }
+
   private async fillDefaultRole(user: User): Promise<void> {
     if (user.customRole) return;
     const defaultRole = await this.roleRepo.findOne({ where: { defaultFor: user.role } });
@@ -89,7 +97,7 @@ export class UsersService {
       passwordHash: await bcrypt.hash(tempPassword, 10),
       role: dto.role,
       roleId: dto.roleId ?? null,
-      allowedWorkshopIds: dto.allowedWorkshopIds?.length ? dto.allowedWorkshopIds : null,
+      allowedWorkshopIds: this.normalizeAllowedWorkshopIds(dto.allowedWorkshopIds),
       mustChangePassword: true,
     });
     const saved = await this.repo.save(user);
@@ -109,7 +117,7 @@ export class UsersService {
     if (dto.password) user.passwordHash = await bcrypt.hash(dto.password, 10);
     if ('roleId' in dto) user.roleId = dto.roleId ?? null;
     if ('allowedWorkshopIds' in dto) {
-      user.allowedWorkshopIds = dto.allowedWorkshopIds?.length ? dto.allowedWorkshopIds : null;
+      user.allowedWorkshopIds = this.normalizeAllowedWorkshopIds(dto.allowedWorkshopIds);
     }
 
     const saved = await this.repo.save(user);
