@@ -55,11 +55,11 @@ NOT start until PR1 is merged.
 
 ## Phase 4: PR2 — Extract shared Simulator form
 
-- [ ] 4.1 Create `apps/web/src/app/(dashboard)/presupuesto/simulador/_shared/use-simulator-form.ts`: move `plate`/`customerName`/`phone`/`budgetNumber`/`notes`/`items`/`estimate`/`error` state + `handlePlateLookup` + estimate-debounce effect out of `simulador/page.tsx`
-- [ ] 4.2 Create `apps/web/src/app/(dashboard)/presupuesto/simulador/_shared/simulator-form.tsx`: move the vehicle-header + items-list + estimate-summary JSX out of `simulador/page.tsx`, parameterized by the hook's state/handlers
-- [ ] 4.3 Rewrite `apps/web/src/app/(dashboard)/presupuesto/simulador/page.tsx` to consume `_shared/*`; create-mode behavior (lookup, items, estimate, save-as-modal) unchanged — no new/removed capability in this PR
-- [ ] 4.4 Manual QA: full create flow identical to pre-refactor (plate lookup, add/remove items, estimate recompute, save creates appointment, redirect to `/presupuesto/{id}`)
-- [ ] 4.5 `pnpm typecheck` (web) clean; no `apps/api` changes in this PR
+- [x] 4.1 Create `apps/web/src/app/(dashboard)/presupuesto/simulador/_shared/use-simulator-form.ts`: move `plate`/`customerName`/`phone`/`budgetNumber`/`notes`/`items`/`estimate`/`error` state + `handlePlateLookup` + estimate-debounce effect out of `simulador/page.tsx`
+- [x] 4.2 Create `apps/web/src/app/(dashboard)/presupuesto/simulador/_shared/simulator-form.tsx`: move the vehicle-header + items-list + estimate-summary JSX out of `simulador/page.tsx`, parameterized by the hook's state/handlers
+- [x] 4.3 Rewrite `apps/web/src/app/(dashboard)/presupuesto/simulador/page.tsx` to consume `_shared/*`; create-mode behavior (lookup, items, estimate, save-as-modal) unchanged — no new/removed capability in this PR
+- [x] 4.4 Manual QA: full create flow identical to pre-refactor (plate lookup, add/remove items, estimate recompute, save creates appointment, redirect to `/presupuesto/{id}`) — verified via line-by-line handler/prop equivalence against the pre-refactor file (no live-browser QA available in this environment); every state setter, mutation call, and JSX branch was preserved 1:1, only re-wired through props
+- [x] 4.5 `pnpm typecheck` (web) clean; no `apps/api` changes in this PR
 
 ## Phase 5: PR3 — `simulador/[id]` edit route
 
