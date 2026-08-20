@@ -3,6 +3,7 @@ import { WorkshopsService, CreateWorkshopDto, UpdateWorkshopDto } from './worksh
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 const wrap = (data: any) => ({ data, meta: { timestamp: new Date().toISOString() } });
 
@@ -12,10 +13,12 @@ export class WorkshopsController {
   constructor(private service: WorkshopsService) {}
 
   @Get()
-  async findAll() { return wrap(await this.service.findAll()); }
+  async findAll(@CurrentUser() user: any) { return wrap(await this.service.findAll(user)); }
 
   @Get(':id')
-  async findOne(@Param('id') id: string) { return wrap(await this.service.findOne(id)); }
+  async findOne(@Param('id') id: string, @CurrentUser() user: any) {
+    return wrap(await this.service.findOne(id, user));
+  }
 
   @Post()
   @UseGuards(RolesGuard)
