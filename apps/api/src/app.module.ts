@@ -39,6 +39,12 @@ import { BudgetSimulatorModule } from './modules/budget-simulator/budget-simulat
         migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
         migrationsRun: config.get('NODE_ENV') !== 'development',
         logging: false,
+        // Sin esto, un pool agotado o un Postgres degradado (no caído, solo
+        // lento) cuelga indefinidamente — antes solo afectaba a queries de
+        // negocio, ahora JwtStrategy.validate() también pega a la DB en cada
+        // request autenticado, así que una DB lenta ahora colgaría el login
+        // de toda la app. Fail fast en vez de colgar.
+        extra: { connectionTimeoutMillis: 5000, statement_timeout: 5000 },
       }),
       inject: [ConfigService],
     }),
