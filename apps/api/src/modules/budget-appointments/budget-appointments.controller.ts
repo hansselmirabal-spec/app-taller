@@ -19,15 +19,28 @@ const wrap = (data: any) => ({ data, meta: { timestamp: new Date().toISOString()
 export class BudgetAppointmentsController {
   constructor(private readonly service: BudgetAppointmentsService) {}
 
+  // Soporta dos modos: `date` (día único, comportamiento preexistente sin
+  // cambios) y `from`+`to` (rango semanal, nuevo — alimenta el board de
+  // /presupuesto). Mirror de appointments.controller.ts:26-45.
   @Get()
-  async findByDate(
+  async find(
     @Query('workshopId') workshopId: string,
-    @Query('date') date: string,
-    @CurrentUser() user: any,
+    @Query('date') date?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @CurrentUser() user?: any,
   ) {
-    if (!workshopId || !date) throw new BadRequestException('workshopId y date son requeridos');
+    if (!workshopId) throw new BadRequestException('workshopId es requerido');
+
+    if (from || to) {
+      if (!from || !to) throw new BadRequestException('from y to son requeridos juntos');
+      if (!DATE_RE.test(from) || !DATE_RE.test(to)) throw new BadRequestException('Formato de fecha inválido (YYYY-MM-DD)');
+      return wrap(await this.service.findByRange(workshopId, from, to, user?.id, user?.role));
+    }
+
+    if (!date) throw new BadRequestException('date, o from y to, son requeridos');
     if (!DATE_RE.test(date)) throw new BadRequestException('Formato de fecha inválido (YYYY-MM-DD)');
-    return wrap(await this.service.findByDate(workshopId, date, user.id, user.role));
+    return wrap(await this.service.findByDate(workshopId, date, user?.id, user?.role));
   }
 
   @Get('by-plate/:plate')

@@ -12,6 +12,7 @@
  *     reserva operacional de horas.
  */
 
+import { Between } from 'typeorm';
 import { BudgetAppointmentsService } from '../modules/budget-appointments/budget-appointments.service';
 
 const WS_ID = 'ws-001';
@@ -174,6 +175,58 @@ describe('BudgetAppointmentsService.findByPlate', () => {
     const result = await service.findByPlate(WS_ID, 'TST 001');
 
     expect(result).toEqual(found);
+  });
+});
+
+// PR1 de "presupuesto-abrir-simulador-desde-cita": GET /budget-appointments
+// gana from/to (rango semanal), mirror de appointments.controller.ts:26-45.
+// findByRange DEBE reproducir el mismo scoping de rol que findByDate
+// (budget-appointments.service.ts:163-171) — si un perito ve presupuestos de
+// otro perito en el rango, es una fuga de autorización real, no solo un bug
+// de UI. Ver design.md Decisión 1 / Threat Matrix.
+describe('BudgetAppointmentsService.findByRange', () => {
+  const FROM = '2026-08-17';
+  const TO = '2026-08-21';
+
+  it('perito caller ve solo sus propios presupuestos (peritoId) en el rango', async () => {
+    const repo = makeRepo(null);
+    const bodyshopService = makeBodyshopService();
+    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any, makeDataSource(repo) as any);
+
+    await service.findByRange(WS_ID, FROM, TO, 'perito-1', 'perito');
+
+    expect(repo.find).toHaveBeenCalledWith({
+      where: { workshopId: WS_ID, date: Between(FROM, TO), peritoId: 'perito-1' },
+      relations: ['perito'],
+      order: { date: 'ASC', timeStart: 'ASC' },
+    });
+  });
+
+  it('caller no-perito ve todos los presupuestos del rango, sin filtro de peritoId', async () => {
+    const repo = makeRepo(null);
+    const bodyshopService = makeBodyshopService();
+    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any, makeDataSource(repo) as any);
+
+    await service.findByRange(WS_ID, FROM, TO, 'admin-1', 'admin');
+
+    const whereArg = (repo.find as jest.Mock).mock.calls[0][0].where;
+    expect(whereArg).not.toHaveProperty('peritoId');
+    expect(whereArg).toEqual({ workshopId: WS_ID, date: Between(FROM, TO) });
+  });
+
+  it('ordena por date ASC, timeStart ASC, acotado a workshopId + Between(from,to)', async () => {
+    const repo = makeRepo(null);
+    const bodyshopService = makeBodyshopService();
+    const service = new BudgetAppointmentsService(repo as any, bodyshopService as any, makeDataSource(repo) as any);
+
+    await service.findByRange(WS_ID, FROM, TO);
+
+    expect(repo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ workshopId: WS_ID, date: Between(FROM, TO) }),
+        order: { date: 'ASC', timeStart: 'ASC' },
+      }),
+    );
   });
 });
 
