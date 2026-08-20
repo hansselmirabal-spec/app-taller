@@ -113,6 +113,14 @@ const TIMELINE_DOT: Record<BudgetAppointment['status'], string> = {
   cancelled: 'bg-slate-300',
 };
 
+// Only `pending` budgets are editable in the Simulator — everything else is
+// read-only. Centralized here so every nav call site stays in sync.
+function budgetNavPath(appt: BudgetAppointment): string {
+  return appt.status === 'pending'
+    ? `/presupuesto/simulador/${appt.id}`
+    : `/presupuesto/${appt.id}`;
+}
+
 // Hueco libre entre el fin de una cita y el inicio de la siguiente — solo se
 // muestra si es de al menos una hora, para no ensuciar la vista con huecos
 // de 5-10 minutos entre citas seguidas.
@@ -125,7 +133,7 @@ function gapLabel(prevEndHM: string, nextStartHM: string): string | null {
   return `${hours}h libres`;
 }
 
-function AgendaTimeline({ appts, onClick }: { appts: BudgetAppointment[]; onClick: (id: string) => void }) {
+function AgendaTimeline({ appts, onClick }: { appts: BudgetAppointment[]; onClick: (appt: BudgetAppointment) => void }) {
   const sorted = [...appts].sort((a, b) => a.timeStart.localeCompare(b.timeStart));
 
   if (sorted.length === 0) {
@@ -153,7 +161,7 @@ function AgendaTimeline({ appts, onClick }: { appts: BudgetAppointment[]; onClic
               <span className={`absolute -left-[6px] top-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-slate-50 ${TIMELINE_DOT[a.status]}`} />
               <button
                 type="button"
-                onClick={() => onClick(a.id)}
+                onClick={() => onClick(a)}
                 className={`w-full flex items-center gap-3 rounded-xl border bg-white px-3.5 py-2.5 text-left hover:shadow-md hover:-translate-y-0.5 transition-all ${isCancelled ? 'opacity-60 border-slate-200' : 'border-slate-200'}`}
               >
                 <div className="flex-1 min-w-0">
@@ -301,7 +309,7 @@ export default function PresupuestoPage() {
             <p className="text-sm font-semibold text-slate-700 mb-4">
               {capitalizeFirst(format(new Date(date + 'T12:00:00'), "EEEE d 'de' MMMM", { locale: es }))}
             </p>
-            <AgendaTimeline appts={appts} onClick={id => router.push(`/presupuesto/${id}`)} />
+            <AgendaTimeline appts={appts} onClick={appt => router.push(budgetNavPath(appt))} />
           </div>
         ) : appts.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 gap-3 text-slate-400">
@@ -327,7 +335,7 @@ export default function PresupuestoPage() {
                     <BudgetCard
                       key={a.id}
                       appt={a}
-                      onClick={() => router.push(`/presupuesto/${a.id}`)}
+                      onClick={() => router.push(budgetNavPath(a))}
                     />
                   ))}
                 </div>
@@ -344,7 +352,7 @@ export default function PresupuestoPage() {
                     <BudgetCard
                       key={a.id}
                       appt={a}
-                      onClick={() => router.push(`/presupuesto/${a.id}`)}
+                      onClick={() => router.push(budgetNavPath(a))}
                     />
                   ))}
                 </div>
@@ -361,7 +369,7 @@ export default function PresupuestoPage() {
                     <BudgetCard
                       key={a.id}
                       appt={a}
-                      onClick={() => router.push(`/presupuesto/${a.id}`)}
+                      onClick={() => router.push(budgetNavPath(a))}
                     />
                   ))}
                 </div>

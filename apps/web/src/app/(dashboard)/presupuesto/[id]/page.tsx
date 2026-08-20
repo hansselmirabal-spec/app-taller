@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, CheckCircle2, XCircle, Plus, Trash2,
-  Loader2, ExternalLink, AlertTriangle, FileText, Calendar,
+  Loader2, ExternalLink, AlertTriangle, FileText, Calendar, Info,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import {
@@ -32,9 +32,22 @@ const STATUS_CONFIG = {
   cancelled: { label: 'Cancelado',  className: 'bg-slate-100 text-slate-500' },
 } as const;
 
+// useSearchParams() opta out del prerender estático salvo que esté envuelto
+// en Suspense — mismo patrón que /login (evita missing-suspense-with-csr-bailout
+// en `next build`).
 export default function PresupuestoDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <PresupuestoDetailBody />
+    </Suspense>
+  );
+}
+
+function PresupuestoDetailBody() {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const isReadonlyNotice = searchParams.get('readonly') === '1';
 
   const { data: appt, isLoading } = useBudgetAppointment(id);
   const updateProcesses = useUpdateBudgetProcesses();
@@ -196,6 +209,18 @@ export default function PresupuestoDetailPage() {
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-2xl mx-auto space-y-5">
+
+          {/* Aviso de solo lectura — llegado desde una pestaña vieja del
+              Simulador apuntando a un presupuesto que ya no está pendiente */}
+          {isReadonlyNotice && (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <Info className="h-4 w-4 flex-shrink-0 mt-0.5" />
+              <p>
+                Este presupuesto ya no está pendiente — se abre en modo lectura.
+                Solo los pendientes se editan desde el Simulador.
+              </p>
+            </div>
+          )}
 
           {/* Info básica */}
           <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
