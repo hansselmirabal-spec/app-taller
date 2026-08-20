@@ -119,9 +119,14 @@ function AgendaTimeline({ appts, onClick }: { appts: BudgetAppointment[]; onClic
                 className={`w-full flex items-center gap-3 rounded-xl border bg-white px-3.5 py-2.5 text-left hover:shadow-md hover:-translate-y-0.5 transition-all ${isCancelled ? 'opacity-60 border-slate-200' : 'border-slate-200'}`}
               >
                 <div className="flex-1 min-w-0">
-                  <span className="font-bold text-sm text-slate-900 tracking-wide">{a.plate}</span>
-                  <span className="text-slate-400 text-xs"> · </span>
-                  <span className="text-sm text-slate-600 truncate">{a.customerName}</span>
+                  <div>
+                    <span className="font-bold text-sm text-slate-900 tracking-wide">{a.plate}</span>
+                    <span className="text-slate-400 text-xs"> · </span>
+                    <span className="text-sm text-slate-600 truncate">{a.customerName}</span>
+                  </div>
+                  {a.notes && (
+                    <p className="text-xs text-slate-400 truncate mt-0.5">{a.notes}</p>
+                  )}
                 </div>
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${cfg.badge}`}>
                   {cfg.label}
