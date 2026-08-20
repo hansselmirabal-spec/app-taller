@@ -71,19 +71,41 @@ Already resolved by design (not reopened): 3-PR split, stacked-to-main, per-PR l
 
 ## Phase 8: PR3 — `GET /workshops` scoping (TDD)
 
-- [ ] 8.1 RED: in new `apps/api/src/__tests__/workshops.service.spec.ts`, test `findAll(user)` returns all active workshops for `admin`/`admin_taller`/unrestricted user
-- [ ] 8.2 RED: test `findAll(user)` filters to only `allowedWorkshopIds` for a restricted user
-- [ ] 8.3 GREEN: change `WorkshopsService.findAll()` to `findAll(user: UserAccessContext)`, add `where: { id: In(user.allowedWorkshopIds) }` branch when restricted
+- [x] 8.1 RED: in new `apps/api/src/__tests__/workshops.service.spec.ts`, test `findAll(user)` returns all active workshops for `admin`/`admin_taller`/unrestricted user
+- [x] 8.2 RED: test `findAll(user)` filters to only `allowedWorkshopIds` for a restricted user
+- [x] 8.3 GREEN: change `WorkshopsService.findAll()` to `findAll(user?: UserAccessContext)`, add `where: { id: In(user.allowedWorkshopIds) }` branch when restricted. `user` made optional (deviation, see PR3 notes below) so internal callers unrelated to a specific request keep compiling.
 
 ## Phase 9: PR3 — `findOne` 403 on inaccessible workshop (TDD)
 
-- [ ] 9.1 RED: in `workshops.service.spec.ts`, test `findOne(id, user)` throws `ForbiddenException` when a restricted user requests an id outside `allowedWorkshopIds`
-- [ ] 9.2 RED: test `findOne(id, user)` succeeds for admin/admin_taller/unrestricted or when id is in the list (regression)
-- [ ] 9.3 GREEN: change `WorkshopsService.findOne()` to `findOne(id: string, user: UserAccessContext)`, add the access check before returning
-- [ ] 9.4 GREEN: in new `apps/api/src/__tests__/workshops.controller.spec.ts`, wire `@CurrentUser()` into `WorkshopsController.findAll`/`findOne` and pass `user` through to the service calls
+- [x] 9.1 RED: in `workshops.service.spec.ts`, test `findOne(id, user)` throws `ForbiddenException` when a restricted user requests an id outside `allowedWorkshopIds`
+- [x] 9.2 RED: test `findOne(id, user)` succeeds for admin/admin_taller/unrestricted or when id is in the list (regression)
+- [x] 9.3 GREEN: change `WorkshopsService.findOne()` to `findOne(id: string, user?: UserAccessContext)`, add the access check before returning. `user` made optional (deviation, see PR3 notes below).
+- [x] 9.4 GREEN: in new `apps/api/src/__tests__/workshops.controller.spec.ts`, wire `@CurrentUser()` into `WorkshopsController.findAll`/`findOne` and pass `user` through to the service calls
 
 ## Phase 10: PR3 — Verification
 
-- [ ] 10.1 `cd apps/api && pnpm test` — full suite green
-- [ ] 10.2 `cd apps/api && pnpm typecheck` — clean
-- [ ] 10.3 Confirm admin user-assignment picker (`settings/users` page) still lists every workshop — `users.controller` stays `@Roles('admin','admin_taller')`, both bypass; no frontend PR needed
+- [x] 10.1 `cd apps/api && pnpm test` — full suite green (34 suites, 352 passed, 2 skipped, 0 failed)
+- [x] 10.2 `cd apps/api && pnpm typecheck` — clean
+- [x] 10.3 Confirm admin user-assignment picker (`settings/users` page) still lists every workshop — `users.controller` stays `@Roles('admin','admin_taller')`, both bypass; no frontend PR needed
+
+### PR3 notes — deviation from literal task wording
+
+Tasks 8.3/9.3 as originally written imply `user` is a required parameter. That broke 13
+pre-existing internal call sites across `capacity`, `bodyshop`, `bodyshop-schedule`,
+`appointments`, and `technicians` that call `workshopsService.findAll()`/`findOne(id)` for
+lookups unrelated to a specific request's user (e.g. resolving a workshop's config by name
+during appointment validation) — corrected from an initial miscount of 9. Making `user`
+optional — applying the access check only when it's supplied — fixes `GET /workshops` per
+spec without touching those 13 unrelated files, keeping PR3 scoped to its design boundary
+(`workshops.controller.ts`/`workshops.service.ts` only, plus the shared
+`isUnrestrictedWorkshopAccess()` helper extracted post-review into
+`common/guards/workshop-access.util.ts`, reused by `WorkshopAccessGuard`) and its line
+budget. Confirmed via `rg` audit before implementing; full suite + typecheck green after
+the change.
+
+**Post-review finding (out of scope for this PR, flagged for a follow-up)**: of those 13
+call sites, 3 are reached by HTTP routes that do NOT carry `WorkshopAccessGuard` on the same
+`workshopId` — `GET /bodyshop/tech-availability`, `POST /bodyshop/simulate-schedule`, and
+`GET /technicians?workshopName=` (bypasses the guard entirely since it only inspects
+`workshopId`, never `workshopName`). Pre-existing gaps, not introduced or worsened by PR1-3
+— none of those three controllers were touched by this change. Needs its own follow-up PR.

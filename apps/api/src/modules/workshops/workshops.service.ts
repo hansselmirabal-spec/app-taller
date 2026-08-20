@@ -1,8 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { IsString, IsOptional, IsBoolean, IsIn, IsInt, Min, Max } from 'class-validator';
 import { Workshop } from './workshop.entity';
+import type { UserAccessContext } from '../users/users.service';
+import { isUnrestrictedWorkshopAccess } from '../../common/guards/workshop-access.util';
 
 export class CreateWorkshopDto {
   @IsString() name: string;
@@ -29,11 +31,31 @@ export class UpdateWorkshopDto {
 export class WorkshopsService {
   constructor(@InjectRepository(Workshop) private repo: Repository<Workshop>) {}
 
-  findAll() {
-    return this.repo.find({ where: { active: true }, order: { name: 'ASC' } });
+  // `user` es opcional por el mismo motivo que en findOne(): consumidores internos
+  // (p.ej. appointments.service resolviendo config por nombre de taller) no operan
+  // sobre una request de un usuario específico y deben seguir viendo todos los talleres.
+  findAll(user?: UserAccessContext) {
+    if (!user || isUnrestrictedWorkshopAccess(user)) {
+      return this.repo.find({ where: { active: true }, order: { name: 'ASC' } });
+    }
+    return this.repo.find({
+      where: { active: true, id: In(user.allowedWorkshopIds as string[]) },
+      order: { name: 'ASC' },
+    });
   }
 
-  async findOne(id: string) {
+  // `user` es opcional a propósito: los consumidores internos (capacity, bodyshop,
+  // appointments, technicians) resuelven un workshopId y solo necesitan la entidad,
+  // sin re-chequear acceso acá. Solo el controller de `GET /workshops/:id` pasa
+  // `user` para aplicar el scoping. OJO: no todos esos consumidores están detrás de
+  // WorkshopAccessGuard en su propia ruta — `bodyshop.controller.ts` tech-availability,
+  // `bodyshop-schedule.controller.ts` simulate-schedule, y `technicians.controller.ts`
+  // vía `?workshopName=` NO lo están (hallado en revisión de este change, alcance de
+  // este PR es solo `GET /workshops` — pendiente un fix aparte).
+  async findOne(id: string, user?: UserAccessContext) {
+    if (user && !isUnrestrictedWorkshopAccess(user) && !(user.allowedWorkshopIds as string[]).includes(id)) {
+      throw new ForbiddenException('No tenés acceso a este taller');
+    }
     const w = await this.repo.findOne({ where: { id } });
     if (!w) throw new NotFoundException('Taller no encontrado');
     return w;

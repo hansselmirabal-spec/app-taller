@@ -1,4 +1,5 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { isUnrestrictedWorkshopAccess } from './workshop-access.util';
 
 @Injectable()
 export class WorkshopAccessGuard implements CanActivate {
@@ -9,11 +10,9 @@ export class WorkshopAccessGuard implements CanActivate {
     const user = request.user;
 
     if (!user) return false;
-    if (user.role === 'admin' || user.role === 'admin_taller') return true;
-    if (user.allowedWorkshopIds === null || user.allowedWorkshopIds === undefined) return true;
+    if (isUnrestrictedWorkshopAccess(user)) return true;
 
     const allowedIds: string[] = user.allowedWorkshopIds;
-    if (!Array.isArray(allowedIds) || allowedIds.length === 0) return true;
 
     // `params` cubre rutas como `seed-workshop/:workshopId` que no lo mandan
     // por query/body — sin este fallback el guard era un no-op ahí.
