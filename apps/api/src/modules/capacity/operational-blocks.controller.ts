@@ -3,6 +3,7 @@ import {
   Query, Param, Body, UseGuards, BadRequestException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { WorkshopAccessGuard } from '../../common/guards/workshop-access.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -20,6 +21,7 @@ export class OperationalBlocksController {
   constructor(private readonly service: OperationalBlocksService) {}
 
   @Get()
+  @UseGuards(WorkshopAccessGuard)
   async findByDate(
     @Query('workshopId') workshopId: string,
     @Query('date') date: string,

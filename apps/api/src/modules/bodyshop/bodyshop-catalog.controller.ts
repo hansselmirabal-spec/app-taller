@@ -4,6 +4,7 @@ import {
 import { IsArray, IsInt, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { WorkshopAccessGuard } from '../../common/guards/workshop-access.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { BodyshopCatalogService } from './bodyshop-catalog.service';
@@ -97,6 +98,7 @@ export class BodyshopCatalogController {
   }
 
   @Get('matrix')
+  @UseGuards(WorkshopAccessGuard)
   async getMatrix(
     @Query('pieceId') pieceId: string,
     @Query('processId') processId: string,
@@ -107,6 +109,7 @@ export class BodyshopCatalogController {
   }
 
   @Post('calculate-hours')
+  @UseGuards(WorkshopAccessGuard)
   async calculateHours(@Body() body: CalculateHoursDto) {
     return wrap(await this.catalogService.calculateHours(body.items, body.workshopId));
   }
@@ -117,6 +120,8 @@ export class BodyshopCatalogController {
     return this.catalogService.seedDefaults(workshopId);
   }
 
+  // Solo @Roles('admin') — WorkshopAccessGuard sería un no-op acá, admin ya
+  // hace bypass total del guard antes de llegar a leer params.workshopId.
   @Post('seed-workshop/:workshopId')
   @UseGuards(RolesGuard) @Roles('admin')
   seedWorkshop(@Param('workshopId') workshopId: string) {

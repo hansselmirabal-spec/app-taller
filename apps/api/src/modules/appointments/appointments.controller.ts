@@ -2,6 +2,7 @@ import { Controller, Get, Post, Patch, Delete, Query, Param, Body, UseGuards, Ba
 import { AppointmentsService, CreateAppointmentDto, UpdateAppointmentDto, UpdateStatusDto, RescheduleAppointmentDto } from './appointments.service';
 import { WorkshopsService } from '../workshops/workshops.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { WorkshopAccessGuard } from '../../common/guards/workshop-access.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -24,6 +25,7 @@ export class AppointmentsController {
   }
 
   @Get()
+  @UseGuards(WorkshopAccessGuard)
   async find(
     @Query('date') date?: string,
     @Query('from') from?: string,
@@ -48,6 +50,7 @@ export class AppointmentsController {
   // Atraviesa appointments (mecánica) + bodyshop_entries (chapería). Devuelve
   // hasta 30 resultados ordenados por fecha desc.
   @Get('search')
+  @UseGuards(WorkshopAccessGuard)
   async search(
     @Query('q') q?: string,
     @Query('workshopId') workshopId?: string,

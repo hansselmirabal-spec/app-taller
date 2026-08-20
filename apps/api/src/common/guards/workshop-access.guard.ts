@@ -15,8 +15,10 @@ export class WorkshopAccessGuard implements CanActivate {
     const allowedIds: string[] = user.allowedWorkshopIds;
     if (!Array.isArray(allowedIds) || allowedIds.length === 0) return true;
 
+    // `params` cubre rutas como `seed-workshop/:workshopId` que no lo mandan
+    // por query/body — sin este fallback el guard era un no-op ahí.
     const workshopId: string | undefined =
-      request.query?.workshopId ?? request.body?.workshopId;
+      request.query?.workshopId ?? request.body?.workshopId ?? request.params?.workshopId;
 
     if (!workshopId) return true;
 

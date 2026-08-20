@@ -60,14 +60,14 @@ Already resolved by design (not reopened): 3-PR split, stacked-to-main, per-PR l
 
 ## Phase 6: PR2 — Guard rollout to 6 controllers (TDD)
 
-- [ ] 6.1 RED: for each of `appointments.controller.ts`, `budget-appointments.controller.ts`, `operational-blocks.controller.ts`, `bodyshop-catalog.controller.ts`, `bodyshop-capacity.controller.ts`, `technicians.controller.ts` — add/extend that controller's spec with a restricted-user-denied-403 case and a restricted-user-allowed case, mirroring `tracking.controller.spec.ts`'s guard test shape
-- [ ] 6.2 GREEN: add `@UseGuards(WorkshopAccessGuard)` per guarded route in each of the 6 controllers (route-level, same placement pattern as `tracking.controller.ts:54`); confirm each guarded route reads `workshopId` from `query`/`body` — if any reads it from `params` only, flag and extend the guard (open question from design)
-- [ ] 6.3 Confirm `service-types`, `specialties`, `work-types` controllers are untouched (no guard added) — regression check per spec's "Global catalogs remain unguarded"
+- [x] 6.1 RED: for each of `appointments.controller.ts`, `budget-appointments.controller.ts`, `operational-blocks.controller.ts`, `bodyshop-catalog.controller.ts`, `bodyshop-capacity.controller.ts`, `technicians.controller.ts` — add/extend that controller's spec with a restricted-user-denied-403 case and a restricted-user-allowed case, mirroring `tracking.controller.spec.ts`'s guard test shape
+- [x] 6.2 GREEN: add `@UseGuards(WorkshopAccessGuard)` per guarded route in each of the 6 controllers (route-level, same placement pattern as `tracking.controller.ts:54`); confirm each guarded route reads `workshopId` from `query`/`body` — if any reads it from `params` only, flag and extend the guard (open question from design). **Found one**: `bodyshop-catalog.controller.ts`'s `seed-workshop/:workshopId` reads it only from the route param — extended `WorkshopAccessGuard` to fall back to `request.params?.workshopId` (unit-tested in `workshop-access.guard.spec.ts`). Correction post-review: that specific route is `@Roles('admin')`-only, and `admin` already bypasses `WorkshopAccessGuard` unconditionally — so the fallback closes no gap on that route (removed the guard from it, since it was a provable no-op there); the `params.workshopId` fallback itself stays in the guard as a correct, tested capability for any future non-admin-only route keyed by a route param.
+- [x] 6.3 Confirm `service-types`, `specialties`, `work-types` controllers are untouched (no guard added) — regression check per spec's "Global catalogs remain unguarded" — confirmed via `rg -n "WorkshopAccessGuard" service-types specialties work-types` → no matches
 
 ## Phase 7: PR2 — Verification
 
-- [ ] 7.1 `cd apps/api && pnpm test` — full suite green
-- [ ] 7.2 `cd apps/api && pnpm typecheck` — clean
+- [x] 7.1 `cd apps/api && pnpm test` — full suite green (32 suites, 339 passed, 2 skipped, 0 failed)
+- [x] 7.2 `cd apps/api && pnpm typecheck` — clean
 
 ## Phase 8: PR3 — `GET /workshops` scoping (TDD)
 
