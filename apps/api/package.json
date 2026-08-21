@@ -24,7 +24,8 @@
     "db:seed:demo-mechanic": "ts-node -r tsconfig-paths/register src/database/demo-mechanic.seed.ts",
     "db:seed:demo-bodyshop": "ts-node -r tsconfig-paths/register src/database/demo-bodyshop.seed.ts",
     "db:seed:demo-enrich": "ts-node -r tsconfig-paths/register src/database/demo-enrich.seed.ts",
-    "db:seed:test": "ts-node -r tsconfig-paths/register src/database/seed-test-complete.ts"
+    "db:seed:test": "ts-node -r tsconfig-paths/register src/database/seed-test-complete.ts",
+    "db:backfill:final-control": "ts-node -r tsconfig-paths/register src/database/backfill-final-control.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.0",

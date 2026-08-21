@@ -26,33 +26,33 @@ Chain strategy: pending
 
 ## Phase 1: Foundation
 
-- [ ] 1.1 Create `apps/api/src/database/backfill-final-control.ts` bootstrap: `import 'reflect-metadata'`, local `DataSource` (`postgres`, `DATABASE_URL` fallback, `synchronize: false`), matching `bodyshop-workshop.seed.ts`.
-- [ ] 1.2 Implement exported `parseArgs(argv)`: default dry-run, `--apply`, `--out=<dir>`, unknown flag → `exit 1`.
-- [ ] 1.3 Import `FINAL_CONTROL_FIXED_HOURS` from `apps/api/src/modules/bodyshop/bodyshop-hours.util.ts` — never hardcode `0.5`.
-- [ ] 1.4 Define exported `SELECTION_PREDICATE_SQL` per design's interfaces section. **Requirement (locked, added by user)**: it MUST NOT filter by any date/timestamp column — covers the full historical universe with no 60-day cutoff; that cutoff is a `getBoard()`-only live-kanban rule and must never gate this data-correction script.
+- [x] 1.1 Create `apps/api/src/database/backfill-final-control.ts` bootstrap: `import 'reflect-metadata'`, local `DataSource` (`postgres`, `DATABASE_URL` fallback, `synchronize: false`), matching `bodyshop-workshop.seed.ts`.
+- [x] 1.2 Implement exported `parseArgs(argv)`: default dry-run, `--apply`, `--out=<dir>`, unknown flag → `exit 1`.
+- [x] 1.3 Import `FINAL_CONTROL_FIXED_HOURS` from `apps/api/src/modules/bodyshop/bodyshop-hours.util.ts` — never hardcode `0.5`.
+- [x] 1.4 Define exported `SELECTION_PREDICATE_SQL` per design's interfaces section. **Requirement (locked, added by user)**: it MUST NOT filter by any date/timestamp column — covers the full historical universe with no 60-day cutoff; that cutoff is a `getBoard()`-only live-kanban rule and must never gate this data-correction script.
 
 ## Phase 2: Core Implementation
 
-- [ ] 2.1 Implement dry-run path: run `SELECT` with `SELECTION_PREDICATE_SQL`, print affected entries (id, plate, status, resolved log status) + count, `ROLLBACK`, `exit 0`.
-- [ ] 2.2 Implement exported `resolveLogStatus(entryStatus)`: `done` → `skipped`, else → `pending` (cancelled never reaches it, excluded by predicate).
-- [ ] 2.3 Implement apply path: single `INSERT ... SELECT ... RETURNING id, source_id, status` sharing `SELECTION_PREDICATE_SQL`; guard `inserted.length === preview.length`, else `throw`.
-- [ ] 2.4 Implement exported `buildAuditPayload(runId, rows)`: shape from design (`runId`, `changeName`, `database`, `count`, `rows`, `rollbackSql` built from `tracking_logs.id`, not `source_id`).
-- [ ] 2.5 Write audit JSON to `--out` or default `apps/api/backfill-audit/` **before** `COMMIT`; mirror payload to stdout; then `COMMIT`.
-- [ ] 2.6 Wrap in try/catch: any throw → `ROLLBACK`, `exit 1`, no audit file written. Bootstrap under `if (require.main === module)`.
+- [x] 2.1 Implement dry-run path: run `SELECT` with `SELECTION_PREDICATE_SQL`, print affected entries (id, plate, status, resolved log status) + count, `ROLLBACK`, `exit 0`.
+- [x] 2.2 Implement exported `resolveLogStatus(entryStatus)`: `done` → `skipped`, else → `pending` (cancelled never reaches it, excluded by predicate).
+- [x] 2.3 Implement apply path: single `INSERT ... SELECT ... RETURNING id, source_id, status` sharing `SELECTION_PREDICATE_SQL`; guard `inserted.length === preview.length`, else `throw`.
+- [x] 2.4 Implement exported `buildAuditPayload(runId, rows)`: shape from design (`runId`, `changeName`, `database`, `count`, `rows`, `rollbackSql` built from `tracking_logs.id`, not `source_id`).
+- [x] 2.5 Write audit JSON to `--out` or default `apps/api/backfill-audit/` **before** `COMMIT`; mirror payload to stdout; then `COMMIT`.
+- [x] 2.6 Wrap in try/catch: any throw → `ROLLBACK`, `exit 1`, no audit file written. Bootstrap under `if (require.main === module)`.
 
 ## Phase 3: Integration / Wiring
 
-- [ ] 3.1 Add `"db:backfill:final-control": "ts-node -r tsconfig-paths/register src/database/backfill-final-control.ts"` to `apps/api/package.json`.
-- [ ] 3.2 Add `backfill-audit/` to `.gitignore`.
+- [x] 3.1 Add `"db:backfill:final-control": "ts-node -r tsconfig-paths/register src/database/backfill-final-control.ts"` to `apps/api/package.json`.
+- [x] 3.2 Add `backfill-audit/` to `.gitignore`.
 
 ## Phase 4: Testing
 
-- [ ] 4.1 Test `resolveLogStatus`: `done→skipped`, `scheduled/in_progress→pending`.
-- [ ] 4.2 Test `parseArgs`: default dry-run, `--apply`, `--out=`, unknown flag rejected.
-- [ ] 4.3 Test `run()` dry-run: zero `INSERT`s issued, `ROLLBACK` called.
-- [ ] 4.4 Test `run()` apply: commits on success; count-mismatch and write-failure both `ROLLBACK` and skip the audit file.
-- [ ] 4.5 Test `buildAuditPayload`: shape + `rollbackSql` built from log `id`s.
-- [ ] 4.6 Test `SELECTION_PREDICATE_SQL` contains no date/`created_at` filter — asserts the full-history requirement (no 60-day cutoff) added above.
+- [x] 4.1 Test `resolveLogStatus`: `done→skipped`, `scheduled/in_progress→pending`.
+- [x] 4.2 Test `parseArgs`: default dry-run, `--apply`, `--out=`, unknown flag rejected.
+- [x] 4.3 Test `run()` dry-run: zero `INSERT`s issued, `ROLLBACK` called.
+- [x] 4.4 Test `run()` apply: commits on success; count-mismatch and write-failure both `ROLLBACK` and skip the audit file.
+- [x] 4.5 Test `buildAuditPayload`: shape + `rollbackSql` built from log `id`s.
+- [x] 4.6 Test `SELECTION_PREDICATE_SQL` contains no date/`created_at` filter — asserts the full-history requirement (no 60-day cutoff) added above.
 
 ## Phase 5: Pre-Production Verification
 
