@@ -26,7 +26,7 @@ Object.defineProperty(window, 'localStorage', { value: localStorageMock, writabl
 const fetchMock = jest.fn();
 (global as any).fetch = fetchMock;
 
-import { login, forgotPassword, resetPassword, getWorkshops } from '../lib/api';
+import { login, forgotPassword, resetPassword, getWorkshops, getBudgetSimulatorConfig } from '../lib/api';
 
 function fetchResponse(status: number, body: any, contentType = 'application/json'): Response {
   return {
@@ -169,6 +169,32 @@ describe('lib/api.ts → http()', () => {
       // Aunque haya un "token" residual en localStorage, no se manda como Bearer.
       const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
       expect(headers.Authorization).toBeUndefined();
+    });
+  });
+
+  // ── getBudgetSimulatorConfig() ───────────────────────────────────────────────
+
+  describe('getBudgetSimulatorConfig()', () => {
+    it('convierte tarifaMdo de string (decimal de TypeORM) a number', async () => {
+      fetchMock.mockResolvedValueOnce(fetchResponse(200, {
+        data: { tarifaMdo: '144000.00', moneda: 'Gs.', ivaIncluido: false },
+      }));
+
+      const config = await getBudgetSimulatorConfig();
+
+      expect(config.tarifaMdo).toBe(144000);
+      expect(typeof config.tarifaMdo).toBe('number');
+    });
+
+    it('preserva moneda e ivaIncluido sin modificarlos', async () => {
+      fetchMock.mockResolvedValueOnce(fetchResponse(200, {
+        data: { tarifaMdo: '1500.50', moneda: 'USD', ivaIncluido: true },
+      }));
+
+      const config = await getBudgetSimulatorConfig();
+
+      expect(config.moneda).toBe('USD');
+      expect(config.ivaIncluido).toBe(true);
     });
   });
 
