@@ -163,6 +163,7 @@ export async function deleteWorkshop(id: string): Promise<void> {
 export async function getTechnicians(workshopId: string, workshopName?: string, includeInactive?: boolean): Promise<Technician[]> {
   if (MOCK) return delay([...getWorkshopData(workshopId).technicians]);
   const params = new URLSearchParams();
+  if (workshopId) params.set('workshopId', workshopId);
   if (workshopName) params.set('workshopName', workshopName);
   if (includeInactive) params.set('includeInactive', 'true');
   const qs = params.toString();

@@ -106,6 +106,7 @@ export class BodyshopController {
   // ── Disponibilidad de técnicos por proceso ────────────────────────────────────
 
   @Get('tech-availability')
+  @UseGuards(WorkshopAccessGuard)
   async getTechAvailability(
     @Query('workshopId') workshopId: string,
     @Query('date') date: string,

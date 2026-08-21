@@ -24,29 +24,29 @@ Chain strategy: pending
 
 ## Phase 1: Slice 1 — decorator fixes (bodyshop)
 
-- [ ] 1.1 `bodyshop.controller.ts:108` — add `@UseGuards(WorkshopAccessGuard)` above `getTechAvailability`. Import already present (line 12).
-- [ ] 1.2 `bodyshop-schedule.controller.ts` — add `import { WorkshopAccessGuard } from '../../common/guards/workshop-access.guard';`; add `@UseGuards(WorkshopAccessGuard)` above `simulate` (line 14).
+- [x] 1.1 `bodyshop.controller.ts:108` — add `@UseGuards(WorkshopAccessGuard)` above `getTechAvailability`. Import already present (line 12).
+- [x] 1.2 `bodyshop-schedule.controller.ts` — add `import { WorkshopAccessGuard } from '../../common/guards/workshop-access.guard';`; add `@UseGuards(WorkshopAccessGuard)` above `simulate` (line 14).
 
 ## Phase 2: Slice 2 — technicians name authorization + frontend
 
-- [ ] 2.1 `technicians.controller.ts` — add `import { CurrentUser } from '../../common/decorators/current-user.decorator';`, `import type { UserAccessContext } from '../users/users.service';`, `import { isUnrestrictedWorkshopAccess } from '../../common/guards/workshop-access.util';`.
-- [ ] 2.2 `technicians.controller.ts:findAll` — add `@CurrentUser() user: UserAccessContext` as the **first** param (before the optional `@Query` params, per TS param-ordering rule).
-- [ ] 2.3 `technicians.controller.ts` — rewrite `resolveWorkshopName`: if `workshopName`, call new `assertWorkshopNameAllowed(workshopName, user)` then return it (even with `workshopId` present); else if `workshopId`, call `this.workshopsService.findOne(workshopId, user)` and return `.name`.
-- [ ] 2.4 `technicians.controller.ts` — add private `assertWorkshopNameAllowed(name, user)`: no-op if `isUnrestrictedWorkshopAccess(user)`; else fetch `findAll(user)`, throw `ForbiddenException('No tenés acceso a este taller')` if no entry matches `name`.
-- [ ] 2.5 `apps/web/src/lib/api.ts:165-168` — in `getTechnicians`, add `if (workshopId) params.set('workshopId', workshopId);`.
-- [ ] 2.6 `workshops.service.ts:47-54` — drop `bodyshop.controller.ts`, `bodyshop-schedule.controller.ts`, `technicians.controller.ts` from the pending-debt comment's "NO lo están" list.
+- [x] 2.1 `technicians.controller.ts` — add `import { CurrentUser } from '../../common/decorators/current-user.decorator';`, `import type { UserAccessContext } from '../users/users.service';`, `import { isUnrestrictedWorkshopAccess } from '../../common/guards/workshop-access.util';`.
+- [x] 2.2 `technicians.controller.ts:findAll` — add `@CurrentUser() user: UserAccessContext` as the **first** param (before the optional `@Query` params, per TS param-ordering rule).
+- [x] 2.3 `technicians.controller.ts` — rewrite `resolveWorkshopName`: if `workshopName`, call new `assertWorkshopNameAllowed(workshopName, user)` then return it (even with `workshopId` present); else if `workshopId`, call `this.workshopsService.findOne(workshopId, user)` and return `.name`.
+- [x] 2.4 `technicians.controller.ts` — add private `assertWorkshopNameAllowed(name, user)`: no-op if `isUnrestrictedWorkshopAccess(user)`; else fetch `findAll(user)`, throw `ForbiddenException('No tenés acceso a este taller')` if no entry matches `name`.
+- [x] 2.5 `apps/web/src/lib/api.ts:165-168` — in `getTechnicians`, add `if (workshopId) params.set('workshopId', workshopId);`.
+- [x] 2.6 `workshops.service.ts:47-54` — drop `bodyshop.controller.ts`, `bodyshop-schedule.controller.ts`, `technicians.controller.ts` from the pending-debt comment's "NO lo están" list.
 
 ## Phase 3: Testing
 
-- [ ] 3.1 Create `bodyshop-tech-availability.controller.guard.spec.ts` (`buildGuardTestApp(BodyshopController, ...)`): restricted user + disallowed `workshopId` → 403; admin → 200.
-- [ ] 3.2 Create `bodyshop-schedule.controller.guard.spec.ts` (`buildGuardTestApp(BodyshopScheduleController, ...)`): restricted user, disallowed `workshopId` in POST body → 403; admin → 200.
-- [ ] 3.3 Extend `technicians.controller.guard.spec.ts`: add `findAll` mock to `WorkshopsService`.
-- [ ] 3.4 Add case: restricted user queries disallowed `workshopName` → 403.
-- [ ] 3.5 Add case: allowed `workshopId` + disallowed `workshopName` together → 403 (name precedence).
-- [ ] 3.6 Add case: admin queries by `workshopName` → 200.
-- [ ] 3.7 Confirm `workshop-access.guard.spec.ts` fail-open regression test still passes unmodified.
+- [x] 3.1 Create `bodyshop-tech-availability.controller.guard.spec.ts` (`buildGuardTestApp(BodyshopController, ...)`): restricted user + disallowed `workshopId` → 403; admin → 200.
+- [x] 3.2 Create `bodyshop-schedule.controller.guard.spec.ts` (`buildGuardTestApp(BodyshopScheduleController, ...)`): restricted user, disallowed `workshopId` in POST body → 403; admin → 200.
+- [x] 3.3 Extend `technicians.controller.guard.spec.ts`: add `findAll` mock to `WorkshopsService`.
+- [x] 3.4 Add case: restricted user queries disallowed `workshopName` → 403.
+- [x] 3.5 Add case: allowed `workshopId` + disallowed `workshopName` together → 403 (name precedence).
+- [x] 3.6 Add case: admin queries by `workshopName` → 200.
+- [x] 3.7 Confirm `workshop-access.guard.spec.ts` fail-open regression test still passes unmodified.
 
 ## Phase 4: Verification
 
-- [ ] 4.1 Grep `apps/web/src` for other `getTechnicians(` callers besides `use-technicians.ts:11` — confirm none broke by the added `workshopId` param.
-- [ ] 4.2 Run full `apps/api` test suite once to confirm no other guard/spec regressed.
+- [x] 4.1 Grep `apps/web/src` for other `getTechnicians(` callers besides `use-technicians.ts:11` — confirm none broke by the added `workshopId` param.
+- [x] 4.2 Run full `apps/api` test suite once to confirm no other guard/spec regressed.
