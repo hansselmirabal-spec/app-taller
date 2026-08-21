@@ -96,7 +96,9 @@ export function synthesizeManualLine(item: SimulatorItem, tarifa: number): Simul
   const category = item.manualCategory ?? 'BODYWORK';
   const proceso = MANUAL_PROCESO_BY_CATEGORY[category];
   const horas = round2((item.manualHours ?? 0) * item.qty);
-  const totalMdo = round2(horas * tarifa);
+  // Math.round (no round2) — mismo criterio que el backend para montos en
+  // Gs. (budget-simulator.service.ts), que no tiene subunidad fraccionaria.
+  const totalMdo = Math.round(horas * tarifa);
   const breakdown: SimulatorProcessBreakdown[] = [
     { proceso, horas, descripcion: `${proceso} — ${item.pieza}` },
   ];
@@ -143,14 +145,21 @@ export function buildEstimate(
   manualIdx.forEach(originalIdx => { lines[originalIdx] = synthesizeManualLine(items[originalIdx], tarifa); });
 
   const sum = (pick: (l: SimulatorLineResult) => number) => round2(lines.reduce((acc, l) => acc + pick(l), 0));
+  const totalHoras = sum(l => l.totalHoras);
 
   return {
     lines,
     bodyworkHours: sum(l => l.bodyworkHours),
     prepHours: sum(l => l.prepHours),
     paintHours: sum(l => l.paintHours),
-    totalHoras: sum(l => l.totalHoras),
-    totalMdo: sum(l => l.totalMdo),
+    totalHoras,
+    // Redondeo de la suma, NO suma de redondeos — mismo criterio que el
+    // agregado del backend (budget-simulator.service.ts), que calcula
+    // Math.round(totalHoras agregado × tarifa) en vez de sumar el totalMdo
+    // ya redondeado de cada línea (sumar redondeos diverge del redondeo de
+    // la suma, ej. 2 líneas de 0.5h a tarifa 3 → suma de redondeos = 4,
+    // redondeo de la suma = 3).
+    totalMdo: Math.round(totalHoras * tarifa),
     tarifa,
     moneda,
   };

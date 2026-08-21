@@ -20,7 +20,7 @@ untouched, per the design's non-negotiable: manual pieces never write to
 
 Decision needed before apply: Yes
 Chained PRs recommended: Yes
-Chain strategy: pending
+Chain strategy: stacked-to-main (confirmed)
 400-line budget risk: High
 
 ### Suggested Work Units
@@ -46,6 +46,26 @@ Chain strategy: pending
 - [x] 2.5 Derive `estimate` via `buildEstimate` in hook body; reset mode-specific fields on toggle instead of `setEstimate(null)`; drop `setEstimate` from public return.
 - [x] 2.6 Wire `useBudgetSimulatorConfig()`: `tarifa = config?.tarifaMdo ?? catalogResult?.result?.tarifa ?? 0`.
 - [x] 2.7 GREEN: run `pnpm --filter web test use-simulator-form`, confirm 2.1 passes.
+
+**Post-review fix (PR 2, before merge)**: `review-reliability` found a CRITICAL —
+`buildEstimate`'s aggregate `totalMdo` summed each line's already-rounded
+`totalMdo` (`sum(l => l.totalMdo)`), instead of rounding the aggregate hours
+once like the backend does (`Math.round(totalHoras agregado × tarifa)`,
+`budget-simulator.service.ts:225`). Sum-of-roundings ≠ rounding-of-sum: 2
+catalog lines at 0.5h/tarifa=3 gave `4` instead of the backend's `3`. This
+affected ordinary catalog-only budgets already in production, not just manual
+rows. Fixed by computing `totalMdo: Math.round(totalHoras × tarifa)` off the
+aggregate hours instead of summing per-line `totalMdo`; also switched
+`synthesizeManualLine`'s per-line `totalMdo` from `round2` to `Math.round` for
+the same backend-consistency reason (per-line `totalMdo` is otherwise unused
+downstream). Added a regression test reproducing the exact counter-example.
+Two lower-severity WARNINGs from the same review were left as documented,
+non-blocking gaps: the stale-signature/race test exercises the pure guard
+function directly rather than the async debounce path (would need net-new
+`renderHook` + fake-timer test infra not yet present in this repo), and the
+edit-mode rehydration hardcoding `mode:'catalog'` is correctly Phase 3 scope
+(unreachable today — no UI can create a `manual` row yet, so no saved budget
+can contain `damageLevel:'Manual'`).
 
 ## Phase 3: UI + edit rehydration + PDF/WhatsApp (PR 3)
 

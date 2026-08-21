@@ -171,4 +171,37 @@ describe('buildEstimate', () => {
 
     expect(estimate).toBeNull();
   });
+
+  it('rounds the aggregate totalMdo once, instead of summing each already-rounded line (matches backend)', () => {
+    // Two catalog lines at 0.5h each, tarifa=3: per-line totalMdo rounds to
+    // 2 (Math.round(0.5*3)) each → naive sum = 4. The backend's own
+    // aggregate is Math.round(totalHoras agregado × tarifa) = Math.round(1*3)
+    // = 3. buildEstimate must match the backend's aggregate, not the sum.
+    const halfHourLine = (pieza: string): SimulatorLineResult => ({
+      pieza, damageLevel: 'Leve', qty: 1,
+      breakdown: [{ proceso: 'Reparar', horas: 0.5, descripcion: `Reparar — ${pieza}` }],
+      bodyworkHours: 0.5, prepHours: 0, paintHours: 0, totalHoras: 0.5, totalMdo: 2,
+    });
+    const items: SimulatorItem[] = [
+      { ...newSimulatorItem(), pieza: 'A' },
+      { ...newSimulatorItem(), pieza: 'B' },
+    ];
+    const catalogRows = [
+      { pieza: 'A', damageLevel: 'Leve' as const, qty: 1 },
+      { pieza: 'B', damageLevel: 'Leve' as const, qty: 1 },
+    ];
+    const catalogResult = {
+      signature: catalogSignature(catalogRows),
+      result: {
+        lines: [halfHourLine('A'), halfHourLine('B')],
+        bodyworkHours: 1, prepHours: 0, paintHours: 0, totalHoras: 1, totalMdo: 4,
+        tarifa: 3, moneda: 'PYG',
+      } as SimulatorEstimateResult,
+    };
+
+    const estimate = buildEstimate(items, catalogResult, 3, 'PYG');
+
+    expect(estimate!.totalHoras).toBe(1);
+    expect(estimate!.totalMdo).toBe(3); // NOT 4 (sum of per-line roundings)
+  });
 });
