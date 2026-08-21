@@ -1,5 +1,6 @@
 import { Controller, Post, Get, Query, Body, UseGuards, BadRequestException } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { WorkshopAccessGuard } from '../../common/guards/workshop-access.guard';
 import { BodyshopScheduleService, SimulateInput } from './bodyshop-schedule.service';
 
 const wrap = (data: any) => ({ data, meta: { timestamp: new Date().toISOString() } });
@@ -11,6 +12,7 @@ export class BodyshopScheduleController {
   constructor(private readonly service: BodyshopScheduleService) {}
 
   @Post('simulate-schedule')
+  @UseGuards(WorkshopAccessGuard)
   async simulate(@Body() dto: SimulateInput) {
     return wrap(await this.service.simulate(dto));
   }
