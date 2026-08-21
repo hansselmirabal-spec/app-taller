@@ -69,13 +69,15 @@ can contain `damageLevel:'Manual'`).
 
 ## Phase 3: UI + edit rehydration + PDF/WhatsApp (PR 3)
 
-- [ ] 3.1 RED: `__tests__/simulator-edit-rehydration.spec.ts` — `'Manual'` piece rehydrates to `mode:'manual'`, `manualHours=totalHoras/qty`, `manualCategory` from breakdown proceso.
-- [ ] 3.2 `simulador/[id]/page.tsx:77-84`: implement rehydration per 3.1; cast `damageLevel as LineDamageLabel`.
-- [ ] 3.3 `simulator-form.tsx:162-235`: add mode-toggle icon button per row (`List`↔`PenLine`); manual slot = free-text pieza, category select, horas input (`step=0.1 min=0.1`), qty `w-14`.
-- [ ] 3.4 Verify `page.tsx:65-70` (create-mode Guardar) now persists manual-only budgets with zero/minimal change since `estimate` is non-null once derived; tighten only if a gap surfaces.
-- [ ] 3.5 RED: `__tests__/simulator-manual-integration.spec.tsx` — 100%-manual budget: summary bar renders, PDF shows `Manual` (no `undefined`), WhatsApp text has no `undefined`/`NaN`.
-- [ ] 3.6 GREEN: close any gap surfaced by 3.5.
-- [ ] 3.7 Guard test: `__tests__/use-simulator-form-guard.spec.ts` — hook never imports `createCatalogItem`/`updateCatalogItem`; catalog row count unchanged after a manual-only save.
+- [x] 3.1 RED: `__tests__/simulator-edit-rehydration.spec.ts` — `'Manual'` piece rehydrates to `mode:'manual'`, `manualHours=totalHoras/qty`, `manualCategory` from breakdown proceso.
+- [x] 3.2 `simulador/[id]/page.tsx:77-84`: implement rehydration per 3.1; cast `damageLevel as LineDamageLabel`.
+- [x] 3.3 `simulator-form.tsx:162-235`: add mode-toggle icon button per row (`List`↔`PenLine`); manual slot = free-text pieza, category select, horas input (`step=0.1 min=0.1`), qty `w-14`.
+- [x] 3.4 Verify `page.tsx:65-70` (create-mode Guardar) now persists manual-only budgets with zero/minimal change since `estimate` is non-null once derived; tighten only if a gap surfaces. **Verified — no gap.** `if (estimate) { const {processes, pieces} = estimateToBudgetPayload(estimate); if (processes.length > 0) {...} }` already works for a manual-only budget because `estimate` is now always derived (Phase 2) and a valid manual row contributes to `bodyworkHours`/`prepHours`/`paintHours`, so `processes.length > 0`. Zero lines changed in `page.tsx`.
+- [x] 3.5 RED: `__tests__/simulator-manual-integration.spec.ts` — 100%-manual budget: PDF shows `Manual` (no `undefined`), WhatsApp text has no `undefined`/`NaN`. **File extension note**: written as `.spec.ts`, not `.spec.tsx` — this repo's jest `testRegex` (`.*\.spec\.ts$`) doesn't pick up `.tsx` and there is no `@testing-library/react` dependency (confirmed absent from `package.json`); attempting to import `budget-pdf.tsx` directly also fails under this jest config (`@react-pdf/renderer` ships ESM jest can't parse — confirmed by a real `SyntaxError` before reverting the import). Tests instead assert against the same pure functions/exported data every consumer reads (`buildEstimate`, `buildWhatsAppMessage`, `estimateToBudgetPayload`) plus a source-level check that `budget-pdf.tsx`'s `DAMAGE_LABEL`/`DAMAGE_COLOR` declare a real `Manual` entry — same static-assertion style as the Phase 2/3 guard tests. Summary-bar coverage for a 100%-manual budget is structurally covered by Phase 2's `buildEstimate` "100%-manual budget without catalogResult" test (estimate is non-null ⇒ `EstimateSummaryBar` renders, since its only gate is `if (!estimate) return null`).
+- [x] 3.6 GREEN: `pnpm --filter web test simulator-manual-integration` → all pass; no gap surfaced.
+- [x] 3.7 Guard test: `__tests__/use-simulator-form-guard.spec.ts` — source-scans `use-simulator-form.ts`, `simulator-form.tsx`, `page.tsx`, `[id]/page.tsx` for `createCatalogItem`/`updateCatalogItem` references (none found) and asserts `estimateToBudgetPayload`'s manual-only output is `{processes, pieces}`-shaped only, never catalog-shaped (`active`/`descripcionFinal`).
+
+**PR 3 diff size note**: implementation (`[id]/page.tsx`, `simulator-form.tsx`, `use-simulator-form.ts`) ≈ 234 changed lines; 3 new test files ≈ 259 lines. Combined ≈ 493 lines, above the general 400-line guard but consistent with the already-confirmed `stacked-to-main` chain split (PR 3 is the last of 3 chained PRs; PR 1 and PR 2 already merged separately keeping each unit under budget individually).
 
 ## Phase 4: Verification
 

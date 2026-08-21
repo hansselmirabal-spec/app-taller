@@ -3,10 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { ArrowLeft, Calculator, Loader2, FileDown, FileX, MessageCircle } from 'lucide-react';
-import { randomId } from '@/lib/utils';
 import { useBudgetAppointment, useUpdateBudgetProcesses } from '@/hooks/use-budget-appointments';
-import type { DamageLevel } from '@/lib/api';
-import { useSimulatorForm, estimateToBudgetPayload } from '../_shared/use-simulator-form';
+import { useSimulatorForm, estimateToBudgetPayload, pieceToItem } from '../_shared/use-simulator-form';
 import { SimulatorForm, EstimateSummaryBar } from '../_shared/simulator-form';
 import { LazyBudgetPdfLink } from '../_shared/budget-pdf-link-lazy';
 
@@ -75,15 +73,7 @@ export default function EditarSimuladorPresupuestoPage() {
     setBudgetNumber(appt.budgetNumber ?? '');
     setNotes(appt.notes ?? '');
     if (appt.pieces && appt.pieces.length > 0) {
-      setItems(appt.pieces.map(p => ({
-        id:          randomId(),
-        pieza:       p.pieza,
-        damageLevel: p.damageLevel as DamageLevel,
-        qty:         p.qty,
-        // TODO(simulador-pieza-manual Phase 3): detect p.damageLevel === 'Manual'
-        // and rehydrate mode:'manual' + manualCategory/manualHours instead.
-        mode:        'catalog' as const,
-      })));
+      setItems(appt.pieces.map(pieceToItem));
     }
     // pieces null/empty → keep the hook's default single empty item
     setScreenState('ready');

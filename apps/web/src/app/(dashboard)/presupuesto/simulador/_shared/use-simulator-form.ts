@@ -7,6 +7,7 @@ import {
 } from '@/hooks/use-budget-simulator';
 import { useVehicleLookup } from '@/hooks/use-vehicle-lookup';
 import type { DamageLevel, SimulatorEstimateItem, SimulatorEstimateResult, SimulatorLineResult, SimulatorProcessBreakdown } from '@/lib/api';
+import type { BudgetPiece } from '@/types';
 
 export type ManualCategory = 'BODYWORK' | 'PREP' | 'PAINT';
 
@@ -90,6 +91,48 @@ const MANUAL_PROCESO_BY_CATEGORY: Record<ManualCategory, string> = {
   PREP: 'Preparacion',
   PAINT: 'Pintar',
 };
+
+// Inverse of MANUAL_PROCESO_BY_CATEGORY — used to rehydrate a saved manual
+// piece's category from its persisted breakdown[0].proceso.
+const MANUAL_CATEGORY_BY_PROCESO: Record<string, ManualCategory> = {
+  Reparar: 'BODYWORK',
+  Preparacion: 'PREP',
+  Pintar: 'PAINT',
+};
+
+/**
+ * Rehydrates a persisted BudgetPiece (from an already-saved appointment)
+ * back into a SimulatorItem. A piece with `damageLevel === 'Manual'` was
+ * synthesized by synthesizeManualLine and is rehydrated as a manual row —
+ * `manualHours` is the inverse of `horas = round2(manualHours × qty)`, and
+ * `manualCategory` is recovered from the single breakdown entry's `proceso`.
+ * Every other piece rehydrates as a catalog row, unchanged from today.
+ */
+export function pieceToItem(p: BudgetPiece): SimulatorItem {
+  const qty = p.qty > 0 ? p.qty : 1;
+
+  if (p.damageLevel === 'Manual') {
+    const proceso = p.breakdown?.[0]?.proceso;
+    const manualCategory = (proceso ? MANUAL_CATEGORY_BY_PROCESO[proceso] : undefined) ?? 'BODYWORK';
+    return {
+      id: randomId(),
+      pieza: p.pieza,
+      damageLevel: 'Leve', // unused in manual mode — kept for the field's required DamageLevel type
+      qty,
+      mode: 'manual',
+      manualCategory,
+      manualHours: (p.totalHoras ?? 0) / qty,
+    };
+  }
+
+  return {
+    id: randomId(),
+    pieza: p.pieza,
+    damageLevel: p.damageLevel as DamageLevel,
+    qty,
+    mode: 'catalog',
+  };
+}
 
 /** Synthesizes a manual row into the same SimulatorLineResult shape the backend returns for catalog rows, so every downstream consumer keeps walking one estimate.lines array. */
 export function synthesizeManualLine(item: SimulatorItem, tarifa: number): SimulatorLineResult {
@@ -183,6 +226,48 @@ export function estimateToBudgetPayload(estimate: SimulatorEstimateResult) {
     totalHoras:  l.totalHoras,
   }));
   return { processes, pieces };
+}
+
+interface WhatsAppHeader {
+  plate: string;
+  customerName: string;
+  phone: string;
+  budgetNumber: string;
+  notes: string;
+}
+
+/**
+ * Builds the WhatsApp share text for an estimate — extracted as a pure
+ * function so it can be unit-tested without opening a browser window.
+ * `line.damageLevel` is a `LineDamageLabel` ('Leve'|'Medio'|'Grave'|
+ * 'Sustitucion'|'Manual'), so a manual row renders "(Manual)" here, never
+ * `undefined`.
+ */
+export function buildWhatsAppMessage(estimate: SimulatorEstimateResult, header: WhatsAppHeader): string {
+  const { plate, customerName, phone, budgetNumber, notes } = header;
+  const lines = estimate.lines.map(l => {
+    const procs = l.breakdown.map(b => `  • ${b.descripcion}: ${b.horas}h`).join('\n');
+    return `*${l.pieza}* (${l.damageLevel}) — ${l.totalHoras}h\n${procs}`;
+  }).join('\n\n');
+
+  return [
+    `*Presupuesto de Reparación*`,
+    budgetNumber ? `N° ${budgetNumber}` : '',
+    ``,
+    `*Cliente:* ${customerName || '—'}`,
+    `*Patente:* ${plate.toUpperCase() || '—'}`,
+    phone ? `*Tel:* ${phone}` : '',
+    ``,
+    `*Detalle de trabajos:*`,
+    lines,
+    ``,
+    `*Chapería:* ${estimate.bodyworkHours}h  |  *Preparación:* ${estimate.prepHours}h  |  *Pintura:* ${estimate.paintHours}h`,
+    `*Total horas:* ${estimate.totalHoras}h`,
+    `*Costo mano de obra:* ${estimate.moneda} ${estimate.totalMdo.toLocaleString('es-PY')}`,
+    ``,
+    notes ? `_${notes}_` : '',
+    `_Solo mano de obra · No incluye repuestos · Válido 30 días_`,
+  ].filter(Boolean).join('\n');
 }
 
 /**
@@ -309,30 +394,7 @@ export function useSimulatorForm() {
 
   function handleWhatsApp() {
     if (!estimate) return;
-    const lines = estimate.lines.map(l => {
-      const procs = l.breakdown.map(b => `  • ${b.descripcion}: ${b.horas}h`).join('\n');
-      return `*${l.pieza}* (${l.damageLevel}) — ${l.totalHoras}h\n${procs}`;
-    }).join('\n\n');
-
-    const msg = [
-      `*Presupuesto de Reparación*`,
-      budgetNumber ? `N° ${budgetNumber}` : '',
-      ``,
-      `*Cliente:* ${customerName || '—'}`,
-      `*Patente:* ${plate.toUpperCase() || '—'}`,
-      phone ? `*Tel:* ${phone}` : '',
-      ``,
-      `*Detalle de trabajos:*`,
-      lines,
-      ``,
-      `*Chapería:* ${estimate.bodyworkHours}h  |  *Preparación:* ${estimate.prepHours}h  |  *Pintura:* ${estimate.paintHours}h`,
-      `*Total horas:* ${estimate.totalHoras}h`,
-      `*Costo mano de obra:* ${estimate.moneda} ${estimate.totalMdo.toLocaleString('es-PY')}`,
-      ``,
-      notes ? `_${notes}_` : '',
-      `_Solo mano de obra · No incluye repuestos · Válido 30 días_`,
-    ].filter(Boolean).join('\n');
-
+    const msg = buildWhatsAppMessage(estimate, { plate, customerName, phone, budgetNumber, notes });
     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
   }
 
