@@ -243,7 +243,15 @@ export function SimulatorForm({
                         step={0.1}
                         min={0.1}
                         value={item.manualHours ?? ''}
-                        onChange={e => onUpdateItem(item.id, { manualHours: Number(e.target.value) })}
+                        onChange={e => {
+                          // Redondeado a 2 decimales al tipear — el guardado
+                          // (round2 en synthesizeManualLine) trunca a esa
+                          // precisión igual, así que cargar más decimales acá
+                          // solo generaría un drift silencioso al reabrir el
+                          // presupuesto guardado.
+                          const raw = Number(e.target.value);
+                          onUpdateItem(item.id, { manualHours: Number.isFinite(raw) ? Math.round(raw * 100) / 100 : raw });
+                        }}
                         placeholder="Hs"
                         className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-center outline-none focus:ring-2 focus:ring-blue-400"
                       />

@@ -92,13 +92,13 @@ const MANUAL_PROCESO_BY_CATEGORY: Record<ManualCategory, string> = {
   PAINT: 'Pintar',
 };
 
-// Inverse of MANUAL_PROCESO_BY_CATEGORY — used to rehydrate a saved manual
-// piece's category from its persisted breakdown[0].proceso.
-const MANUAL_CATEGORY_BY_PROCESO: Record<string, ManualCategory> = {
-  Reparar: 'BODYWORK',
-  Preparacion: 'PREP',
-  Pintar: 'PAINT',
-};
+// Derivado de MANUAL_PROCESO_BY_CATEGORY (no mantenido a mano en paralelo) —
+// usado para rehidratar la categoría de una pieza manual guardada a partir de
+// su breakdown[0].proceso persistido. Así un cambio futuro en el mapa
+// directo no puede desincronizarse silenciosamente del inverso.
+const MANUAL_CATEGORY_BY_PROCESO: Record<string, ManualCategory> = Object.fromEntries(
+  (Object.entries(MANUAL_PROCESO_BY_CATEGORY) as [ManualCategory, string][]).map(([category, proceso]) => [proceso, category]),
+);
 
 /**
  * Rehydrates a persisted BudgetPiece (from an already-saved appointment)
@@ -121,7 +121,10 @@ export function pieceToItem(p: BudgetPiece): SimulatorItem {
       qty,
       mode: 'manual',
       manualCategory,
-      manualHours: (p.totalHoras ?? 0) / qty,
+      // round2 acá también — la división en JS puede reintroducir ruido de
+      // punto flotante (ej. 14.7/3 === 4.8999999999999995) aunque el valor
+      // guardado ya sea limpio, y el input solo acepta 2 decimales.
+      manualHours: round2((p.totalHoras ?? 0) / qty),
     };
   }
 

@@ -5,7 +5,9 @@
  * the project's established pattern (see use-simulator-form.spec.ts).
  */
 
-import { pieceToItem } from '../app/(dashboard)/presupuesto/simulador/_shared/use-simulator-form';
+import {
+  pieceToItem, synthesizeManualLine, newSimulatorItem, type SimulatorItem,
+} from '../app/(dashboard)/presupuesto/simulador/_shared/use-simulator-form';
 import type { BudgetPiece } from '../types';
 
 describe('pieceToItem', () => {
@@ -78,5 +80,32 @@ describe('pieceToItem', () => {
     expect(item.qty).toBe(1);
     expect(item.manualHours).toBe(2);
     expect(item.manualCategory).toBe('BODYWORK');
+  });
+
+  it.each([
+    [1.5, 2], [0.3, 3], [2.25, 4], [0.1, 1], [4.9, 3],
+  ])('round-trips manualHours=%s × qty=%s through synthesizeManualLine → pieceToItem without drift', (manualHours, qty) => {
+    // Reproduce el guardado real: la UI restringe manualHours a 2 decimales
+    // al tipear (mismo redondeo que synthesizeManualLine aplica al calcular
+    // horas), así el round-trip completo (crear → sintetizar → persistir →
+    // reabrir) siempre recupera el valor original.
+    const original: SimulatorItem = {
+      ...newSimulatorItem(), mode: 'manual', pieza: 'Pieza de prueba',
+      manualCategory: 'BODYWORK', manualHours, qty,
+    };
+
+    const line = synthesizeManualLine(original, 10000);
+    const piece: BudgetPiece = {
+      pieza: line.pieza,
+      damageLevel: line.damageLevel,
+      qty: line.qty,
+      breakdown: line.breakdown,
+      totalHoras: line.totalHoras,
+    };
+
+    const rehydrated = pieceToItem(piece);
+
+    expect(rehydrated.manualHours).toBe(manualHours);
+    expect(rehydrated.qty).toBe(qty);
   });
 });
