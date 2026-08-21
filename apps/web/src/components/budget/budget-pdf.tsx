@@ -1,7 +1,7 @@
 import {
   Document, Page, Text, View, StyleSheet, Font,
 } from '@react-pdf/renderer';
-import type { SimulatorEstimateResult, DamageLevel } from '@/lib/api';
+import type { SimulatorEstimateResult, LineDamageLabel } from '@/lib/api';
 
 Font.register({
   family: 'Helvetica',
@@ -21,18 +21,20 @@ const COLOR = {
   white:      '#ffffff',
 };
 
-const DAMAGE_LABEL: Record<DamageLevel, string> = {
+const DAMAGE_LABEL: Record<LineDamageLabel, string> = {
   Leve:        'Leve',
   Medio:       'Medio',
   Grave:       'Grave',
   Sustitucion: 'Sustitución',
+  Manual:      'Manual',
 };
 
-const DAMAGE_COLOR: Record<DamageLevel, string> = {
+const DAMAGE_COLOR: Record<LineDamageLabel, string> = {
   Leve:        '#059669',
   Medio:       '#d97706',
   Grave:       '#ea580c',
   Sustitucion: '#dc2626',
+  Manual:      '#334155',
 };
 
 const s = StyleSheet.create({

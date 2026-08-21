@@ -33,9 +33,9 @@ Chain strategy: pending
 
 ## Phase 1: Foundation (PR 1)
 
-- [ ] 1.1 `lib/api.ts`: add `LineDamageLabel = DamageLevel | 'Manual'`; change `SimulatorLineResult.damageLevel` to `LineDamageLabel`; add `BudgetSimulatorConfig` + `getBudgetSimulatorConfig()` (MOCK branch + `Number(raw.tarifaMdo)` coercion, mirrors `budgetSimulatorEstimate`).
-- [ ] 1.2 `hooks/use-budget-simulator.ts`: add `useBudgetSimulatorConfig()` — `useQuery({queryKey:['budget-simulator-config'], staleTime: Infinity})`.
-- [ ] 1.3 `components/budget/budget-pdf.tsx`: widen `DAMAGE_LABEL`/`DAMAGE_COLOR` (lines 24-38) to `Record<LineDamageLabel,…>`; add `'Manual'` entry (generic label, safe color fallback).
+- [x] 1.1 `lib/api.ts`: add `LineDamageLabel = DamageLevel | 'Manual'`; change `SimulatorLineResult.damageLevel` to `LineDamageLabel`; add `BudgetSimulatorConfig` + `getBudgetSimulatorConfig()` (MOCK branch + `Number(raw.tarifaMdo)` coercion, mirrors `budgetSimulatorEstimate`).
+- [x] 1.2 `hooks/use-budget-simulator.ts`: add `useBudgetSimulatorConfig()` — `useQuery({queryKey:['budget-simulator-config'], staleTime: Infinity})`.
+- [x] 1.3 `components/budget/budget-pdf.tsx`: widen `DAMAGE_LABEL`/`DAMAGE_COLOR` (lines 24-38) to `Record<LineDamageLabel,…>`; add `'Manual'` entry (generic label, safe color fallback).
 
 ## Phase 2: Core hook — derived estimate (PR 2)
 
