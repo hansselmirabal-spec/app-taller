@@ -73,7 +73,7 @@ Frontend-only change with no migration and no backend contract change. Revert th
 
 ## Success Criteria
 
-- [ ] Advisor can add an off-catalog panel with hours in the same row list, mixed freely with catalog rows.
-- [ ] A 100% manual budget can be saved, shared via WhatsApp, and exported to PDF with no `undefined` or 0-hour values.
-- [ ] `bodyshop_catalog` row count is unchanged after saving a budget with manual pieces.
-- [ ] Approving a budget with manual pieces produces the correct bodywork/prep/paint hour split in the bodyshop entry.
+- [x] Advisor can add an off-catalog panel with hours in the same row list, mixed freely with catalog rows.
+- [x] A 100% manual budget can be saved, shared via WhatsApp, and exported to PDF with no `undefined` or 0-hour values.
+- [x] `bodyshop_catalog` row count is unchanged after saving a budget with manual pieces.
+- [x] Approving a budget with manual pieces produces the correct bodywork/prep/paint hour split in the bodyshop entry.
