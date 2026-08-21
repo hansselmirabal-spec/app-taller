@@ -1,14 +1,20 @@
 'use client';
 
-import { Loader2, Plus, Trash2 } from 'lucide-react';
+import { List, Loader2, PenLine, Plus, Trash2 } from 'lucide-react';
 import type { DamageLevel, SimulatorEstimateResult } from '@/lib/api';
-import type { SimulatorItem } from './use-simulator-form';
+import type { ManualCategory, SimulatorItem } from './use-simulator-form';
 
 const DAMAGE_LEVELS: { value: DamageLevel; label: string }[] = [
   { value: 'Leve',        label: 'Leve'         },
   { value: 'Medio',       label: 'Medio'        },
   { value: 'Grave',       label: 'Grave'        },
   { value: 'Sustitucion', label: 'Sustitución'  },
+];
+
+const MANUAL_CATEGORIES: { value: ManualCategory; label: string }[] = [
+  { value: 'BODYWORK', label: 'Chapería'     },
+  { value: 'PREP',     label: 'Preparación'  },
+  { value: 'PAINT',    label: 'Pintura'      },
 ];
 
 interface SimulatorFormProps {
@@ -162,39 +168,98 @@ export function SimulatorForm({
         <div className="space-y-3">
           {items.map((item, idx) => {
             const lineResult = estimate?.lines?.[idx];
+            const isManual = item.mode === 'manual';
+            const isIncomplete = isManual && item.pieza.trim() !== ''
+              && (item.manualCategory == null || !((item.manualHours ?? 0) > 0));
             return (
               <div key={item.id} className="space-y-1.5">
                 {/* Row */}
                 <div className="flex items-center gap-2">
+                  {/* Mode toggle */}
+                  <button
+                    type="button"
+                    onClick={() => onUpdateItem(item.id, { mode: isManual ? 'catalog' : 'manual' })}
+                    title={isManual ? 'Cambiar a pieza de catálogo' : 'Cambiar a pieza manual'}
+                    className="h-9 w-9 flex-shrink-0 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:border-blue-400 hover:text-blue-500 transition-colors"
+                  >
+                    {isManual ? <PenLine className="h-4 w-4" /> : <List className="h-4 w-4" />}
+                  </button>
+
                   {/* Pieza */}
                   <div className="flex-1">
-                    <select
-                      value={item.pieza}
-                      onChange={e => onUpdateItem(item.id, { pieza: e.target.value })}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400 bg-white"
-                    >
-                      <option value="">Seleccionar pieza...</option>
-                      {piezas.map((p: string) => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
-                    </select>
+                    {isManual ? (
+                      <input
+                        type="text"
+                        value={item.pieza}
+                        onChange={e => onUpdateItem(item.id, { pieza: e.target.value })}
+                        placeholder="Nombre de la pieza"
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400"
+                      />
+                    ) : (
+                      <select
+                        value={item.pieza}
+                        onChange={e => onUpdateItem(item.id, { pieza: e.target.value })}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                      >
+                        <option value="">Seleccionar pieza...</option>
+                        {piezas.map((p: string) => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+                    )}
                   </div>
 
-                  {/* Daño */}
+                  {/* Daño / Categoría */}
                   <div className="w-32">
-                    <select
-                      value={item.damageLevel}
-                      onChange={e => onUpdateItem(item.id, { damageLevel: e.target.value as DamageLevel })}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400 bg-white"
-                    >
-                      {DAMAGE_LEVELS.map(d => (
-                        <option key={d.value} value={d.value}>{d.label}</option>
-                      ))}
-                    </select>
+                    {isManual ? (
+                      <select
+                        value={item.manualCategory ?? ''}
+                        onChange={e => onUpdateItem(item.id, { manualCategory: e.target.value as ManualCategory })}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                      >
+                        <option value="">Categoría...</option>
+                        {MANUAL_CATEGORIES.map(c => (
+                          <option key={c.value} value={c.value}>{c.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <select
+                        value={item.damageLevel}
+                        onChange={e => onUpdateItem(item.id, { damageLevel: e.target.value as DamageLevel })}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                      >
+                        {DAMAGE_LEVELS.map(d => (
+                          <option key={d.value} value={d.value}>{d.label}</option>
+                        ))}
+                      </select>
+                    )}
                   </div>
+
+                  {/* Horas (manual only) */}
+                  {isManual && (
+                    <div className="w-16">
+                      <input
+                        type="number"
+                        step={0.1}
+                        min={0.1}
+                        value={item.manualHours ?? ''}
+                        onChange={e => {
+                          // Redondeado a 2 decimales al tipear — el guardado
+                          // (round2 en synthesizeManualLine) trunca a esa
+                          // precisión igual, así que cargar más decimales acá
+                          // solo generaría un drift silencioso al reabrir el
+                          // presupuesto guardado.
+                          const raw = Number(e.target.value);
+                          onUpdateItem(item.id, { manualHours: Number.isFinite(raw) ? Math.round(raw * 100) / 100 : raw });
+                        }}
+                        placeholder="Hs"
+                        className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-center outline-none focus:ring-2 focus:ring-blue-400"
+                      />
+                    </div>
+                  )}
 
                   {/* Qty */}
-                  <div className="w-16">
+                  <div className={isManual ? 'w-14' : 'w-16'}>
                     <input
                       type="number"
                       min={1}
@@ -216,6 +281,13 @@ export function SimulatorForm({
                     </button>
                   )}
                 </div>
+
+                {/* Incomplete manual row hint — never forwarded to the estimate until fixed */}
+                {isIncomplete && (
+                  <p className="ml-1 text-[11px] text-amber-600">
+                    Completá categoría y horas para incluir esta pieza en el presupuesto
+                  </p>
+                )}
 
                 {/* Estimate breakdown for this line */}
                 {lineResult && (
