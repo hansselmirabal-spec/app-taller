@@ -2,6 +2,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   getBudgetSimulatorPiezas,
   budgetSimulatorEstimate,
+  getBudgetSimulatorConfig,
   type SimulatorEstimateItem,
 } from '@/lib/api';
 
@@ -16,5 +17,13 @@ export function useBudgetSimulatorPiezas() {
 export function useBudgetSimulatorEstimate() {
   return useMutation({
     mutationFn: (items: SimulatorEstimateItem[]) => budgetSimulatorEstimate(items),
+  });
+}
+
+export function useBudgetSimulatorConfig() {
+  return useQuery({
+    queryKey: ['budget-simulator-config'],
+    queryFn:  getBudgetSimulatorConfig,
+    staleTime: Infinity,
   });
 }

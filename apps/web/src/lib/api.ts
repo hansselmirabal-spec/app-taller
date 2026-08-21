@@ -1673,10 +1673,15 @@ export type DamageLevel = 'Leve' | 'Medio' | 'Grave' | 'Sustitucion';
 
 export interface SimulatorEstimateItem { pieza: string; damageLevel: DamageLevel; qty: number }
 
+// Pieza manual: 'Manual' amplía el rótulo de una línea ya cotizada, pero
+// NUNCA puede colarse en SimulatorEstimateItem (batch al backend), que sigue
+// atado 1:1 al enum DamageLevel del backend.
+export type LineDamageLabel = DamageLevel | 'Manual';
+
 export interface SimulatorProcessBreakdown { proceso: string; horas: number; descripcion: string }
 
 export interface SimulatorLineResult {
-  pieza: string; damageLevel: DamageLevel; qty: number;
+  pieza: string; damageLevel: LineDamageLabel; qty: number;
   breakdown: SimulatorProcessBreakdown[];
   bodyworkHours: number; prepHours: number; paintHours: number;
   totalHoras: number; totalMdo: number;
@@ -1687,6 +1692,8 @@ export interface SimulatorEstimateResult {
   bodyworkHours: number; prepHours: number; paintHours: number;
   totalHoras: number; totalMdo: number; tarifa: number; moneda: string;
 }
+
+export interface BudgetSimulatorConfig { tarifaMdo: number; moneda: string; ivaIncluido: boolean }
 
 export async function getBudgetSimulatorPiezas(): Promise<SimulatorPieza[]> {
   if (MOCK) return delay([]);
@@ -1699,6 +1706,13 @@ export async function budgetSimulatorEstimate(items: SimulatorEstimateItem[]): P
     method: 'POST',
     body: JSON.stringify({ items }),
   });
+}
+
+export async function getBudgetSimulatorConfig(): Promise<BudgetSimulatorConfig> {
+  if (MOCK) return delay({ tarifaMdo: 144000, moneda: 'Gs.', ivaIncluido: false });
+  const raw = await http<BudgetSimulatorConfig>('/budget-simulator/config');
+  // tarifaMdo es `decimal` en TypeORM y viaja como string en el JSON.
+  return { ...raw, tarifaMdo: Number(raw.tarifaMdo) };
 }
 
 // ── Budget Simulator Catalog ───────────────────────────────────────────────────
