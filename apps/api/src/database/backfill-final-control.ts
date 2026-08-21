@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { DataSource, QueryRunner } from 'typeorm';
 import { FINAL_CONTROL_FIXED_HOURS } from '../modules/bodyshop/bodyshop-hours.util';
@@ -68,6 +69,12 @@ WHERE COALESCE(e.status, 'scheduled') <> 'cancelled'
 
 const PREVIEW_SELECT_SQL = `SELECT e.id, e.plate, e.status ${SELECTION_PREDICATE_SQL};`;
 
+// El `CASE` de acá DEBE seguir exactamente la misma regla que
+// `resolveLogStatus()` de abajo — es la misma política de negocio escrita
+// dos veces (SQL para el INSERT real, TS para el preview del dry-run)
+// porque un solo `INSERT...SELECT` no puede compartir código con una función
+// TS. Si cambia una, cambiar la otra en el mismo commit — si no, el dry-run
+// muestra un status distinto al que realmente se escribe.
 const APPLY_INSERT_SQL = `
 INSERT INTO tracking_logs
   (id, source_type, source_id, process_name, process_code, order_index,
@@ -80,6 +87,8 @@ ${SELECTION_PREDICATE_SQL}
 RETURNING id, source_id, status;
 `;
 
+// Ver comentario en APPLY_INSERT_SQL — misma regla, escrita en TS para el
+// preview del dry-run. Mantener sincronizada con el CASE de arriba.
 export function resolveLogStatus(entryStatus: string): 'pending' | 'skipped' {
   return entryStatus === 'done' ? 'skipped' : 'pending';
 }
@@ -99,17 +108,21 @@ export interface AuditPayload {
   runId: string;
   changeName: string;
   database: string;
+  executedBy: string;
   count: number;
   rows: AuditRow[];
   rollbackSql: string;
 }
 
-export function buildAuditPayload(runId: string, rows: AuditRow[], database: string): AuditPayload {
+export function buildAuditPayload(
+  runId: string, rows: AuditRow[], database: string, executedBy: string,
+): AuditPayload {
   const ids = rows.map((r) => `'${r.insertedLogId}'`).join(', ');
   return {
     runId,
     changeName: 'control-final-backfill-legacy',
     database,
+    executedBy,
     count: rows.length,
     rows,
     rollbackSql: `DELETE FROM tracking_logs WHERE id IN (${ids});`,
@@ -155,7 +168,13 @@ export async function run(queryRunner: QueryRunner, opts: ParsedArgs, database: 
       return;
     }
 
-    const notes = `backfill:control-final-backfill-legacy:${buildRunId(new Date())}`;
+    // Un solo runId para AMBOS: el marcador `notes` que queda en la fila de
+    // `tracking_logs` (fallback de correlación si el archivo de auditoría se
+    // pierde) y el nombre/contenido del archivo de auditoría. Dos llamadas a
+    // `new Date()` en momentos distintos producirían dos IDs distintos que
+    // nunca podrían correlacionarse entre sí.
+    const runId = buildRunId(new Date());
+    const notes = `backfill:control-final-backfill-legacy:${runId}`;
     const inserted: { id: string; source_id: string; status: 'pending' | 'skipped' }[] =
       await queryRunner.query(APPLY_INSERT_SQL, [FINAL_CONTROL_FIXED_HOURS, notes]);
 
@@ -165,33 +184,53 @@ export async function run(queryRunner: QueryRunner, opts: ParsedArgs, database: 
       );
     }
 
+    // Map, no zip por índice: `INSERT...SELECT...RETURNING` no garantiza que
+    // el orden de las filas devueltas coincida con el del `SELECT` de
+    // preview — juntarlas por índice de array podría atribuir la
+    // patente/status de una fila a la pieza de auditoría de otra.
     const previewByEntryId = new Map(previewRows.map((r) => [r.entryId, r]));
     const insertedAt = new Date().toISOString();
     const auditRows: AuditRow[] = inserted.map((row) => {
       const preview = previewByEntryId.get(row.source_id);
+      // Nunca debería faltar — el guard de conteo de arriba solo prueba
+      // cardinalidad igual, no membresía idéntica (una escritura
+      // concurrente entre el SELECT y el INSERT podría, en teoría, cambiar
+      // qué entries matchean manteniendo el conteo igual). Preferimos
+      // fallar fuerte a auditar una fila con patente/status en blanco.
+      if (!preview) {
+        throw new Error(
+          `Audit build failed: inserted log ${row.id} has no matching preview row for entry ${row.source_id}. Aborting before commit.`,
+        );
+      }
       return {
         entryId: row.source_id,
-        plate: preview?.plate ?? '',
-        entryStatus: preview?.entryStatus ?? '',
+        plate: preview.plate,
+        entryStatus: preview.entryStatus,
         insertedLogId: row.id,
         logStatus: row.status,
         insertedAt,
       };
     });
 
-    const runId = buildRunId(new Date());
-    const payload = buildAuditPayload(runId, auditRows, database);
+    const executedBy = os.userInfo().username;
+    const payload = buildAuditPayload(runId, auditRows, database, executedBy);
 
     fs.mkdirSync(opts.outDir, { recursive: true });
     const outPath = path.join(opts.outDir, `backfill-final-control-${runId}.json`);
-    fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
+    // mode 0o600 — el archivo lleva patentes/nombres de clientes en texto
+    // plano; que solo lo pueda leer quien lo generó.
+    fs.writeFileSync(outPath, JSON.stringify(payload, null, 2), { mode: 0o600 });
 
     console.log(JSON.stringify(payload, null, 2));
 
     await queryRunner.commitTransaction();
     console.log(`\n✅ Applied. ${payload.count} rows inserted. Audit file: ${outPath}`);
   } catch (err) {
-    await queryRunner.rollbackTransaction();
+    try {
+      await queryRunner.rollbackTransaction();
+    } catch (rollbackErr) {
+      console.error('❌ Rollback itself failed — transaction state is unknown:', rollbackErr);
+    }
     console.error('❌ Backfill failed, transaction rolled back. No audit file written.', err);
     process.exit(1);
   }

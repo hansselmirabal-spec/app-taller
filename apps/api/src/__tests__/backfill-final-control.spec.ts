@@ -121,12 +121,13 @@ describe('buildAuditPayload', () => {
       },
     ];
 
-    const payload = buildAuditPayload('2026-08-21T18-04-11Z', rows, 'localhost/taller_db');
+    const payload = buildAuditPayload('2026-08-21T18-04-11Z', rows, 'localhost/taller_db', 'jperez');
 
     expect(payload).toEqual({
       runId: '2026-08-21T18-04-11Z',
       changeName: 'control-final-backfill-legacy',
       database: 'localhost/taller_db',
+      executedBy: 'jperez',
       count: 2,
       rows,
       rollbackSql: "DELETE FROM tracking_logs WHERE id IN ('log-1', 'log-2');",
@@ -208,5 +209,64 @@ describe('run()', () => {
     expect(qr.rollbackTransaction).toHaveBeenCalledTimes(1);
     expect(qr.commitTransaction).not.toHaveBeenCalled();
     expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('does not swallow the original error when rollbackTransaction itself throws', async () => {
+    const exitSpy = mockExit();
+    const qr = makeQueryRunner({
+      query: jest.fn().mockRejectedValueOnce(new Error('connection terminated')),
+      rollbackTransaction: jest.fn().mockRejectedValueOnce(new Error('rollback also failed')),
+    });
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await run(qr, { apply: false, outDir: '/tmp/out' }, 'localhost/taller_db');
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    // El error original ("connection terminated") se sigue logueando aunque
+    // el propio rollback también haya fallado — no debe perderse.
+    expect(errorSpy).toHaveBeenCalledWith(
+      '❌ Backfill failed, transaction rolled back. No audit file written.',
+      expect.objectContaining({ message: 'connection terminated' }),
+    );
+  });
+
+  it('aborts before commit if an inserted row has no matching preview row (same count, different membership)', async () => {
+    const exitSpy = mockExit();
+    const writeSpy = jest.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
+    // Conteo igual (1 vs 1) pero source_id de la fila insertada no matchea
+    // ningún preview — simula una escritura concurrente entre el SELECT y
+    // el INSERT que el guard de conteo por sí solo no puede detectar.
+    const qr = makeQueryRunner({
+      query: jest.fn()
+        .mockResolvedValueOnce([PREVIEW_ROW])
+        .mockResolvedValueOnce([{ ...INSERTED_ROW, source_id: 'entry-otra' }]),
+    });
+
+    await run(qr, { apply: true, outDir: '/tmp/out' }, 'localhost/taller_db');
+
+    expect(qr.rollbackTransaction).toHaveBeenCalledTimes(1);
+    expect(qr.commitTransaction).not.toHaveBeenCalled();
+    expect(writeSpy).not.toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('is idempotent: re-running against an already-backfilled universe inserts zero rows and still commits', async () => {
+    const exitSpy = mockExit();
+    const writeSpy = jest.spyOn(fs, 'writeFileSync').mockImplementation(() => undefined);
+    jest.spyOn(fs, 'mkdirSync').mockImplementation(() => undefined as any);
+    // La corrida anterior ya dejó FINAL_CONTROL en todas las entries
+    // afectadas — SELECTION_PREDICATE_SQL las excluye, preview viene vacío.
+    const qr = makeQueryRunner({
+      query: jest.fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]),
+    });
+
+    await run(qr, { apply: true, outDir: '/tmp/out' }, 'localhost/taller_db');
+
+    expect(qr.commitTransaction).toHaveBeenCalledTimes(1);
+    expect(qr.rollbackTransaction).not.toHaveBeenCalled();
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
   });
 });

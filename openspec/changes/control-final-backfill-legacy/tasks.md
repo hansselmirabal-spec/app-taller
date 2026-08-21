@@ -54,6 +54,19 @@ Chain strategy: pending
 - [x] 4.5 Test `buildAuditPayload`: shape + `rollbackSql` built from log `id`s.
 - [x] 4.6 Test `SELECTION_PREDICATE_SQL` contains no date/`created_at` filter — asserts the full-history requirement (no 60-day cutoff) added above.
 
+**Post-review fixes (before merge)**: full 4R came back with 0 CRITICAL, 7 WARNING, 2 SUGGESTION. Fixed 6 directly:
+- **Real bug (reliability)**: `notes` written to `tracking_logs` and the audit file's `runId` were built from two separate `new Date()` calls — they'd never actually match, breaking the documented DB-side correlation fallback if the audit file is lost. Fixed: one `runId` computed once, reused for both.
+- **Silent data-integrity gap (readability→correctness)**: the preview↔inserted join used `Map.get(...) ?? ''` — a miss (possible if a concurrent write changes which entries match the predicate between the `SELECT` and the `INSERT...SELECT`, keeping the count equal but not the membership; the existing count-only guard can't catch this) silently wrote a blank plate/status into the audit record instead of failing. Fixed: throws and aborts before commit on a miss, consistent with the script's own "audit before commit" design principle. Added a test reproducing the exact scenario.
+- **Swallowed root-cause error (resilience)**: `catch` called `rollbackTransaction()` unguarded — if the rollback itself threw (e.g. connection already dead), the real cause of the original failure never reached the console.error/logs. Fixed: nested try/catch, original error always logged regardless of rollback outcome. Added a test.
+- **Plaintext audit file (risk)**: written with default permissions, containing plate numbers, with no operator-identity field. Fixed: `fs.writeFileSync(..., { mode: 0o600 })`, and `AuditPayload` gained an `executedBy` field (`os.userInfo().username`).
+- **Duplicated business rule with no cross-reference (readability)**: `done→skipped` policy exists twice — the SQL `CASE` in `APPLY_INSERT_SQL` and the TS `resolveLogStatus()` used for the dry-run preview — with no comment linking them, so an edit to one could silently drift from the other. Added comments at both sites.
+- **Missing idempotency test (reliability)**: idempotency was a load-bearing design claim (the selection predicate already excludes entries with a prior `FINAL_CONTROL` log) but no test exercised a second run against an already-backfilled universe. Added one.
+
+Left as documented, non-blocking (matches the risk lens's own severity/causal classification):
+- No environment/target-database safety check before a live `--apply` write — `causal_disposition: pre-existing`, matches the exact same unguarded `DATABASE_URL` fallback pattern already used by every `db:seed:*` script in this repo. Not introduced by this change; addressing it would mean hardening the whole family of scripts, out of scope here.
+- The audit file is written before `COMMIT` (not after) — deliberate design tradeoff already documented in `design.md` (a failed disk write must not leave committed rows without a rollback trail; a lost/orphaned audit file for a transaction that never committed is the accepted asymmetric failure mode).
+- `SELECTION_PREDICATE_SQL` naming (SUGGESTION, includes `FROM` + `WHERE`, not just a predicate) and lack of an executable (vs. string-assertion) test for `cancelled` never reaching `resolveLogStatus` (SUGGESTION) — both low-value for a one-off script, left as-is.
+
 ## Phase 5: Pre-Production Verification
 
 - [ ] 5.1 Run dry-run against QAS: `pnpm --filter @app-taller/api db:backfill:final-control`; record the real affected-entry count in the PR description / audit notes.
