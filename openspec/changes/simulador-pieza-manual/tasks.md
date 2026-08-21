@@ -86,5 +86,5 @@ can contain `damageLevel:'Manual'`).
 
 ## Phase 4: Verification
 
-- [ ] 4.1 `pnpm --filter web test simulador` + `pnpm --filter web type-check` (confirm a manual row cannot type-check into `SimulatorEstimateItem`).
-- [ ] 4.2 Manual smoke: mixed catalog/manual row on create + edit pages — Save, PDF, WhatsApp, summary bar; confirm `GET /budget-simulator/catalog` row count unchanged.
+- [x] 4.1 `pnpm --filter web test simulator` (4 simulator spec files, 30/30) + `pnpm --filter web typecheck` — both clean, run by `sdd-verify` against `origin/main` @ 283b92b.
+- [ ] 4.2 Manual smoke: mixed catalog/manual row on create + edit pages — Save, PDF, WhatsApp, summary bar; confirm `GET /budget-simulator/catalog` row count unchanged. Not executed in this environment (no browser session) — recommend one human click-through in QAS before relying on this for a live demo. Static/runtime evidence (repo-wide grep for catalog-mutation calls + passing integration tests) stands in for now.
