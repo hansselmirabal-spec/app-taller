@@ -39,13 +39,13 @@ Chain strategy: pending
 
 ## Phase 2: Core hook — derived estimate (PR 2)
 
-- [ ] 2.1 RED: `__tests__/use-simulator-form.spec.ts` — `buildEstimate` order preservation (mixed rows); manual line `horas=round2(manualHours×qty)`/`totalMdo`/single breakdown entry; manual rows excluded from `/estimate` payload; stale `catalogResult` signature ⇒ `estimate === null`.
-- [ ] 2.2 `use-simulator-form.ts`: extend `SimulatorItem` with `mode`, `manualCategory?`, `manualHours?`; default `mode:'catalog'` in `newSimulatorItem()`.
-- [ ] 2.3 Implement `splitItems`, `synthesizeManualLine(tarifa)` (BODYWORK→Reparar/PREP→Preparacion/PAINT→Pintar, `descripcion: "${proceso} — ${pieza}"`), `buildEstimate(items, catalogResult, tarifa, moneda)` merging by original index.
-- [ ] 2.4 Replace `estimate` state with signature-keyed `catalogResult`; per-mode row-readiness gate; skip network call when zero catalog rows.
-- [ ] 2.5 Derive `estimate` via `buildEstimate` in hook body; reset mode-specific fields on toggle instead of `setEstimate(null)`; drop `setEstimate` from public return.
-- [ ] 2.6 Wire `useBudgetSimulatorConfig()`: `tarifa = config?.tarifaMdo ?? catalogResult?.result?.tarifa ?? 0`.
-- [ ] 2.7 GREEN: run `pnpm --filter web test use-simulator-form`, confirm 2.1 passes.
+- [x] 2.1 RED: `__tests__/use-simulator-form.spec.ts` — `buildEstimate` order preservation (mixed rows); manual line `horas=round2(manualHours×qty)`/`totalMdo`/single breakdown entry; manual rows excluded from `/estimate` payload; stale `catalogResult` signature ⇒ `estimate === null`.
+- [x] 2.2 `use-simulator-form.ts`: extend `SimulatorItem` with `mode`, `manualCategory?`, `manualHours?`; default `mode:'catalog'` in `newSimulatorItem()`.
+- [x] 2.3 Implement `splitItems`, `synthesizeManualLine(tarifa)` (BODYWORK→Reparar/PREP→Preparacion/PAINT→Pintar, `descripcion: "${proceso} — ${pieza}"`), `buildEstimate(items, catalogResult, tarifa, moneda)` merging by original index.
+- [x] 2.4 Replace `estimate` state with signature-keyed `catalogResult`; per-mode row-readiness gate; skip network call when zero catalog rows.
+- [x] 2.5 Derive `estimate` via `buildEstimate` in hook body; reset mode-specific fields on toggle instead of `setEstimate(null)`; drop `setEstimate` from public return.
+- [x] 2.6 Wire `useBudgetSimulatorConfig()`: `tarifa = config?.tarifaMdo ?? catalogResult?.result?.tarifa ?? 0`.
+- [x] 2.7 GREEN: run `pnpm --filter web test use-simulator-form`, confirm 2.1 passes.
 
 ## Phase 3: UI + edit rehydration + PDF/WhatsApp (PR 3)
 

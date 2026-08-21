@@ -80,6 +80,9 @@ export default function EditarSimuladorPresupuestoPage() {
         pieza:       p.pieza,
         damageLevel: p.damageLevel as DamageLevel,
         qty:         p.qty,
+        // TODO(simulador-pieza-manual Phase 3): detect p.damageLevel === 'Manual'
+        // and rehydrate mode:'manual' + manualCategory/manualHours instead.
+        mode:        'catalog' as const,
       })));
     }
     // pieces null/empty → keep the hook's default single empty item
