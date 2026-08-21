@@ -11,10 +11,17 @@ import * as request from 'supertest';
 import { TechniciansController } from '../modules/technicians/technicians.controller';
 import { TechniciansService } from '../modules/technicians/technicians.service';
 import { WorkshopsService } from '../modules/workshops/workshops.service';
-import { buildGuardTestApp, asUser, restrictedUser, UNRESTRICTED_USER } from './helpers/workshop-guard-http.helper';
+import {
+  buildGuardTestApp, asUser, restrictedUser, UNRESTRICTED_USER, type FakeUser,
+} from './helpers/workshop-guard-http.helper';
 
 const WORKSHOP_A = { id: 'ws-1', name: 'Taller A' };
 const WORKSHOP_B = { id: 'ws-2', name: 'Taller B' };
+
+// isUnrestrictedWorkshopAccess() trata 'admin' y 'admin_taller' como
+// equivalentes — UNRESTRICTED_USER solo cubre 'admin', así que este caso
+// cubre la otra rama del bypass.
+const ADMIN_TALLER_USER: FakeUser = { id: 'u-admin-taller', role: 'admin_taller', allowedWorkshopIds: null };
 
 describe('TechniciansController — WorkshopAccessGuard (GET /technicians)', () => {
   let app: INestApplication;
@@ -80,6 +87,14 @@ describe('TechniciansController — WorkshopAccessGuard (GET /technicians)', () 
     await request(app.getHttpServer())
       .get('/technicians')
       .set(asUser(UNRESTRICTED_USER))
+      .query({ workshopName: WORKSHOP_B.name })
+      .expect(200);
+  });
+
+  it('usuario admin_taller consultando por workshopName de cualquier taller pasa sin problema', async () => {
+    await request(app.getHttpServer())
+      .get('/technicians')
+      .set(asUser(ADMIN_TALLER_USER))
       .query({ workshopName: WORKSHOP_B.name })
       .expect(200);
   });

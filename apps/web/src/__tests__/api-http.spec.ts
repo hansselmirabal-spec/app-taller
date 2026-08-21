@@ -26,7 +26,7 @@ Object.defineProperty(window, 'localStorage', { value: localStorageMock, writabl
 const fetchMock = jest.fn();
 (global as any).fetch = fetchMock;
 
-import { login, forgotPassword, resetPassword, getWorkshops, getBudgetSimulatorConfig } from '../lib/api';
+import { login, forgotPassword, resetPassword, getWorkshops, getBudgetSimulatorConfig, getTechnicians } from '../lib/api';
 
 function fetchResponse(status: number, body: any, contentType = 'application/json'): Response {
   return {
@@ -195,6 +195,29 @@ describe('lib/api.ts → http()', () => {
 
       expect(config.moneda).toBe('USD');
       expect(config.ivaIncluido).toBe(true);
+    });
+  });
+
+  // ── getTechnicians() ─────────────────────────────────────────────────────────
+
+  describe('getTechnicians()', () => {
+    it('manda workshopId en el query string (regresión: antes se descartaba en silencio)', async () => {
+      fetchMock.mockResolvedValueOnce(fetchResponse(200, { data: [] }));
+
+      await getTechnicians('ws-1');
+
+      const url = fetchMock.mock.calls[0][0] as string;
+      expect(url).toContain('workshopId=ws-1');
+    });
+
+    it('manda workshopId y workshopName juntos cuando ambos se pasan', async () => {
+      fetchMock.mockResolvedValueOnce(fetchResponse(200, { data: [] }));
+
+      await getTechnicians('ws-1', 'Taller A');
+
+      const url = fetchMock.mock.calls[0][0] as string;
+      expect(url).toContain('workshopId=ws-1');
+      expect(url).toContain('workshopName=Taller');
     });
   });
 

@@ -19,6 +19,12 @@ export class TechniciansController {
     private workshopsService: WorkshopsService,
   ) {}
 
+  // `WorkshopAccessGuard` solo inspecciona `workshopId` (query/body/params) —
+  // nunca `workshopName`. Por eso `workshopName` se autoriza acá, no en el
+  // guard: es la ÚNICA autorización real para ese caso, no una capa extra.
+  // No quitar `assertWorkshopNameAllowed` ni cambiar el orden de precedencia
+  // (nombre gana sobre id cuando ambos vienen) sin reabrir el gap que este
+  // cambio cierra.
   private async resolveWorkshopName(
     workshopId: string | undefined,
     workshopName: string | undefined,
@@ -33,6 +39,8 @@ export class TechniciansController {
     return ws.name;
   }
 
+  // Lanza si `name` no pertenece a un taller permitido para `user` — es la
+  // autorización real del path por workshopName, ver comentario de arriba.
   private async assertWorkshopNameAllowed(name: string, user: UserAccessContext): Promise<void> {
     if (isUnrestrictedWorkshopAccess(user)) return;
     const allowed = await this.workshopsService.findAll(user);

@@ -44,10 +44,11 @@ export class WorkshopsService {
     });
   }
 
-  // `user` es opcional a propósito: los consumidores internos (capacity, bodyshop,
-  // appointments, technicians) resuelven un workshopId y solo necesitan la entidad,
-  // sin re-chequear acceso acá. Solo el controller de `GET /workshops/:id` pasa
-  // `user` para aplicar el scoping.
+  // `user` es opcional a propósito: la mayoría de los consumidores internos
+  // (capacity, bodyshop, appointments) resuelven un workshopId y solo
+  // necesitan la entidad, sin re-chequear acceso acá. `GET /workshops/:id` y
+  // `technicians.controller.ts` (resolución de `workshopId`/`workshopName`)
+  // sí pasan `user` para aplicar el scoping.
   async findOne(id: string, user?: UserAccessContext) {
     if (user && !isUnrestrictedWorkshopAccess(user) && !(user.allowedWorkshopIds as string[]).includes(id)) {
       throw new ForbiddenException('No tenés acceso a este taller');
