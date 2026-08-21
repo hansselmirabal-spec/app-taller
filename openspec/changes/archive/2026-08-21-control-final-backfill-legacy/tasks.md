@@ -69,5 +69,5 @@ Left as documented, non-blocking (matches the risk lens's own severity/causal cl
 
 ## Phase 5: Pre-Production Verification
 
-- [ ] 5.1 Run dry-run against QAS: `pnpm --filter @app-taller/api db:backfill:final-control`; record the real affected-entry count in the PR description / audit notes.
-- [ ] 5.2 Confirm dry-run status resolution matches expectation (`done`→`skipped` preview, else `pending`) before sign-off. `--apply` execution in QAS and PROD is a separate manual operator action per environment, outside this SDD apply cycle.
+- [x] 5.1 Run dry-run against QAS: ran the compiled script directly in the QAS API container (`node /app/dist/database/backfill-final-control.js`, image rebuilt from `main`@739d9f5 via `develop` sync) on 2026-08-21. **Result: 18 affected entries** (`AB123`, `GLA 200 D`, `ABC123`, `QATEST01`, `BNR523`, `AACA898`, `AANN177`, `BNR 523`, `AAXB971`, `ZZTEST99`, `AAKZ786`, `AVP 825`, `CD456`, `CAEY010`, `QATEST02`, `AAVR380`, `CD789`, `PDT001`). Zero rows inserted (dry-run), zero errors.
+- [x] 5.2 Dry-run status resolution confirmed correct: all 18 entries in QAS today are `status ∈ {scheduled, in_progress, paused}` (none `done`), so all 18 resolve to log status `pending` — the `done`→`skipped` branch exists in code and is unit-tested (4.1) but has no live QAS example to exercise end-to-end yet. `--apply` execution in QAS and PROD remains a separate manual operator action per environment, outside this SDD cycle — the script is ready, not yet run with `--apply` anywhere.
