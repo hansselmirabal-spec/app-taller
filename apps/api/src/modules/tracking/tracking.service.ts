@@ -622,7 +622,7 @@ export class TrackingService {
     }
 
     const newLog = await this.withTechnicianLock(technicianId, async manager => {
-      // (a) mismo chequeo de conflicto que unblockProcess() líneas 530-534.
+      // (a) mismo chequeo de conflicto que unblockProcess().
       const conflict = await manager.findOne(TrackingLog, {
         where: { technicianId, status: 'in_progress' },
       });
@@ -633,7 +633,7 @@ export class TrackingService {
       }
 
       // (b) snapshot del técnico saliente ANTES de borrar
-      // bodyshop_process_techs — mismo patrón que pauseLog() líneas 427-433.
+      // bodyshop_process_techs — mismo patrón que pauseLog().
       if (!log.technicianId) {
         const assigned = await this.resolveAssignedTechnician(log);
         if (assigned) {
@@ -652,14 +652,14 @@ export class TrackingService {
       await manager.save(TrackingLog, log);
 
       // (d) libera la capacidad del proceso devuelto — mismo criterio que
-      // pauseLog() tracking.service.ts:448 (`this.processTechRepo.delete(...)`),
-      // pero vía manager para que quede atómico con el resto de la transacción.
+      // pauseLog() (`this.processTechRepo.delete(...)`), pero vía manager
+      // para que quede atómico con el resto de la transacción.
       if (log.sourceType === 'bodyshop') {
         await manager.delete(BodyshopProcessTech, { entryId: log.sourceId, process: log.processCode });
       }
 
       // (e) nueva pasada del proceso anterior — shape de initForBodyshop()
-      // líneas 225-234 + campos de arranque de startProcess() líneas 392-399.
+      // + campos de arranque de startProcess().
       const created = await manager.save(TrackingLog, manager.create(TrackingLog, {
         sourceType:   log.sourceType,
         sourceId:     log.sourceId,
@@ -675,7 +675,7 @@ export class TrackingService {
       }));
 
       // (f) upsert de bodyshop_process_techs para el proceso reabierto —
-      // mirror exacto de unblockProcess() líneas 511-523.
+      // mirror exacto de unblockProcess().
       if (log.sourceType === 'bodyshop') {
         const existing = await manager.findOne(BodyshopProcessTech, {
           where: { entryId: log.sourceId, process: prev.processCode },
@@ -693,9 +693,15 @@ export class TrackingService {
       return created;
     });
 
-    // Post-transacción, mirror de unblockProcess() líneas 542-551: si no
-    // queda ningún otro log 'blocked' para el mismo origen, restaura el
-    // estado de pausa del appointment/entry.
+    // Post-transacción, mirror de unblockProcess(): si no queda ningún otro
+    // log 'blocked' para el mismo origen, restaura el estado de pausa del
+    // appointment/entry. Igual que en unblockProcess(), esto corre FUERA de
+    // la transacción de arriba — si falla acá, la devolución ya está
+    // comiteada (log 'returned', capacidad liberada, técnico reasignado) y
+    // el caller ve un error por algo que en realidad ya sucedió. Riesgo
+    // preexistente heredado a propósito del mismo patrón, no nuevo de este
+    // endpoint — arreglarlo implica revisar el mismo punto en
+    // unblockProcess(), fuera de alcance de este cambio.
     const otherBlocked = await this.logRepo.findOne({
       where: { sourceType: log.sourceType, sourceId: log.sourceId, status: 'blocked' },
     });
@@ -994,14 +1000,19 @@ export class TrackingService {
   // FINAL_CONTROL 6). Si hay varias pasadas del mismo processCode empatadas en
   // orderIndex, se queda con la más nueva (createdAt DESC).
   //
-  // Post-review fix (PR1→PR2): el desempate por createdAt no alcanza cuando
-  // dos pasadas nacen en la MISMA transacción — returnToProcess() (PR2) hace
-  // dos writes a tracking_logs en un único dataSource.transaction(), y
-  // Postgres now() devuelve el mismo valor para toda la transacción, así que
-  // dos createdAt podrían quedar idénticos. Se agrega `id` (UUID) como tercer
-  // desempate: no le da un significado temporal real al ganador, pero
-  // garantiza que la elección sea determinística sin importar el orden en que
-  // Postgres devuelva las filas empatadas (ORDER BY no lo garantiza en ties).
+  // Post-review fix (PR1→PR2): revisión adversarial encontró que el único
+  // call site real (returnToProcess()) lee `allLogs` ANTES de entrar a la
+  // transacción — así que el escenario "dos pasadas nacidas en la misma
+  // transacción, mismo now()" NO es observable hoy desde acá (no hay dos
+  // writes de tracking_logs en la misma transacción que este método vea).
+  // El riesgo genuino, más improbable, es una colisión de timestamp entre
+  // DOS llamadas separadas a returnToProcess() para el mismo processCode.
+  // El desempate por `id` (UUID, sin orden temporal real) NO garantiza
+  // elegir la pasada correcta ante ese empate — solo garantiza que la
+  // elección sea determinística y repetible en vez de depender del orden
+  // en que Postgres devuelva las filas (ORDER BY no lo garantiza en ties).
+  // Si esto alguna vez se vuelve un riesgo real y no solo teórico, la
+  // solución correcta es una columna de secuencia monotónica, no un UUID.
   private pickPreviousMother(logs: TrackingLog[], current: TrackingLog): TrackingLog | null {
     return logs
       .filter(l => l.processType !== 'PARALLEL' && l.processCode !== 'AGENDA'

@@ -1899,5 +1899,42 @@ describe('TrackingService', () => {
       // horas planificadas entre pasadas es aceptada, no un bug de QAS).
       expect(card.plannedTotalHours).toBe(16);
     });
+
+    it('la duplicación de horas empuja suggestedExitDate más adelante que si se dedupicara (efecto real, no solo el dato intermedio)', async () => {
+      const { service } = await build();
+      const buildCardOf = (logs: TrackingLog[]) => (service as any).buildCard(ENTRY_ID, 'bodyshop', {
+        status: 'in_progress', plate: 'ABC', customerName: 'Test', vehicleType: null,
+        techName: null, serviceOrType: null, entryDate: '2026-06-10', exitDate: null,
+      }, logs);
+
+      // BODYWORK 1h + PREP vieja 4h + PREP nueva 4h = 9h → cruza el umbral de
+      // WORK_HOURS_PER_DAY=8, así que la NO-dedup empuja suggestedExitDate un
+      // día hábil más tarde que si la pasada vieja se excluyera (5h, 1 día).
+      const duplicated = buildCardOf([
+        makeLog({ id: 'l-agenda', processCode: 'AGENDA',   orderIndex: 0, processType: 'MOTHER', status: 'completed', plannedHours: 0 }),
+        makeLog({ id: 'l-bw',     processCode: 'BODYWORK', orderIndex: 1, processType: 'MOTHER', status: 'completed', plannedHours: 1 }),
+        makeLog({
+          id: 'l-prep-old', processCode: 'PREP', orderIndex: 2, processType: 'MOTHER', status: 'returned', plannedHours: 4,
+          createdAt: new Date('2026-06-10T09:00:00Z'),
+        }),
+        makeLog({
+          id: 'l-prep-redo', processCode: 'PREP', orderIndex: 2, processType: 'MOTHER', status: 'in_progress', plannedHours: 4,
+          createdAt: new Date('2026-06-12T09:00:00Z'),
+        }),
+      ]);
+      const dedupedEquivalent = buildCardOf([
+        makeLog({ id: 'l-agenda', processCode: 'AGENDA',   orderIndex: 0, processType: 'MOTHER', status: 'completed', plannedHours: 0 }),
+        makeLog({ id: 'l-bw',     processCode: 'BODYWORK', orderIndex: 1, processType: 'MOTHER', status: 'completed', plannedHours: 1 }),
+        makeLog({
+          id: 'l-prep-redo', processCode: 'PREP', orderIndex: 2, processType: 'MOTHER', status: 'in_progress', plannedHours: 4,
+          createdAt: new Date('2026-06-12T09:00:00Z'),
+        }),
+      ]);
+
+      expect(duplicated.plannedTotalHours).toBe(9);
+      expect(dedupedEquivalent.plannedTotalHours).toBe(5);
+      expect(new Date(duplicated.suggestedExitDate as string).getTime())
+        .toBeGreaterThan(new Date(dedupedEquivalent.suggestedExitDate as string).getTime());
+    });
   });
 });

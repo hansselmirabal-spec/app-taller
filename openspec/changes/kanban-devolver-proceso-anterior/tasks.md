@@ -98,8 +98,34 @@ secundario por id (PR2)`).
 
 ## Phase 4: PR2 — Verification
 
-- [x] 4.1 `pnpm test` (api) green — 412 passed, 2 pre-existing skipped, 0 failed
+- [x] 4.1 `pnpm test` (api) green — 415 passed, 2 pre-existing skipped, 0 failed
 - [x] 4.2 `pnpm typecheck` green (api+web)
+
+**Post-review fixes (PR2, before merge)**: full 4R came back with 0 CRITICAL. Risk (1 WARNING,
+pre-existing) and resilience (1 WARNING, mirrors an existing pattern in `unblockProcess()`) were
+left documented, non-blocking — neither is introduced or worsened by this PR:
+- Risk: `technicianId` is accepted without checking it belongs to the same workshop as the entry
+  — same gap already present in `startProcess()`/`unblockProcess()`, not new here.
+- Resilience: the post-transaction `setPauseStatus()` step in `returnToProcess()` runs outside the
+  DB transaction (same shape as `unblockProcess()`) — if it throws, the caller sees an error for a
+  devolución that already committed successfully. Fixing this means revisiting the same point in
+  `unblockProcess()` too; out of scope for this change.
+
+Readability and reliability had 3 real, cheap fixes, applied directly:
+- 5 comments in `returnToProcess()` cited absolute line numbers of other functions
+  (`unblockProcess() líneas 530-534`, etc.) — these go stale the moment code above those functions
+  changes, with nothing to catch it. Replaced with function-name-only references.
+- `pickPreviousMother()`'s post-review comment (tie-break by `id`) overclaimed what it actually
+  protects: the only real call site (`returnToProcess()`) reads `allLogs` *before* entering the
+  transaction, so the "two writes in one transaction, same `now()`" scenario the comment used to
+  justify the fix isn't observable from there. Comment corrected to describe the real, narrower
+  residual risk (timestamp collision across two *separate* `returnToProcess()` calls) and to be
+  honest that a UUID tie-break makes the pick deterministic, not necessarily correct.
+- Task 3.10's test only asserted `plannedTotalHours`, never the actual effect the task description
+  claimed to lock in (`suggestedExitDate` shifting later). Added a second test with hours chosen to
+  cross the `WORK_HOURS_PER_DAY` threshold (9h duplicated vs. 5h deduped-equivalent) and asserts
+  `suggestedExitDate` is genuinely later for the duplicated case, not just checking an intermediate
+  number.
 
 ## Phase 5: PR3 — Frontend data layer
 
