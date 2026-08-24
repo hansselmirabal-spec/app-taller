@@ -129,23 +129,36 @@ Readability and reliability had 3 real, cheap fixes, applied directly:
 
 ## Phase 5: PR3 — Frontend data layer
 
-- [ ] 5.1 [no RED — no `.test.tsx` harness] add `returnTrackingProcess(logId, reason, technicianId, technicianName?)` in `apps/web/src/lib/api.ts`
-- [ ] 5.2 [no RED] add `createdAt`, `canReturn`, `previousProcessName` to `TrackingProcessSummary`, `api.ts:1351-1365`
-- [ ] 5.3 [no RED] add `useReturnProcess()` mutation hook invalidating `['tracking-board']` in `apps/web/src/hooks/use-tracking.ts`
+- [x] 5.1 [no RED — no `.test.tsx` harness] add `returnTrackingProcess(logId, reason, technicianId, technicianName?)` in `apps/web/src/lib/api.ts`
+- [x] 5.2 [no RED] add `createdAt`, `canReturn`, `previousProcessName` to `TrackingProcessSummary`, `api.ts:1351-1365`
+- [x] 5.3 [no RED] add `useReturnProcess()` mutation hook invalidating `['tracking-board']` in `apps/web/src/hooks/use-tracking.ts`
 
 ## Phase 6: PR3 — Frontend UI
 
-- [ ] 6.1 [no RED] create `apps/web/src/components/kanban/return-process-modal.tsx` — reason radios (`PAUSE_REASONS`-style + "Otro") and technician list, both required; merge `PauseModal` (page.tsx:632-688) + `resume-tech-modal.tsx` patterns
-- [ ] 6.2 [no RED] fix `isCurrent` to compare by `logId`, not `processCode` — `page.tsx:911`
-- [ ] 6.3 [no RED] add `'returned'` entries to the `statusColors`/`statusLabel`/`statusBadge` maps and a `ProcessStatusIcon` branch — `page.tsx:912-931`
-- [ ] 6.4 [no RED] dedup `BodyshopScheduleBlock.allDone` by latest pass per `processCode` — `page.tsx:176-178`
-- [ ] 6.5 [no RED] apply shared `byProcessOrder` (`orderIndex` ASC, `createdAt` ASC) comparator at `page.tsx:88,156,1041`
-- [ ] 6.6 [no RED] add "Devolver a {previousProcessName}" button in `CardDetailModal`'s action footer (`page.tsx:1219-1261`), gated on `isAdminOrManager() && cp.canReturn && !isParallelPlaceholder`, wired to `ReturnProcessModal` + `useReturnProcess()`
+- [x] 6.1 [no RED] create `apps/web/src/components/kanban/return-process-modal.tsx` — reason radios (`PAUSE_REASONS`-style + "Otro") and technician list, both required; merge `PauseModal` (page.tsx:632-688) + `resume-tech-modal.tsx` patterns
+- [x] 6.2 [no RED] fix `isCurrent` to compare by `logId`, not `processCode` — `page.tsx:911`
+- [x] 6.3 [no RED] add `'returned'` entries to the `statusColors`/`statusLabel`/`statusBadge` maps and a `ProcessStatusIcon` branch — `page.tsx:912-931`
+- [x] 6.4 [no RED] dedup `BodyshopScheduleBlock.allDone` by latest pass per `processCode` — `page.tsx:176-178`
+- [x] 6.5 [no RED] apply shared `byProcessOrder` (`orderIndex` ASC, `createdAt` ASC) comparator at `page.tsx:88,156,1041`
+- [x] 6.6 [no RED] add "Devolver a {previousProcessName}" button in `CardDetailModal`'s action footer (`page.tsx:1219-1261`), gated on `isAdminOrManager() && cp.canReturn && !isParallelPlaceholder`, wired to `ReturnProcessModal` + `useReturnProcess()`
 
 ## Phase 7: PR3 — Verification
 
-- [ ] 7.1 [manual QA] return PREP→BODYWORK, confirm technician freed on capacity screen, redo BODYWORK, confirm PREP reappears `pending` and the card can then reach "Entregado"
-- [ ] 7.2 `pnpm typecheck` green (web)
+- [ ] 7.1 [manual QA] return PREP→BODYWORK, confirm technician freed on capacity screen, redo BODYWORK, confirm PREP reappears `pending` and the card can then reach "Entregado" — code path traced end-to-end (backend PR1/PR2 tests + frontend wiring reviewed), but NOT click-tested in a real browser; left for human QAS per instructions
+- [x] 7.2 `pnpm typecheck` green (web)
+
+**Post-review fix (PR3, before merge)**: `review-reliability` confirmed all 5 focus points
+(button gate, highlight fix, `allDone` dedup, shared comparator, modal required-fields) were
+implemented correctly — the only real finding was that the entire PR3 frontend surface shipped
+with zero automated tests (the repo has no `.test.tsx`/RTL harness, so this matched an established,
+accepted limitation from prior changes this session). Closed the closeable part of that gap:
+`byProcessOrder` and the `allDone` dedup logic (previously inlined in `BodyshopScheduleBlock`) were
+both pure functions with no React dependency — extracted `computeAllDone()` as its own exported
+function and added `apps/web/src/__tests__/kanban-return-process-order.spec.ts` (6 tests, same
+pattern as `use-simulator-form.spec.ts`: import the page module directly, test the pure logic in
+isolation, no rendering). The genuinely React-dependent parts (the modal component, the button
+visibility JSX, `page.tsx`'s render tree) remain untested by design — no RTL harness exists in this
+repo, consistent with every other frontend PR this session.
 
 ## Scope note
 

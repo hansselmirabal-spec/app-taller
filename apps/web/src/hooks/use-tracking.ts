@@ -3,7 +3,7 @@ import {
   getTrackingBoard, startTrackingProcess, completeTrackingProcess,
   blockTrackingProcess, unblockTrackingProcess, setTrackingExitDate,
   setTrackingResource, clearTrackingResource, getResourceAgenda,
-  addTrackingProcess, getResumeOptions,
+  addTrackingProcess, getResumeOptions, returnTrackingProcess,
   type TrackingBoard, type ResourceAgendaItem, type ResumeOptions,
 } from '@/lib/api';
 
@@ -51,6 +51,16 @@ export function useUnblockProcess() {
     mutationFn: ({ logId, technicianId, technicianName }: {
       logId: string; technicianId?: string; technicianName?: string;
     }) => unblockTrackingProcess(logId, technicianId, technicianName),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tracking-board'] }),
+  });
+}
+
+export function useReturnProcess() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ logId, reason, technicianId, technicianName }: {
+      logId: string; reason: string; technicianId: string; technicianName?: string;
+    }) => returnTrackingProcess(logId, reason, technicianId, technicianName),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tracking-board'] }),
   });
 }
