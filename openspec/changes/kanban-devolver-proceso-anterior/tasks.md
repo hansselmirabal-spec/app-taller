@@ -147,6 +147,19 @@ Readability and reliability had 3 real, cheap fixes, applied directly:
 - [ ] 7.1 [manual QA] return PREP→BODYWORK, confirm technician freed on capacity screen, redo BODYWORK, confirm PREP reappears `pending` and the card can then reach "Entregado" — code path traced end-to-end (backend PR1/PR2 tests + frontend wiring reviewed), but NOT click-tested in a real browser; left for human QAS per instructions
 - [x] 7.2 `pnpm typecheck` green (web)
 
+**Post-review fix (PR3, before merge)**: `review-reliability` confirmed all 5 focus points
+(button gate, highlight fix, `allDone` dedup, shared comparator, modal required-fields) were
+implemented correctly — the only real finding was that the entire PR3 frontend surface shipped
+with zero automated tests (the repo has no `.test.tsx`/RTL harness, so this matched an established,
+accepted limitation from prior changes this session). Closed the closeable part of that gap:
+`byProcessOrder` and the `allDone` dedup logic (previously inlined in `BodyshopScheduleBlock`) were
+both pure functions with no React dependency — extracted `computeAllDone()` as its own exported
+function and added `apps/web/src/__tests__/kanban-return-process-order.spec.ts` (6 tests, same
+pattern as `use-simulator-form.spec.ts`: import the page module directly, test the pure logic in
+isolation, no rendering). The genuinely React-dependent parts (the modal component, the button
+visibility JSX, `page.tsx`'s render tree) remain untested by design — no RTL harness exists in this
+repo, consistent with every other frontend PR this session.
+
 ## Scope note
 
 `blockedReason` in `ProcessSummary`/timeline display (design's Open Question #2) is deliberately

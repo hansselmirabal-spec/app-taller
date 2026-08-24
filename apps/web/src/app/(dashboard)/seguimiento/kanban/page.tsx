@@ -83,8 +83,22 @@ function diffBusinessDays(fromStr: string, toStr: string): number {
 // desempate para que se muestren en orden cronológico (mismo criterio aplicado
 // en 6 sitios del backend en PR1, spec: "Chronological ordering across
 // repeated processes").
-function byProcessOrder(a: TrackingProcessSummary, b: TrackingProcessSummary): number {
+export function byProcessOrder(a: TrackingProcessSummary, b: TrackingProcessSummary): number {
   return a.orderIndex - b.orderIndex || a.createdAt.localeCompare(b.createdAt);
+}
+
+// Espejo de la dedup del backend (`allMothersDone`, tracking.service.ts): una
+// devolución deja el log 'returned' antiguo para siempre en `allProcesses`
+// junto con la pasada nueva del mismo `processCode` — sin deduplicar por la
+// pasada más reciente, `allDone` quedaría false para siempre tras devolver.
+// 'returned' NO cuenta como completo; 'skipped' sí (a diferencia de 'returned').
+export function computeAllDone(processes: TrackingProcessSummary[]): boolean {
+  const latestByCode = new Map<string, TrackingProcessSummary>();
+  for (const p of [...processes].sort(byProcessOrder)) {
+    if (p.processCode !== 'AGENDA') latestByCode.set(p.processCode, p);
+  }
+  return [...latestByCode.values()]
+    .every(p => p.status === 'completed' || p.status === 'skipped');
 }
 
 interface TimelineEntry extends TrackingProcessSummary {
@@ -184,16 +198,7 @@ function BodyshopScheduleBlock({ card }: { card: TrackingCard }) {
   const realHours      = card.realTotalHours;               // solo procesos terminados
   const remainingHours = Math.max(0, card.plannedTotalHours - executedHours);
   const workDays       = workingDaysNeeded(card.plannedTotalHours);
-  // Espejo de la dedup del backend (`allMothersDone`, tracking.service.ts):
-  // una devolución deja el log 'returned' antiguo para siempre en `allProcesses`
-  // junto con la pasada nueva del mismo `processCode` — sin deduplicar por la
-  // pasada más reciente, `allDone` quedaría false para siempre tras devolver.
-  const latestByCode = new Map<string, TrackingProcessSummary>();
-  for (const p of [...card.allProcesses].sort(byProcessOrder)) {
-    if (p.processCode !== 'AGENDA') latestByCode.set(p.processCode, p);
-  }
-  const allDone = [...latestByCode.values()]
-    .every(p => p.status === 'completed' || p.status === 'skipped');
+  const allDone        = computeAllDone(card.allProcesses);
 
   // Fin estimado actualizado desde ahora con las horas que faltan
   const nowFinish = !allDone && remainingHours > 0
