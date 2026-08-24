@@ -4,8 +4,10 @@ import { TrackingService } from './tracking.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { WorkshopAccessGuard } from '../../common/guards/workshop-access.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
-import { IsOptional, IsString, IsNumber, Min } from 'class-validator';
+import { IsOptional, IsString, IsNotEmpty, IsUUID, IsNumber, MaxLength, Min } from 'class-validator';
 
 export class AddProcessDto {
   @IsString() processCode: string;
@@ -31,6 +33,17 @@ class BlockProcessDto {
 // legacy que no mandan body).
 export class UnblockProcessDto {
   @IsOptional() @IsString() technicianId?: string;
+  @IsOptional() @IsString() technicianName?: string;
+}
+
+// D1 (design): el motivo se guarda en blocked_reason (varchar(120)) — de
+// ahí el @MaxLength(120). technicianId es obligatorio (a diferencia de
+// UnblockProcessDto): "reanudar" tiene un snapshot al que caer si no viene
+// técnico, pero "devolver" siempre arranca una pasada nueva sin snapshot
+// previo posible.
+export class ReturnProcessDto {
+  @IsString() @IsNotEmpty() @MaxLength(120) reason: string;
+  @IsUUID() technicianId: string;
   @IsOptional() @IsString() technicianName?: string;
 }
 
@@ -126,6 +139,21 @@ export class TrackingController {
   @Get('process/:logId/resume-options')
   async getResumeOptions(@Param('logId') logId: string) {
     return wrap(await this.service.getResumeOptions(logId));
+  }
+
+  // D7: RolesGuard a nivel de MÉTODO (no de clase, como sí hace
+  // users.controller.ts:8) — sigue el patrón ya usado en este mismo
+  // controller (WorkshopAccessGuard en getBoard, PermissionsGuard en
+  // getProductivity): cada ruta compone sus propios guards, ninguna ruta
+  // existente cambia de comportamiento.
+  @Patch('process/:logId/return')
+  @UseGuards(RolesGuard)
+  @Roles('admin', 'admin_taller')
+  async returnProcess(
+    @Param('logId') logId: string,
+    @Body() dto: ReturnProcessDto,
+  ) {
+    return wrap(await this.service.returnToProcess(logId, dto.reason, dto.technicianId, dto.technicianName));
   }
 
   @Patch('exit-date/:sourceType/:sourceId')

@@ -67,26 +67,65 @@ batch) or add an `id`/sequence-based secondary tiebreak.
 
 ## Phase 3: PR2 — Return transaction, endpoint, and `completeProcess()` resolver (TDD)
 
-- [ ] 3.1 RED: reject non-MOTHER (`PARALLEL`) log → 400 — `tracking.service.spec.ts`
-- [ ] 3.2 RED: reject status not in `in_progress|blocked|pending` → 400 (covers double-return of `completed`/`skipped`/`returned`)
-- [ ] 3.3 RED: reject when no previous MOTHER exists (BODYWORK/AGENDA) → 400
-- [ ] 3.4 RED: reject when the previous process's latest pass is already `pending|in_progress|blocked` → 400
-- [ ] 3.5 RED: technician already `in_progress` elsewhere → 400 via `withTechnicianLock`'s existing `23505` mapping, not a raw DB error
-- [ ] 3.6 RED: successful return tx — current log → `'returned'` + `blockedReason`; old `bodyshop_process_techs` row deleted; new `in_progress` log created for `prev`; new `bodyshop_process_techs` row upserted; assert step order (status flip before insert, per the partial-unique-index constraint)
-- [ ] 3.7 RED: forced failure mid-transaction (e.g. tech upsert) → no partial writes persist
-- [ ] 3.8 RED: `completeProcess()` resolver — `'returned'` at `orderIndex` 2 wins over plain `pending` at `orderIndex` 3; regenerated log is created `pending`, not `in_progress`
-- [ ] 3.9 RED: `completeProcess()` resolver — two stacked `'returned'` logs (`orderIndex` 2 and 4) pick `orderIndex` 2
-- [ ] 3.10 RED: explicit test asserting planned hours are NOT deduplicated across passes — both passes' `plannedHours` sum into duration/`suggestedExitDate` (locks the accepted-duplication decision, not a silent QAS discovery)
-- [ ] 3.11 GREEN: implement `returnToProcess(logId, reason, technicianId, technicianName?)` in `tracking.service.ts` inside `withTechnicianLock()`, steps a-f per design's Data Flow
-- [ ] 3.12 GREEN: replace `completeProcess()` next-MOTHER resolution (`tracking.service.ts:619-639`) with the unified `pending | returned` resolver
-- [ ] 3.13 GREEN: add `ReturnProcessDto` (`reason` `@IsNotEmpty @MaxLength(120)`, `technicianId` `@IsUUID`, `technicianName` optional) in `tracking.controller.ts`
-- [ ] 3.14 GREEN: add `PATCH process/:logId/return` with `@UseGuards(RolesGuard)` + `@Roles('admin','admin_taller')` at the route level (not class-level), `tracking.controller.ts`
-- [ ] 3.15 RED+GREEN: controller test — non-`admin`/`admin_taller` role rejected 403, no service call — `tracking.controller.spec.ts`
+- [x] 3.1 RED: reject non-MOTHER (`PARALLEL`) log → 400 — `tracking.service.spec.ts`
+- [x] 3.2 RED: reject status not in `in_progress|blocked|pending` → 400 (covers double-return of `completed`/`skipped`/`returned`)
+- [x] 3.3 RED: reject when no previous MOTHER exists (BODYWORK/AGENDA) → 400
+- [x] 3.4 RED: reject when the previous process's latest pass is already `pending|in_progress|blocked` → 400
+- [x] 3.5 RED: technician already `in_progress` elsewhere → 400 via `withTechnicianLock`'s existing `23505` mapping, not a raw DB error
+- [x] 3.6 RED: successful return tx — current log → `'returned'` + `blockedReason`; old `bodyshop_process_techs` row deleted; new `in_progress` log created for `prev`; new `bodyshop_process_techs` row upserted; assert step order (status flip before insert, per the partial-unique-index constraint)
+- [x] 3.7 RED: forced failure mid-transaction (e.g. tech upsert) → no partial writes persist
+- [x] 3.8 RED: `completeProcess()` resolver — `'returned'` at `orderIndex` 2 wins over plain `pending` at `orderIndex` 3; regenerated log is created `pending`, not `in_progress`
+- [x] 3.9 RED: `completeProcess()` resolver — two stacked `'returned'` logs (`orderIndex` 2 and 4) pick `orderIndex` 2
+- [x] 3.10 RED: explicit test asserting planned hours are NOT deduplicated across passes — both passes' `plannedHours` sum into duration/`suggestedExitDate` (locks the accepted-duplication decision, not a silent QAS discovery)
+- [x] 3.11 GREEN: implement `returnToProcess(logId, reason, technicianId, technicianName?)` in `tracking.service.ts` inside `withTechnicianLock()`, steps a-f per design's Data Flow
+- [x] 3.12 GREEN: replace `completeProcess()` next-MOTHER resolution (`tracking.service.ts:619-639`) with the unified `pending | returned` resolver
+- [x] 3.13 GREEN: add `ReturnProcessDto` (`reason` `@IsNotEmpty @MaxLength(120)`, `technicianId` `@IsUUID`, `technicianName` optional) in `tracking.controller.ts`
+- [x] 3.14 GREEN: add `PATCH process/:logId/return` with `@UseGuards(RolesGuard)` + `@Roles('admin','admin_taller')` at the route level (not class-level), `tracking.controller.ts`
+- [x] 3.15 RED+GREEN: controller test — non-`admin`/`admin_taller` role rejected 403, no service call — `tracking.controller.spec.ts`
+
+**Post-review fix applied during PR2 (tie-break secondary key)**: per the Phase 2
+note, `pickPreviousMother()`'s `createdAt` tie-break gained a third key —
+`b.id.localeCompare(a.id)` — because `returnToProcess()`'s transaction does two
+sequential `tracking_logs` writes inside one `dataSource.transaction()`, and
+Postgres `now()` returns the same value for every call within a single
+transaction (not just "probably the same" — guaranteed identical if the
+column defaults to `now()`). Sequential inserts alone would NOT have fixed
+this (statement order doesn't change `now()`'s value within one tx), so the
+secondary-key approach was chosen over "force sequential inserts." Covered by
+a new triangulation test asserting the pick is identical regardless of input
+array order (`tracking.service.spec.ts`, `pickPreviousMother — desempate
+secundario por id (PR2)`).
 
 ## Phase 4: PR2 — Verification
 
-- [ ] 4.1 `pnpm test` (api) green
-- [ ] 4.2 `pnpm typecheck` green (api+web)
+- [x] 4.1 `pnpm test` (api) green — 415 passed, 2 pre-existing skipped, 0 failed
+- [x] 4.2 `pnpm typecheck` green (api+web)
+
+**Post-review fixes (PR2, before merge)**: full 4R came back with 0 CRITICAL. Risk (1 WARNING,
+pre-existing) and resilience (1 WARNING, mirrors an existing pattern in `unblockProcess()`) were
+left documented, non-blocking — neither is introduced or worsened by this PR:
+- Risk: `technicianId` is accepted without checking it belongs to the same workshop as the entry
+  — same gap already present in `startProcess()`/`unblockProcess()`, not new here.
+- Resilience: the post-transaction `setPauseStatus()` step in `returnToProcess()` runs outside the
+  DB transaction (same shape as `unblockProcess()`) — if it throws, the caller sees an error for a
+  devolución that already committed successfully. Fixing this means revisiting the same point in
+  `unblockProcess()` too; out of scope for this change.
+
+Readability and reliability had 3 real, cheap fixes, applied directly:
+- 5 comments in `returnToProcess()` cited absolute line numbers of other functions
+  (`unblockProcess() líneas 530-534`, etc.) — these go stale the moment code above those functions
+  changes, with nothing to catch it. Replaced with function-name-only references.
+- `pickPreviousMother()`'s post-review comment (tie-break by `id`) overclaimed what it actually
+  protects: the only real call site (`returnToProcess()`) reads `allLogs` *before* entering the
+  transaction, so the "two writes in one transaction, same `now()`" scenario the comment used to
+  justify the fix isn't observable from there. Comment corrected to describe the real, narrower
+  residual risk (timestamp collision across two *separate* `returnToProcess()` calls) and to be
+  honest that a UUID tie-break makes the pick deterministic, not necessarily correct.
+- Task 3.10's test only asserted `plannedTotalHours`, never the actual effect the task description
+  claimed to lock in (`suggestedExitDate` shifting later). Added a second test with hours chosen to
+  cross the `WORK_HOURS_PER_DAY` threshold (9h duplicated vs. 5h deduped-equivalent) and asserts
+  `suggestedExitDate` is genuinely later for the duplicated case, not just checking an intermediate
+  number.
 
 ## Phase 5: PR3 — Frontend data layer
 
