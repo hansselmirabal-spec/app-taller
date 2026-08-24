@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import {
   useTrackingBoard, useStartProcess, useCompleteProcess,
   usePauseProcess, useUnblockProcess, useSetExitDate,
-  useSetResource, useClearResource, useAddProcess,
+  useSetResource, useClearResource, useAddProcess, useReturnProcess,
 } from '@/hooks/use-tracking';
 import { useWorkshopId } from '@/context/workshop-context';
 import { useWorkshops } from '@/hooks/use-workshops';
@@ -14,12 +14,14 @@ import { formatDate } from '@/lib/utils';
 import type { TrackingCard, TrackingColumn, TrackingProcessSummary } from '@/lib/api';
 import { InfoButton } from '@/components/ui/info-button';
 import { ResumeTechModal } from '@/components/kanban/resume-tech-modal';
+import { ReturnProcessModal } from '@/components/kanban/return-process-modal';
 import { useRequirePermission } from '@/hooks/use-require-permission';
+import { isAdminOrManager } from '@/lib/auth';
 import {
   AlertTriangle, RefreshCw, Car, Clock, TrendingDown,
   TrendingUp, Minus, Play, CheckCircle2, ChevronLeft, ChevronRight,
   PauseCircle, X, PlayCircle, CheckCheck, Loader2, Circle,
-  CalendarDays, Pencil, Check, Package, PackageX, Plus, UserX,
+  CalendarDays, Pencil, Check, Package, PackageX, Plus, UserX, Undo2,
 } from 'lucide-react';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -76,6 +78,15 @@ function diffBusinessDays(fromStr: string, toStr: string): number {
   return count;
 }
 
+// Comparador compartido `orderIndex ASC, createdAt ASC` — dos pasadas del mismo
+// proceso (devolución) comparten `processCode`/`orderIndex`; `createdAt` es el
+// desempate para que se muestren en orden cronológico (mismo criterio aplicado
+// en 6 sitios del backend en PR1, spec: "Chronological ordering across
+// repeated processes").
+function byProcessOrder(a: TrackingProcessSummary, b: TrackingProcessSummary): number {
+  return a.orderIndex - b.orderIndex || a.createdAt.localeCompare(b.createdAt);
+}
+
 interface TimelineEntry extends TrackingProcessSummary {
   estStart: Date;
   estEnd: Date;
@@ -85,7 +96,7 @@ interface TimelineEntry extends TrackingProcessSummary {
 function buildTimeline(allProcesses: TrackingProcessSummary[]): TimelineEntry[] {
   const procs = allProcesses
     .filter(p => p.processCode !== 'AGENDA')
-    .sort((a, b) => a.orderIndex - b.orderIndex);
+    .sort(byProcessOrder);
 
   // Cursor inicial: si algún proceso ya arrancó úsalo, si no usa ahora
   const firstStarted = procs.find(p => p.startedAt);
@@ -153,7 +164,7 @@ function BodyshopScheduleBlock({ card }: { card: TrackingCard }) {
   // Hora de inicio real del trabajo (primer proceso no-AGENDA con startedAt)
   const workStartStr = card.allProcesses
     .filter(p => p.processCode !== 'AGENDA')
-    .sort((a, b) => a.orderIndex - b.orderIndex)
+    .sort(byProcessOrder)
     .find(p => p.startedAt)?.startedAt ?? null;
   const workStart = workStartStr ? new Date(workStartStr) : null;
 
@@ -173,8 +184,15 @@ function BodyshopScheduleBlock({ card }: { card: TrackingCard }) {
   const realHours      = card.realTotalHours;               // solo procesos terminados
   const remainingHours = Math.max(0, card.plannedTotalHours - executedHours);
   const workDays       = workingDaysNeeded(card.plannedTotalHours);
-  const allDone        = card.allProcesses
-    .filter(p => p.processCode !== 'AGENDA')
+  // Espejo de la dedup del backend (`allMothersDone`, tracking.service.ts):
+  // una devolución deja el log 'returned' antiguo para siempre en `allProcesses`
+  // junto con la pasada nueva del mismo `processCode` — sin deduplicar por la
+  // pasada más reciente, `allDone` quedaría false para siempre tras devolver.
+  const latestByCode = new Map<string, TrackingProcessSummary>();
+  for (const p of [...card.allProcesses].sort(byProcessOrder)) {
+    if (p.processCode !== 'AGENDA') latestByCode.set(p.processCode, p);
+  }
+  const allDone = [...latestByCode.values()]
     .every(p => p.status === 'completed' || p.status === 'skipped');
 
   // Fin estimado actualizado desde ahora con las horas que faltan
@@ -404,6 +422,7 @@ function ProcessStatusIcon({ status }: { status: string }) {
   if (status === 'completed')   return <CheckCheck className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />;
   if (status === 'in_progress') return <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin flex-shrink-0" />;
   if (status === 'blocked')     return <PauseCircle className="h-3.5 w-3.5 text-orange-500 flex-shrink-0" />;
+  if (status === 'returned')    return <Undo2 className="h-3.5 w-3.5 text-indigo-500 flex-shrink-0" />;
   return <Circle className="h-3.5 w-3.5 text-slate-300 flex-shrink-0" />;
 }
 
@@ -806,8 +825,8 @@ function ExitDateSection({
 // ── Modal de detalle ───────────────────────────────────────────────────────────
 
 function CardDetailModal({
-  card, onClose, onStart, onComplete, onPause, onUnblock,
-  loadingLogId, pausingLogId, unblockingLogId,
+  card, onClose, onStart, onComplete, onPause, onUnblock, onReturn,
+  loadingLogId, pausingLogId, unblockingLogId, returningLogId,
   onSaveExitDate, isSavingExitDate,
   onSetResource, onClearResource, isResourcePending,
 }: {
@@ -817,9 +836,11 @@ function CardDetailModal({
   onComplete: (logId: string) => void;
   onPause:    (logId: string, processName: string) => void;
   onUnblock:  (logId: string, processName: string) => void;
+  onReturn:   (logId: string, processName: string, previousProcessName: string) => void;
   loadingLogId:    string | null;
   pausingLogId:    string | null;
   unblockingLogId: string | null;
+  returningLogId:  string | null;
   onSaveExitDate: (date: string | null) => void;
   isSavingExitDate: boolean;
   onSetResource:  (note: string) => void;
@@ -851,7 +872,7 @@ function CardDetailModal({
     ? { border: 'border-l-blue-400',  bg: 'bg-blue-50/40' }
     : SEMAPHORE[card.semaphore];
 
-  const isActing = !!loadingLogId || !!pausingLogId || !!unblockingLogId;
+  const isActing = !!loadingLogId || !!pausingLogId || !!unblockingLogId || !!returningLogId;
 
   return (
     <div
@@ -908,12 +929,16 @@ function CardDetailModal({
           )}
 
           {timeline.map(p => {
-            const isCurrent = cp?.processCode === p.processCode;
+            // Comparar por logId, no processCode: una devolución deja dos logs
+            // con el mismo processCode ('returned' + el nuevo 'in_progress'),
+            // y solo el log que es efectivamente currentProcess debe resaltarse.
+            const isCurrent = cp?.logId === p.logId;
             const statusColors = {
               completed:   'border-emerald-200 bg-emerald-50/60',
               in_progress: 'border-blue-200 bg-blue-50/60',
               blocked:     'border-orange-200 bg-orange-50/60',
               pending:     'border-slate-200 bg-slate-50/50',
+              returned:    'border-indigo-200 bg-indigo-50/60',
             }[p.status] ?? 'border-slate-200 bg-slate-50/50';
 
             const statusLabel = {
@@ -921,6 +946,7 @@ function CardDetailModal({
               in_progress: 'En curso',
               blocked:     'Pausado',
               pending:     'Pendiente',
+              returned:    'Devuelto',
             }[p.status] ?? p.status;
 
             const statusBadge = {
@@ -928,6 +954,7 @@ function CardDetailModal({
               in_progress: 'bg-blue-100 text-blue-700',
               blocked:     'bg-orange-100 text-orange-700',
               pending:     'bg-slate-100 text-slate-500',
+              returned:    'bg-indigo-100 text-indigo-700',
             }[p.status] ?? 'bg-slate-100 text-slate-500';
 
             return (
@@ -1038,7 +1065,7 @@ function CardDetailModal({
           {(() => {
             const workStartStr = card.allProcesses
               .filter(p => p.processCode !== 'AGENDA')
-              .sort((a, b) => a.orderIndex - b.orderIndex)
+              .sort(byProcessOrder)
               .find(p => p.startedAt)?.startedAt ?? null;
             const workStart = workStartStr ? new Date(workStartStr) : null;
             const laboralFinish = workStart
@@ -1217,7 +1244,14 @@ function CardDetailModal({
         )}
 
         {cp && !isParallelPlaceholder && (
-          <div className="flex-shrink-0 p-4 border-t border-slate-100 bg-slate-50/50 rounded-b-2xl">
+          <div className="flex-shrink-0 p-4 border-t border-slate-100 bg-slate-50/50 rounded-b-2xl space-y-2">
+            {isAdminOrManager() && cp.canReturn && cp.previousProcessName && (
+              <button type="button" disabled={isActing} onClick={() => onReturn(cp.logId, cp.processName, cp.previousProcessName!)}
+                className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 transition-colors">
+                <Undo2 className="h-3.5 w-3.5" />
+                {returningLogId === cp.logId ? 'Devolviendo...' : `Devolver a ${cp.previousProcessName}`}
+              </button>
+            )}
             <div className="flex gap-2">
               {isBlocked ? (
                 <button type="button" disabled={!!unblockingLogId} onClick={() => onUnblock(cp.logId, cp.processName)}
@@ -1817,6 +1851,8 @@ export default function TrackingKanbanPage() {
   const [unblockingLogId, setUnblockingLogId] = useState<string | null>(null);
   const [pauseModal, setPauseModal]         = useState<{ logId: string; processName: string } | null>(null);
   const [resumeModal, setResumeModal]       = useState<{ logId: string; processName: string } | null>(null);
+  const [returnModal, setReturnModal]       = useState<{ logId: string; processName: string; previousProcessName: string } | null>(null);
+  const [returningLogId, setReturningLogId] = useState<string | null>(null);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [filterTech, setFilterTech]         = useState('');
   const [filterSemaphore, setFilterSemaphore] = useState('');
@@ -1829,6 +1865,7 @@ export default function TrackingKanbanPage() {
   const completeMutation = useCompleteProcess();
   const pauseMutation    = usePauseProcess();
   const unblockMutation  = useUnblockProcess();
+  const returnMutation   = useReturnProcess();
   const exitDateMutation = useSetExitDate();
   const setResourceMutation   = useSetResource();
   const clearResourceMutation = useClearResource();
@@ -1894,6 +1931,21 @@ export default function TrackingKanbanPage() {
       setResumeModal(null);
     } finally {
       setUnblockingLogId(null);
+    }
+  }
+
+  function handleReturnOpen(logId: string, processName: string, previousProcessName: string) {
+    setReturnModal({ logId, processName, previousProcessName });
+  }
+
+  async function handleReturnConfirm(reason: string, technicianId: string, technicianName: string) {
+    if (!returnModal) return;
+    setReturningLogId(returnModal.logId);
+    try {
+      await returnMutation.mutateAsync({ logId: returnModal.logId, reason, technicianId, technicianName });
+      setReturnModal(null);
+    } finally {
+      setReturningLogId(null);
     }
   }
 
@@ -1981,6 +2033,17 @@ export default function TrackingKanbanPage() {
         />
       )}
 
+      {/* Modal de confirmación de devolución al proceso anterior (z-50, sobre el modal de detalle) */}
+      {returnModal && (
+        <ReturnProcessModal
+          processName={returnModal.processName}
+          previousProcessName={returnModal.previousProcessName}
+          onConfirm={handleReturnConfirm}
+          onClose={() => setReturnModal(null)}
+          isLoading={returnMutation.isPending}
+        />
+      )}
+
       {/* Modal de detalle de card (z-40) */}
       {selectedCard && (
         <CardDetailModal
@@ -1990,9 +2053,11 @@ export default function TrackingKanbanPage() {
           onComplete={handleComplete}
           onPause={handlePauseOpen}
           onUnblock={handleUnblockOpen}
+          onReturn={handleReturnOpen}
           loadingLogId={loadingLogId}
           pausingLogId={pausingLogId}
           unblockingLogId={unblockingLogId}
+          returningLogId={returningLogId}
           onSaveExitDate={handleSaveExitDate}
           isSavingExitDate={exitDateMutation.isPending}
           onSetResource={note => setResourceMutation.mutate({ entryId: selectedCard.sourceId, note })}
