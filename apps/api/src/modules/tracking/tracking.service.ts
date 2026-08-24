@@ -84,6 +84,7 @@ export interface ProcessSummary {
   plannedHours: number;
   startedAt: string | null;
   completedAt: string | null;
+  createdAt: string;
   status: string;
   realHours: number | null;
   deviation: number | null;
@@ -111,6 +112,8 @@ export interface TrackingCard {
     startedAt: string | null;
     status: string;
     blockedReason: string | null;
+    canReturn: boolean;
+    previousProcessName: string | null;
   } | null;
   plannedTotalHours: number;
   realTotalHours: number;
@@ -618,7 +621,7 @@ export class TrackingService {
       // Avanzar al siguiente proceso MADRE pendiente
       const nextMotherPending = await this.logRepo.findOne({
         where: { sourceType: log.sourceType, sourceId: log.sourceId, status: 'pending', processType: 'MOTHER' } as any,
-        order: { orderIndex: 'ASC' },
+        order: { orderIndex: 'ASC', createdAt: 'ASC' },
       });
       if (nextMotherPending) {
         nextMotherPending.status = 'in_progress';
@@ -677,7 +680,7 @@ export class TrackingService {
     const allIds  = [...mechIds, ...bsIds];
 
     const logs = allIds.length > 0
-      ? await this.logRepo.find({ where: { sourceId: In(allIds) }, order: { orderIndex: 'ASC' } })
+      ? await this.logRepo.find({ where: { sourceId: In(allIds) }, order: { orderIndex: 'ASC', createdAt: 'ASC' } })
       : [];
 
     const logsBySource = new Map<string, TrackingLog[]>();
@@ -693,7 +696,7 @@ export class TrackingService {
         .map(async a => {
           const svc = (a as any).serviceType;
           await this.initForMechanic(a.id, svc?.name ?? 'Trabajo mecánico', Number(svc?.durationHours ?? 0));
-          const newLogs = await this.logRepo.find({ where: { sourceId: a.id }, order: { orderIndex: 'ASC' } });
+          const newLogs = await this.logRepo.find({ where: { sourceId: a.id }, order: { orderIndex: 'ASC', createdAt: 'ASC' } });
           logsBySource.set(a.id, newLogs);
         }),
       ...entries
@@ -715,7 +718,7 @@ export class TrackingService {
                 { name: 'Pintura',     code: 'PAINT',    order: 3, hours: Number((e as any).paintHours)    || 0 },
               ];
           await this.initForBodyshop(e.id, procs);
-          const newLogs = await this.logRepo.find({ where: { sourceId: e.id }, order: { orderIndex: 'ASC' } });
+          const newLogs = await this.logRepo.find({ where: { sourceId: e.id }, order: { orderIndex: 'ASC', createdAt: 'ASC' } });
           logsBySource.set(e.id, newLogs);
         }),
     ]);
@@ -820,12 +823,25 @@ export class TrackingService {
   async getCardProcesses(sourceType: 'mechanic' | 'bodyshop', sourceId: string): Promise<ProcessSummary[]> {
     const logs = await this.logRepo.find({
       where: { sourceType, sourceId },
-      order: { orderIndex: 'ASC' },
+      order: { orderIndex: 'ASC', createdAt: 'ASC' },
     });
     return logs.map(l => this.toProcessSummary(l));
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
+
+  // Regla D4: el proceso MADRE anterior es el de mayor orderIndex estrictamente
+  // menor al actual, excluyendo PARALLEL y AGENDA — orderIndex-1 no sirve porque
+  // BODYSHOP_PROCESS_ORDER tiene huecos (paralelos intercalados, procesos con
+  // 0 horas) y hay un PARALLEL (MECHANIC, 5) entre dos MOTHER (POLISH 4,
+  // FINAL_CONTROL 6). Si hay varias pasadas del mismo processCode empatadas en
+  // orderIndex, se queda con la más nueva (createdAt DESC).
+  private pickPreviousMother(logs: TrackingLog[], current: TrackingLog): TrackingLog | null {
+    return logs
+      .filter(l => l.processType !== 'PARALLEL' && l.processCode !== 'AGENDA'
+                && l.orderIndex < current.orderIndex)
+      .sort((a, b) => b.orderIndex - a.orderIndex || b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null;
+  }
 
   private buildCard(
     sourceId: string,
@@ -849,7 +865,12 @@ export class TrackingService {
     logs: TrackingLog[],
   ): TrackingCard {
     const now = new Date();
-    const sorted = [...logs].sort((a, b) => a.orderIndex - b.orderIndex);
+    // orderIndex ASC, createdAt ASC (D5): dos pasadas del mismo processCode
+    // comparten orderIndex y el orden de llegada de Postgres no está
+    // garantizado en los empates — createdAt como desempate asegura que la
+    // pasada más nueva quede siempre al final (histórico cronológico y
+    // "último write gana" para el dedup de allMothersDone más abajo).
+    const sorted = [...logs].sort((a, b) => a.orderIndex - b.orderIndex || a.createdAt.getTime() - b.createdAt.getTime());
 
     const mothers   = sorted.filter(l => l.processType !== 'PARALLEL');
     const parallels = sorted.filter(l => l.processType === 'PARALLEL');
@@ -860,8 +881,17 @@ export class TrackingService {
     const firstPending = mothers.find(l => l.status === 'pending');
     const currentLog   = inProgress ?? firstBlocked ?? firstPending ?? null;
 
-    const allMothersDone = mothers.length > 0 && mothers.filter(l => l.processCode !== 'AGENDA')
-      .every(l => l.status === 'completed' || l.status === 'skipped');
+    // D3: un log 'returned' nunca desaparece — tras devolver y rehacer el
+    // proceso quedan dos pasadas con el mismo processCode. Si se evaluara
+    // "done" sobre TODOS los logs, la pasada 'returned' vieja bloquearía
+    // "Entregado" para siempre. Se deduplica quedándose con la última pasada
+    // por processCode (gana la última en `mothers`, que ya viene ordenado
+    // createdAt ASC) y se evalúa completitud solo sobre esa lista.
+    const latestMothers = new Map<string, TrackingLog>();
+    for (const l of mothers) latestMothers.set(l.processCode, l);
+    const evaluatedMothers = [...latestMothers.values()].filter(l => l.processCode !== 'AGENDA');
+    const allMothersDone = evaluatedMothers.length > 0
+      && evaluatedMothers.every(l => l.status === 'completed' || l.status === 'skipped');
     const hasActiveParallel = parallels.some(l => l.status === 'pending' || l.status === 'in_progress' || l.status === 'blocked');
     const parallelBlocking  = allMothersDone && hasActiveParallel;
     const allDone = allMothersDone && !hasActiveParallel;
@@ -896,6 +926,10 @@ export class TrackingService {
       .filter(l => l.processCode !== 'AGENDA' && l.status === 'completed' && l.startedAt && l.completedAt)
       .reduce((s, l) => s + (l.completedAt!.getTime() - l.startedAt!.getTime()) / 3_600_000, 0);
 
+    // D4: false para PARALLEL, AGENDA y el primer proceso madre — pickPreviousMother
+    // ya filtra esos casos y devuelve null, así que basta con chequear el resultado.
+    const previousMother = currentLog ? this.pickPreviousMother(sorted, currentLog) : null;
+
     return {
       id: `${sourceType}:${sourceId}`,
       sourceId,
@@ -915,6 +949,8 @@ export class TrackingService {
         startedAt:     currentLog.startedAt?.toISOString() ?? null,
         status:        currentLog.status,
         blockedReason: currentLog.blockedReason ?? null,
+        canReturn:            previousMother !== null,
+        previousProcessName:  previousMother?.processName ?? null,
       } : parallelBlocking ? {
         logId:         '__parallel__',
         processCode:   '__PARALLEL_BLOCKING__',
@@ -924,6 +960,8 @@ export class TrackingService {
         startedAt:     null,
         status:        'in_progress',
         blockedReason: 'Proceso paralelo pendiente bloquea finalización',
+        canReturn:            false,
+        previousProcessName:  null,
       } : null,
       plannedTotalHours: Math.round(plannedTotalHours * 100) / 100,
       realTotalHours:    Math.round(realTotalHours    * 100) / 100,
@@ -983,7 +1021,7 @@ export class TrackingService {
     return Promise.all(entries.map(async e => {
       const logs = await this.logRepo.find({
         where: { sourceType: 'bodyshop', sourceId: e.id },
-        order: { orderIndex: 'ASC' },
+        order: { orderIndex: 'ASC', createdAt: 'ASC' },
       });
       const currentLog = logs.find(l => l.status === 'in_progress' || l.status === 'blocked')
         ?? logs.find(l => l.status === 'pending') ?? null;
@@ -1184,6 +1222,7 @@ export class TrackingService {
       plannedHours: Number(l.plannedHours),
       startedAt:    l.startedAt?.toISOString()  ?? null,
       completedAt:  l.completedAt?.toISOString() ?? null,
+      createdAt:    l.createdAt.toISOString(),
       status:       l.status,
       realHours,
       deviation:    realHours !== null ? Math.round((realHours - Number(l.plannedHours)) * 100) / 100 : null,

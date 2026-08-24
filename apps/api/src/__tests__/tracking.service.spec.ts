@@ -1444,4 +1444,190 @@ describe('TrackingService', () => {
       expect(processTechRepo.rows.has('entry-int::PAINT')).toBe(false);
     });
   });
+
+  // ── PR1: fundación "devolver a proceso anterior" ────────────────────────────
+
+  describe('pickPreviousMother (PR1)', () => {
+    it('salta PARALLEL y AGENDA — desde FINAL_CONTROL(6) llega a POLISH(4), nunca a MECHANIC(5)', async () => {
+      const { service } = await build();
+
+      const logs = [
+        makeLog({ id: 'l-agenda', processCode: 'AGENDA',        orderIndex: 0, processType: 'MOTHER' }),
+        makeLog({ id: 'l-bw',     processCode: 'BODYWORK',      orderIndex: 1, processType: 'MOTHER' }),
+        makeLog({ id: 'l-prep',   processCode: 'PREP',          orderIndex: 2, processType: 'MOTHER' }),
+        makeLog({ id: 'l-paint',  processCode: 'PAINT',         orderIndex: 3, processType: 'MOTHER' }),
+        makeLog({ id: 'l-polish', processCode: 'POLISH',        orderIndex: 4, processType: 'MOTHER' }),
+        makeLog({ id: 'l-mech',   processCode: 'MECHANIC',      orderIndex: 5, processType: 'PARALLEL' }),
+        makeLog({ id: 'l-fc',     processCode: 'FINAL_CONTROL', orderIndex: 6, processType: 'MOTHER' }),
+      ];
+      const current = logs.find(l => l.id === 'l-fc')!;
+
+      const prev = (service as any).pickPreviousMother(logs, current);
+      expect(prev.id).toBe('l-polish');
+    });
+
+    it('retorna null cuando el proceso actual es el primero (solo AGENDA lo precede)', async () => {
+      const { service } = await build();
+      const logs = [
+        makeLog({ id: 'l-agenda', processCode: 'AGENDA',   orderIndex: 0, processType: 'MOTHER' }),
+        makeLog({ id: 'l-bw',     processCode: 'BODYWORK', orderIndex: 1, processType: 'MOTHER' }),
+      ];
+      const current = logs.find(l => l.id === 'l-bw')!;
+
+      const prev = (service as any).pickPreviousMother(logs, current);
+      expect(prev).toBeNull();
+    });
+
+    it('con dos pasadas del mismo orderIndex, elige la más nueva por createdAt', async () => {
+      const { service } = await build();
+      const logs = [
+        makeLog({
+          id: 'l-bw', processCode: 'BODYWORK', orderIndex: 1, processType: 'MOTHER',
+          status: 'completed', createdAt: new Date('2026-06-10T08:00:00Z'),
+        }),
+        makeLog({
+          id: 'l-bw-redo', processCode: 'BODYWORK', orderIndex: 1, processType: 'MOTHER',
+          status: 'in_progress', createdAt: new Date('2026-06-11T08:00:00Z'),
+        }),
+        makeLog({ id: 'l-prep', processCode: 'PREP', orderIndex: 2, processType: 'MOTHER' }),
+      ];
+      const current = logs.find(l => l.id === 'l-prep')!;
+
+      const prev = (service as any).pickPreviousMother(logs, current);
+      expect(prev.id).toBe('l-bw-redo');
+    });
+  });
+
+  describe('buildCard — allMothersDone deduplicado por última pasada (PR1)', () => {
+    it('la última pasada en "returned" bloquea la finalización aunque el resto esté completo', async () => {
+      const { service } = await build();
+      const logs = [
+        makeLog({ id: 'l-agenda', processCode: 'AGENDA',   orderIndex: 0, processType: 'MOTHER', status: 'completed', plannedHours: 0 }),
+        makeLog({ id: 'l-bw',     processCode: 'BODYWORK', orderIndex: 1, processType: 'MOTHER', status: 'completed' }),
+        makeLog({ id: 'l-prep',   processCode: 'PREP',     orderIndex: 2, processType: 'MOTHER', status: 'returned' }),
+      ];
+
+      const card = (service as any).buildCard(ENTRY_ID, 'bodyshop', {
+        status: 'in_progress', plate: 'ABC', customerName: 'Test', vehicleType: null,
+        techName: null, serviceOrType: null, entryDate: '2026-06-10', exitDate: null,
+      }, logs);
+
+      expect(card.semaphore).not.toBe('green');
+    });
+
+    it('una pasada "returned" superada por una pasada "completed" más nueva del mismo proceso SÍ permite terminar', async () => {
+      const { service } = await build();
+      const logs = [
+        makeLog({ id: 'l-agenda', processCode: 'AGENDA', orderIndex: 0, processType: 'MOTHER', status: 'completed', plannedHours: 0 }),
+        makeLog({ id: 'l-bw',     processCode: 'BODYWORK', orderIndex: 1, processType: 'MOTHER', status: 'completed' }),
+        makeLog({
+          id: 'l-prep-old', processCode: 'PREP', orderIndex: 2, processType: 'MOTHER', status: 'returned',
+          createdAt: new Date('2026-06-10T09:00:00Z'),
+        }),
+        makeLog({
+          id: 'l-prep-redo', processCode: 'PREP', orderIndex: 2, processType: 'MOTHER', status: 'completed',
+          plannedHours: 2, createdAt: new Date('2026-06-12T09:00:00Z'),
+          startedAt: new Date('2026-06-12T09:00:00Z'), completedAt: new Date('2026-06-12T11:00:00Z'),
+        }),
+      ];
+
+      const card = (service as any).buildCard(ENTRY_ID, 'bodyshop', {
+        status: 'in_progress', plate: 'ABC', customerName: 'Test', vehicleType: null,
+        techName: null, serviceOrType: null, entryDate: '2026-06-10', exitDate: null,
+      }, logs);
+
+      expect(card.currentProcess).toBeNull();
+      expect(card.semaphore).toBe('green');
+    });
+
+    it('"skipped" sigue contando como completo, sin verse afectado por la regla de dedup', async () => {
+      const { service } = await build();
+      const logs = [
+        makeLog({ id: 'l-agenda', processCode: 'AGENDA',   orderIndex: 0, processType: 'MOTHER', status: 'completed', plannedHours: 0 }),
+        makeLog({ id: 'l-bw',     processCode: 'BODYWORK', orderIndex: 1, processType: 'MOTHER', status: 'completed' }),
+        makeLog({ id: 'l-prep',   processCode: 'PREP',     orderIndex: 2, processType: 'MOTHER', status: 'skipped' }),
+      ];
+
+      const card = (service as any).buildCard(ENTRY_ID, 'bodyshop', {
+        status: 'in_progress', plate: 'ABC', customerName: 'Test', vehicleType: null,
+        techName: null, serviceOrType: null, entryDate: '2026-06-10', exitDate: null,
+      }, logs);
+
+      expect(card.currentProcess).toBeNull();
+      expect(card.semaphore).toBe('green');
+    });
+  });
+
+  describe('buildCard — orden cronológico entre pasadas repetidas (PR1)', () => {
+    it('dos pasadas con el mismo orderIndex se ordenan por createdAt ascendente en allProcesses', async () => {
+      const { service } = await build();
+      const logs = [
+        makeLog({ id: 'l-prep-redo', processCode: 'PREP', orderIndex: 2, createdAt: new Date('2026-06-12T09:00:00Z') }),
+        makeLog({ id: 'l-prep-old',  processCode: 'PREP', orderIndex: 2, createdAt: new Date('2026-06-10T09:00:00Z') }),
+      ];
+
+      const card = (service as any).buildCard(ENTRY_ID, 'bodyshop', {
+        status: 'in_progress', plate: 'ABC', customerName: 'Test', vehicleType: null,
+        techName: null, serviceOrType: null, entryDate: '2026-06-10', exitDate: null,
+      }, logs);
+
+      expect(card.allProcesses.map((p: any) => p.logId)).toEqual(['l-prep-old', 'l-prep-redo']);
+    });
+
+    it('orderIndex sigue siendo la clave primaria: un proceso de orderIndex mayor nunca queda antes por su createdAt', async () => {
+      const { service } = await build();
+      const logs = [
+        makeLog({ id: 'l-paint',     processCode: 'PAINT', orderIndex: 3, createdAt: new Date('2026-06-09T09:00:00Z') }),
+        makeLog({ id: 'l-prep-redo', processCode: 'PREP',  orderIndex: 2, createdAt: new Date('2026-06-12T09:00:00Z') }),
+        makeLog({ id: 'l-prep-old',  processCode: 'PREP',  orderIndex: 2, createdAt: new Date('2026-06-10T09:00:00Z') }),
+      ];
+
+      const card = (service as any).buildCard(ENTRY_ID, 'bodyshop', {
+        status: 'in_progress', plate: 'ABC', customerName: 'Test', vehicleType: null,
+        techName: null, serviceOrType: null, entryDate: '2026-06-10', exitDate: null,
+      }, logs);
+
+      expect(card.allProcesses.map((p: any) => p.logId)).toEqual(['l-prep-old', 'l-prep-redo', 'l-paint']);
+    });
+  });
+
+  describe('buildCard — currentProcess.canReturn / previousProcessName (PR1)', () => {
+    it('expone canReturn=true y previousProcessName cuando existe un MOTHER anterior', async () => {
+      const { service } = await build();
+      const logs = [
+        makeLog({ id: 'l-bw', processCode: 'BODYWORK', processName: 'Chapería', orderIndex: 1, status: 'completed' }),
+        makeLog({
+          id: 'l-prep', processCode: 'PREP', processName: 'Preparación', orderIndex: 2,
+          status: 'in_progress', startedAt: new Date('2026-06-10T08:00:00Z'),
+        }),
+      ];
+
+      const card = (service as any).buildCard(ENTRY_ID, 'bodyshop', {
+        status: 'in_progress', plate: 'ABC', customerName: 'Test', vehicleType: null,
+        techName: null, serviceOrType: null, entryDate: '2026-06-10', exitDate: null,
+      }, logs);
+
+      expect(card.currentProcess.canReturn).toBe(true);
+      expect(card.currentProcess.previousProcessName).toBe('Chapería');
+    });
+
+    it('expone canReturn=false en el primer proceso MOTHER (solo AGENDA lo precede)', async () => {
+      const { service } = await build();
+      const logs = [
+        makeLog({ id: 'l-agenda', processCode: 'AGENDA',   orderIndex: 0, status: 'completed' }),
+        makeLog({
+          id: 'l-bw', processCode: 'BODYWORK', orderIndex: 1,
+          status: 'in_progress', startedAt: new Date('2026-06-10T08:00:00Z'),
+        }),
+      ];
+
+      const card = (service as any).buildCard(ENTRY_ID, 'bodyshop', {
+        status: 'in_progress', plate: 'ABC', customerName: 'Test', vehicleType: null,
+        techName: null, serviceOrType: null, entryDate: '2026-06-10', exitDate: null,
+      }, logs);
+
+      expect(card.currentProcess.canReturn).toBe(false);
+      expect(card.currentProcess.previousProcessName).toBeNull();
+    });
+  });
 });

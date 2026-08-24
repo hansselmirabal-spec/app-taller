@@ -37,7 +37,7 @@ export class TrackingLog {
   completedAt: Date | null;
 
   @Column({ type: 'varchar', length: 20, default: 'pending' })
-  status: 'pending' | 'in_progress' | 'blocked' | 'completed' | 'skipped';
+  status: 'pending' | 'in_progress' | 'blocked' | 'completed' | 'skipped' | 'returned';
 
   @Column({ name: 'blocked_reason', type: 'varchar', length: 120, nullable: true })
   blockedReason: string | null;
