@@ -47,6 +47,24 @@ swap (~45), DTO+route (~20), plus ~110 test lines. PR3 is `api.ts`/`use-tracking
 - [x] 2.1 `pnpm test` (api) green
 - [x] 2.2 `pnpm typecheck` green (api+web)
 
+**Post-review fix (PR1, before merge)**: `review-reliability` found a real gap —
+none of the 10 new tests asserted that the `order: { orderIndex: 'ASC', createdAt:
+'ASC' }` comparator was actually wired into the 6 changed `logRepo.find`/`findOne`
+call sites (`completeProcess`'s `nextMotherPending` lookup, `getCardProcesses`,
+and `getBoard`'s two log fetches) — all 10 tests exercised `pickPreviousMother`/
+`buildCard` directly with pre-built arrays, never the repo call arguments. Fixed:
+added an assertion on `completeProcess`'s `nextMotherPending` `findOne` call, a
+new `getCardProcesses` describe block (had zero test coverage before this PR),
+and a loop over every `logRepo.find` call in `getBoard`'s shape test asserting
+any call that includes `order` uses the correct comparator. Also flagged, left
+for PR2 (not fixable/triggerable in PR1): `pickPreviousMother`'s `createdAt`
+tie-break has no secondary key (e.g. `id`) — if PR2's return transaction ever
+inserts two logs with the same `processCode`/`orderIndex` inside one DB
+transaction, Postgres `now()` could return an identical timestamp for both,
+making the tie-break non-deterministic. PR2's implementer should either force
+distinguishable `createdAt` ordering (e.g. sequential inserts, not a single
+batch) or add an `id`/sequence-based secondary tiebreak.
+
 ## Phase 3: PR2 — Return transaction, endpoint, and `completeProcess()` resolver (TDD)
 
 - [ ] 3.1 RED: reject non-MOTHER (`PARALLEL`) log → 400 — `tracking.service.spec.ts`

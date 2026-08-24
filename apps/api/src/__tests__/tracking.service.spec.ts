@@ -675,6 +675,13 @@ describe('TrackingService', () => {
       expect(result.completed.status).toBe('completed');
       expect(result.next).not.toBeNull();
       expect(result.next?.processCode).toBe('FINAL_CONTROL');
+      // El lookup del siguiente MOTHER debe pedir orderIndex ASC, createdAt
+      // ASC a la DB — sin esto, una entry con dos pasadas del mismo proceso
+      // (feature de devolver a proceso anterior) podría reactivar la pasada
+      // vieja en vez de la más reciente.
+      expect(logRepo.findOne).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        order: { orderIndex: 'ASC', createdAt: 'ASC' },
+      }));
     });
 
     it('throws NotFoundException when log does not exist', async () => {
@@ -843,6 +850,21 @@ describe('TrackingService', () => {
     });
   });
 
+  // ── getCardProcesses ─────────────────────────────────────────────────────
+
+  describe('getCardProcesses', () => {
+    it('pide a la DB orderIndex ASC, createdAt ASC — sin esto, dos pasadas del mismo proceso podrían mostrarse fuera de orden cronológico', async () => {
+      const logRepo = makeLogRepo({ find: jest.fn().mockResolvedValue([]) });
+
+      const { service } = await build({ logRepo });
+      await service.getCardProcesses('bodyshop', 'entry-1');
+
+      expect(logRepo.find).toHaveBeenCalledWith(expect.objectContaining({
+        order: { orderIndex: 'ASC', createdAt: 'ASC' },
+      }));
+    });
+  });
+
   // ── getBoard ──────────────────────────────────────────────────────────────
 
   describe('getBoard', () => {
@@ -872,6 +894,18 @@ describe('TrackingService', () => {
       expect(board).toHaveProperty('alertCount');
       expect(board.workshopId).toBe(WS_ID);
       expect(Array.isArray(board.columns)).toBe(true);
+
+      // Toda llamada a logRepo.find() que pida orden debe pedir createdAt
+      // como desempate de orderIndex — si no, dos pasadas del mismo proceso
+      // (feature de devolver a proceso anterior) podrían mostrarse fuera de
+      // orden cronológico en el board.
+      const callsWithOrder = (logRepo.find as jest.Mock).mock.calls
+        .map(([args]: [any]) => args?.order)
+        .filter(Boolean);
+      expect(callsWithOrder.length).toBeGreaterThan(0);
+      for (const order of callsWithOrder) {
+        expect(order).toEqual({ orderIndex: 'ASC', createdAt: 'ASC' });
+      }
     });
 
     it('cancelled appointments do not appear in active columns', async () => {
