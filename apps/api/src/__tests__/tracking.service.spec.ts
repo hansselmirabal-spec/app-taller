@@ -153,7 +153,7 @@ function makeProcessTechRepo(overrides: any = {}) {
 // fallback de TrackingLog nuevo sin logRepo explícito, usado por
 // addProcessToBodyshop.
 function makeManager(opts: {
-  failOn?: 'log' | 'entry';
+  failOn?: 'log' | 'entry' | 'processTech';
   logRepo?: any; processTechRepo?: any; entryRepo?: any;
 } = {}) {
   const saved: { entity: any; data: any }[] = [];
@@ -171,6 +171,10 @@ function makeManager(opts: {
     save: async (entity: any, data: any) => {
       if (entity === TrackingLog && opts.failOn === 'log') throw new Error('DB down (log)');
       if (entity === BodyshopEntry && opts.failOn === 'entry') throw new Error('DB down (entry)');
+      // PR2: fuerza el fallo del paso (f) — upsert de bodyshop_process_techs
+      // en returnToProcess() — para probar que ningún write previo (status
+      // 'returned', log nuevo) queda confirmado si el upsert final falla.
+      if (entity === BodyshopProcessTech && opts.failOn === 'processTech') throw new Error('DB down (processTech)');
       saved.push({ entity, data });
       const repo = repoFor(entity);
       if (repo?.save) return repo.save(data);
@@ -180,6 +184,13 @@ function makeManager(opts: {
     findOne: async (entity: any, findOpts: any) => {
       const repo = repoFor(entity);
       return repo?.findOne ? repo.findOne(findOpts) : null;
+    },
+    // PR2: returnToProcess() borra bodyshop_process_techs vía manager (no vía
+    // this.processTechRepo.delete como pauseLog) para que quede atómico junto
+    // con el resto de la transacción — ver tracking.service.ts returnToProcess().
+    delete: async (entity: any, criteria: any) => {
+      const repo = repoFor(entity);
+      return repo?.delete ? repo.delete(criteria) : { affected: 0 };
     },
     // Solo usado por startProcess (rama MOTHER) para el UPDATE masivo de
     // hermanos in_progress→pending — siempre sobre TrackingLog.
@@ -664,9 +675,8 @@ describe('TrackingService', () => {
       const nextLog     = makeLog({ id: 'log-next', processCode: 'FINAL_CONTROL', orderIndex: 6, status: 'pending', processType: 'MOTHER' });
 
       const logRepo = makeLogRepo({
-        findOne: jest.fn()
-          .mockResolvedValueOnce(currentLog)   // findOne for the completed log
-          .mockResolvedValueOnce(nextLog),      // findOne for next pending MOTHER
+        findOne: jest.fn().mockResolvedValueOnce(currentLog), // findOne for the completed log
+        find:    jest.fn().mockResolvedValue([nextLog]),      // unified pending|returned resolver (D6/PR2)
       });
 
       const { service } = await build({ logRepo });
@@ -675,11 +685,11 @@ describe('TrackingService', () => {
       expect(result.completed.status).toBe('completed');
       expect(result.next).not.toBeNull();
       expect(result.next?.processCode).toBe('FINAL_CONTROL');
-      // El lookup del siguiente MOTHER debe pedir orderIndex ASC, createdAt
-      // ASC a la DB — sin esto, una entry con dos pasadas del mismo proceso
-      // (feature de devolver a proceso anterior) podría reactivar la pasada
-      // vieja en vez de la más reciente.
-      expect(logRepo.findOne).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      // El resolver unificado (PR2, D6) pide TODOS los logs del source
+      // ordenados orderIndex ASC, createdAt ASC — sin esto, una entry con dos
+      // pasadas del mismo proceso (feature de devolver a proceso anterior)
+      // podría reactivar la pasada vieja en vez de la más reciente.
+      expect(logRepo.find).toHaveBeenCalledWith(expect.objectContaining({
         order: { orderIndex: 'ASC', createdAt: 'ASC' },
       }));
     });
@@ -706,8 +716,8 @@ describe('TrackingService', () => {
       const logRepo = makeLogRepo({
         findOne: jest.fn()
           .mockResolvedValueOnce(currentLog)   // the log being completed
-          .mockResolvedValueOnce(null)         // no next pending MOTHER
           .mockResolvedValueOnce(parallelLog), // pending PARALLEL found
+        find: jest.fn().mockResolvedValue([]), // no later pending|returned MOTHER
       });
 
       const { service } = await build({ logRepo });
@@ -1662,6 +1672,232 @@ describe('TrackingService', () => {
 
       expect(card.currentProcess.canReturn).toBe(false);
       expect(card.currentProcess.previousProcessName).toBeNull();
+    });
+  });
+
+  // ── PR2: transacción "devolver a proceso anterior" ──────────────────────
+
+  describe('pickPreviousMother — desempate secundario por id (PR2)', () => {
+    it('con dos pasadas de igual orderIndex y createdAt idéntico (misma tx), el ganador es determinístico sin importar el orden de entrada', async () => {
+      const { service } = await build();
+      const tiedCreatedAt = new Date('2026-06-11T08:00:00Z');
+      const passA = makeLog({ id: 'l-bw-a', processCode: 'BODYWORK', orderIndex: 1, processType: 'MOTHER', createdAt: tiedCreatedAt });
+      const passB = makeLog({ id: 'l-bw-b', processCode: 'BODYWORK', orderIndex: 1, processType: 'MOTHER', createdAt: tiedCreatedAt });
+      const current = makeLog({ id: 'l-prep', processCode: 'PREP', orderIndex: 2, processType: 'MOTHER' });
+
+      const resultAB = (service as any).pickPreviousMother([passA, passB, current], current);
+      const resultBA = (service as any).pickPreviousMother([passB, passA, current], current);
+
+      expect(resultAB).not.toBeNull();
+      expect(resultAB.id).toBe(resultBA.id);
+    });
+  });
+
+  describe('returnToProcess (PR2)', () => {
+    it('rechaza devolver un log PARALLEL (ej. Mecánica) — requisito 8', async () => {
+      const parallelLog = makeLog({ processType: 'PARALLEL', processCode: 'MECHANIC', status: 'in_progress' });
+      const logRepo = makeLogRepo({ findOne: jest.fn().mockResolvedValue(parallelLog) });
+      const { service } = await build({ logRepo });
+
+      await expect(service.returnToProcess(LOG_ID, 'motivo', TECH_ID)).rejects.toThrow(BadRequestException);
+      expect(logRepo.find).not.toHaveBeenCalled();
+    });
+
+    it.each(['completed', 'skipped', 'returned'] as const)(
+      'rechaza devolver un log en estado %s — evita doble devolución',
+      async (status) => {
+        const log = makeLog({ status, processType: 'MOTHER' });
+        const logRepo = makeLogRepo({ findOne: jest.fn().mockResolvedValue(log) });
+        const { service } = await build({ logRepo });
+
+        await expect(service.returnToProcess(LOG_ID, 'motivo', TECH_ID)).rejects.toThrow(BadRequestException);
+      },
+    );
+
+    it('rechaza cuando no hay proceso MADRE anterior (ej. BODYWORK, solo AGENDA lo precede)', async () => {
+      const current = makeLog({ id: 'l-bw', processCode: 'BODYWORK', orderIndex: 1, status: 'in_progress', processType: 'MOTHER' });
+      const agenda  = makeLog({ id: 'l-agenda', processCode: 'AGENDA', orderIndex: 0, status: 'completed', processType: 'MOTHER' });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn().mockResolvedValue(current),
+        find:    jest.fn().mockResolvedValue([agenda, current]),
+      });
+      const { service } = await build({ logRepo });
+
+      await expect(service.returnToProcess('l-bw', 'motivo', TECH_ID)).rejects.toThrow(BadRequestException);
+    });
+
+    it('rechaza cuando la pasada más nueva del proceso anterior ya está pending|in_progress|blocked', async () => {
+      const prevOpen = makeLog({ id: 'l-bw', processCode: 'BODYWORK', orderIndex: 1, status: 'pending', processType: 'MOTHER' });
+      const current  = makeLog({ id: 'l-prep', processCode: 'PREP', orderIndex: 2, status: 'in_progress', processType: 'MOTHER' });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn().mockResolvedValue(current),
+        find:    jest.fn().mockResolvedValue([prevOpen, current]),
+      });
+      const { service } = await build({ logRepo });
+
+      await expect(service.returnToProcess('l-prep', 'motivo', TECH_ID)).rejects.toThrow(BadRequestException);
+    });
+
+    it('rechaza reasignar un técnico ya in_progress en otro vehículo — 400 amigable vía withTechnicianLock, no un error crudo de DB', async () => {
+      const prevBw = makeLog({ id: 'l-bw', processCode: 'BODYWORK', orderIndex: 1, status: 'completed', processType: 'MOTHER' });
+      const current = makeLog({
+        id: 'l-prep', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'PREP',
+        orderIndex: 2, status: 'in_progress', processType: 'MOTHER',
+      });
+      const conflict = makeLog({
+        id: 'log-other', sourceId: 'entry-999', status: 'in_progress',
+        technicianId: TECH_ID, technicianName: 'Luis Benitez', processName: 'Pintura',
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(current)   // el log a devolver
+          .mockResolvedValueOnce(conflict), // conflicto dentro de withTechnicianLock
+        find: jest.fn().mockResolvedValue([prevBw, current]),
+      });
+      const { service } = await build({ logRepo });
+
+      await expect(service.returnToProcess('l-prep', 'motivo', TECH_ID))
+        .rejects.toThrow(/Luis Benitez.*Pintura/);
+      expect(logRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('transacción exitosa: marca "returned"+reason, borra bodyshop_process_techs, crea nuevo log in_progress y upsertea el técnico — status flip ANTES del insert', async () => {
+      const prevBw = makeLog({
+        id: 'l-bw', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'BODYWORK', processName: 'Chapería',
+        orderIndex: 1, plannedHours: 8, status: 'completed', processType: 'MOTHER',
+      });
+      const current = makeLog({
+        id: 'l-prep', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'PREP', processName: 'Preparación',
+        orderIndex: 2, status: 'in_progress', processType: 'MOTHER', technicianId: 'tech-old', technicianName: 'Tech Old',
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(current) // el log a devolver
+          .mockResolvedValueOnce(null)    // conflicto: técnico nuevo libre
+          .mockResolvedValueOnce(null)    // post-tx: otherBlocked
+          .mockResolvedValueOnce(null),   // post-tx: hasInProgress
+        find: jest.fn().mockResolvedValue([prevBw, current]),
+      });
+      const processTechRepo = makeProcessTechRepo({ findOne: jest.fn().mockResolvedValue(null) });
+
+      const { service, saved } = await build({ logRepo, processTechRepo });
+      const result = await service.returnToProcess('l-prep', 'Faltó soldar un panel', 'tech-new', 'Tech New');
+
+      expect(result).toMatchObject({ status: 'in_progress', processCode: 'BODYWORK', technicianId: 'tech-new' });
+
+      const trackingLogSaves = saved.filter((s: any) => s.entity === TrackingLog);
+      expect(trackingLogSaves).toHaveLength(2);
+      // (c) el log devuelto se marca 'returned' ANTES de (e) crear el nuevo —
+      // si se invirtiera, el índice único parcial
+      // tracking_logs_one_in_progress_per_technician (migración 011) podría
+      // disparar un 23505 al reasignar el mismo técnico.
+      expect(trackingLogSaves[0].data).toMatchObject({ id: 'l-prep', status: 'returned', blockedReason: 'Faltó soldar un panel' });
+      expect(trackingLogSaves[1].data).toMatchObject({ processCode: 'BODYWORK', status: 'in_progress', technicianId: 'tech-new' });
+
+      expect(processTechRepo.delete).toHaveBeenCalledWith({ entryId: ENTRY_ID, process: 'PREP' });
+      expect(processTechRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ entryId: ENTRY_ID, process: 'BODYWORK', technicianId: 'tech-new' }),
+      );
+    });
+
+    it('rollback: si falla el upsert de bodyshop_process_techs (paso f), ningún write queda confirmado', async () => {
+      const prevBw = makeLog({
+        id: 'l-bw', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'BODYWORK', processName: 'Chapería',
+        orderIndex: 1, plannedHours: 8, status: 'completed', processType: 'MOTHER',
+      });
+      const current = makeLog({
+        id: 'l-prep', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'PREP', processName: 'Preparación',
+        orderIndex: 2, status: 'in_progress', processType: 'MOTHER', technicianId: 'tech-old',
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(current) // el log a devolver
+          .mockResolvedValueOnce(null),   // conflicto: técnico nuevo libre
+        find: jest.fn().mockResolvedValue([prevBw, current]),
+      });
+      const managerBundle = makeManager({ failOn: 'processTech' });
+
+      const { service, saved } = await build({ logRepo, managerBundle });
+
+      await expect(service.returnToProcess('l-prep', 'motivo', 'tech-new'))
+        .rejects.toThrow('DB down (processTech)');
+      // dataSource.transaction(cb) hace ROLLBACK real si cb() rechaza (misma
+      // garantía que addProcessToBodyshop, arriba); acá lo probamos
+      // indirectamente: el write de BodyshopProcessTech nunca queda
+      // confirmado y el método entero rechazó, así que ningún caller externo
+      // observa el log 'returned' ni el nuevo log 'in_progress' como definitivos.
+      expect(saved.find((s: any) => s.entity === BodyshopProcessTech)).toBeUndefined();
+    });
+  });
+
+  describe('completeProcess — resolver unificado pending|returned (PR2, D6)', () => {
+    it('un "returned" en orderIndex 2 gana sobre un "pending" en orderIndex 3 — no salta a PAINT', async () => {
+      const completing = makeLog({ id: 'l-bw', processCode: 'BODYWORK', orderIndex: 1, status: 'in_progress', processType: 'MOTHER' });
+      const prepReturned = makeLog({
+        id: 'l-prep', processCode: 'PREP', processName: 'Preparación', orderIndex: 2, plannedHours: 4,
+        status: 'returned', processType: 'MOTHER',
+      });
+      const paintPending = makeLog({ id: 'l-paint', processCode: 'PAINT', orderIndex: 3, status: 'pending', processType: 'MOTHER' });
+
+      const logRepo = makeLogRepo({
+        findOne: jest.fn().mockResolvedValueOnce(completing), // el log que se completa
+        find:    jest.fn().mockResolvedValue([prepReturned, paintPending]),
+      });
+
+      const { service } = await build({ logRepo });
+      const result = await service.completeProcess('l-bw');
+
+      expect(result.next).not.toBeNull();
+      expect(result.next?.processCode).toBe('PREP');
+      // Requisito "Re-completion regenerates the returned process": la pasada
+      // regenerada nace 'pending', no 'in_progress' — el operador debe
+      // confirmar técnico explícitamente vía "Iniciar".
+      expect(result.next?.status).toBe('pending');
+    });
+
+    it('con dos "returned" apiladas (orderIndex 2 y 4), regenera la de menor orderIndex primero', async () => {
+      const completing = makeLog({ id: 'l-bw', processCode: 'BODYWORK', orderIndex: 1, status: 'in_progress', processType: 'MOTHER' });
+      const prepReturned   = makeLog({ id: 'l-prep',   processCode: 'PREP',   processName: 'Preparación', orderIndex: 2, status: 'returned', processType: 'MOTHER' });
+      const polishReturned = makeLog({ id: 'l-polish', processCode: 'POLISH', processName: 'Pulido',       orderIndex: 4, status: 'returned', processType: 'MOTHER' });
+
+      const logRepo = makeLogRepo({
+        findOne: jest.fn().mockResolvedValueOnce(completing),
+        find:    jest.fn().mockResolvedValue([prepReturned, polishReturned]),
+      });
+
+      const { service } = await build({ logRepo });
+      const result = await service.completeProcess('l-bw');
+
+      expect(result.next?.processCode).toBe('PREP');
+    });
+  });
+
+  describe('buildCard — plannedHours NO se deduplica entre pasadas (PR2, decisión aceptada del proposal)', () => {
+    it('dos pasadas del mismo proceso suman sus plannedHours en plannedTotalHours', async () => {
+      const { service } = await build();
+      const logs = [
+        makeLog({ id: 'l-agenda',    processCode: 'AGENDA',   orderIndex: 0, processType: 'MOTHER', status: 'completed', plannedHours: 0 }),
+        makeLog({ id: 'l-bw',        processCode: 'BODYWORK', orderIndex: 1, processType: 'MOTHER', status: 'completed', plannedHours: 8 }),
+        makeLog({
+          id: 'l-prep-old', processCode: 'PREP', orderIndex: 2, processType: 'MOTHER', status: 'returned', plannedHours: 4,
+          createdAt: new Date('2026-06-10T09:00:00Z'),
+        }),
+        makeLog({
+          id: 'l-prep-redo', processCode: 'PREP', orderIndex: 2, processType: 'MOTHER', status: 'in_progress', plannedHours: 4,
+          createdAt: new Date('2026-06-12T09:00:00Z'),
+        }),
+      ];
+
+      const card = (service as any).buildCard(ENTRY_ID, 'bodyshop', {
+        status: 'in_progress', plate: 'ABC', customerName: 'Test', vehicleType: null,
+        techName: null, serviceOrType: null, entryDate: '2026-06-10', exitDate: null,
+      }, logs);
+
+      // 8 (BODYWORK) + 4 (PREP pasada vieja, 'returned') + 4 (PREP pasada
+      // nueva) = 16 — ninguna pasada se excluye del total planificado, aunque
+      // la vieja esté 'returned' (decisión del proposal: la duplicación de
+      // horas planificadas entre pasadas es aceptada, no un bug de QAS).
+      expect(card.plannedTotalHours).toBe(16);
     });
   });
 });

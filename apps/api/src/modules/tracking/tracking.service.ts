@@ -582,6 +582,133 @@ export class TrackingService {
     };
   }
 
+  // PATCH tracking/process/:logId/return — devuelve el proceso MADRE actual
+  // al proceso MADRE inmediatamente anterior (D4/pickPreviousMother), dentro
+  // de una única transacción vía withTechnicianLock (mismo candado que
+  // startProcess/unblockProcess, línea 321) para que el índice único parcial
+  // tracking_logs_one_in_progress_per_technician (migración 011) nunca vea un
+  // estado intermedio inconsistente.
+  async returnToProcess(
+    logId: string,
+    reason: string,
+    technicianId: string,
+    technicianName?: string,
+  ): Promise<TrackingLog> {
+    const log = await this.logRepo.findOne({ where: { id: logId } });
+    if (!log) throw new NotFoundException('Proceso no encontrado');
+
+    // Requisito 8 (spec): solo procesos MADRE se pueden devolver — un
+    // paralelo (ej. Mecánica) no tiene "proceso anterior" en el flujo madre.
+    if (log.processType === 'PARALLEL') {
+      throw new BadRequestException('Solo los procesos madre se pueden devolver');
+    }
+    // completed/skipped/returned quedan afuera — esto es justamente lo que
+    // impide una doble devolución del mismo log.
+    if (!['in_progress', 'blocked', 'pending'].includes(log.status)) {
+      throw new BadRequestException('El proceso no se puede devolver en su estado actual');
+    }
+
+    const allLogs = await this.logRepo.find({
+      where: { sourceType: log.sourceType, sourceId: log.sourceId },
+      order: { orderIndex: 'ASC', createdAt: 'ASC' },
+    });
+    const prev = this.pickPreviousMother(allLogs, log);
+    if (!prev) throw new BadRequestException('No hay proceso anterior al que devolver');
+    // prev ya ES la pasada más nueva de su processCode (pickPreviousMother
+    // desempata por createdAt DESC + id) — su status refleja directamente si
+    // ese proceso ya está abierto, sin necesidad de una segunda consulta.
+    if (['pending', 'in_progress', 'blocked'].includes(prev.status)) {
+      throw new BadRequestException('El proceso anterior ya está abierto');
+    }
+
+    const newLog = await this.withTechnicianLock(technicianId, async manager => {
+      // (a) mismo chequeo de conflicto que unblockProcess() líneas 530-534.
+      const conflict = await manager.findOne(TrackingLog, {
+        where: { technicianId, status: 'in_progress' },
+      });
+      if (conflict && conflict.id !== logId) {
+        throw new BadRequestException(
+          `${conflict.technicianName || technicianName || 'El técnico'} ya está trabajando en otro vehículo (proceso "${conflict.processName}"). Hay que pausarlo o completarlo antes de continuar.`,
+        );
+      }
+
+      // (b) snapshot del técnico saliente ANTES de borrar
+      // bodyshop_process_techs — mismo patrón que pauseLog() líneas 427-433.
+      if (!log.technicianId) {
+        const assigned = await this.resolveAssignedTechnician(log);
+        if (assigned) {
+          log.technicianId = assigned.id;
+          log.technicianName = assigned.name || null;
+        }
+      }
+
+      // (c) marcar 'returned' ANTES de crear el log nuevo (e) — si se
+      // invirtiera, el índice único parcial
+      // tracking_logs_one_in_progress_per_technician (migración 011)
+      // dispararía un 23505 al reasignar el mismo técnico al proceso reabierto.
+      log.status = 'returned';
+      log.blockedReason = reason;
+      log.pausedAt = null;
+      await manager.save(TrackingLog, log);
+
+      // (d) libera la capacidad del proceso devuelto — mismo criterio que
+      // pauseLog() tracking.service.ts:448 (`this.processTechRepo.delete(...)`),
+      // pero vía manager para que quede atómico con el resto de la transacción.
+      if (log.sourceType === 'bodyshop') {
+        await manager.delete(BodyshopProcessTech, { entryId: log.sourceId, process: log.processCode });
+      }
+
+      // (e) nueva pasada del proceso anterior — shape de initForBodyshop()
+      // líneas 225-234 + campos de arranque de startProcess() líneas 392-399.
+      const created = await manager.save(TrackingLog, manager.create(TrackingLog, {
+        sourceType:   log.sourceType,
+        sourceId:     log.sourceId,
+        processName:  prev.processName,
+        processCode:  prev.processCode,
+        orderIndex:   prev.orderIndex,
+        plannedHours: prev.plannedHours,
+        processType:  'MOTHER',
+        status:       'in_progress',
+        startedAt:    new Date(),
+        technicianId,
+        technicianName,
+      }));
+
+      // (f) upsert de bodyshop_process_techs para el proceso reabierto —
+      // mirror exacto de unblockProcess() líneas 511-523.
+      if (log.sourceType === 'bodyshop') {
+        const existing = await manager.findOne(BodyshopProcessTech, {
+          where: { entryId: log.sourceId, process: prev.processCode },
+        });
+        if (existing) {
+          existing.technicianId = technicianId;
+          await manager.save(BodyshopProcessTech, existing);
+        } else {
+          await manager.save(BodyshopProcessTech,
+            manager.create(BodyshopProcessTech, { entryId: log.sourceId, process: prev.processCode, technicianId }),
+          );
+        }
+      }
+
+      return created;
+    });
+
+    // Post-transacción, mirror de unblockProcess() líneas 542-551: si no
+    // queda ningún otro log 'blocked' para el mismo origen, restaura el
+    // estado de pausa del appointment/entry.
+    const otherBlocked = await this.logRepo.findOne({
+      where: { sourceType: log.sourceType, sourceId: log.sourceId, status: 'blocked' },
+    });
+    if (!otherBlocked) {
+      const hasInProgress = await this.logRepo.findOne({
+        where: { sourceType: log.sourceType, sourceId: log.sourceId, status: 'in_progress' },
+      });
+      await this.setPauseStatus(log.sourceType, log.sourceId, false, !!hasInProgress);
+    }
+
+    return newLog;
+  }
+
   private async setPauseStatus(
     sourceType: 'mechanic' | 'bodyshop',
     sourceId: string,
@@ -618,15 +745,45 @@ export class TrackingService {
     let parallelBlocking = false;
 
     if (log.processType === 'MOTHER') {
-      // Avanzar al siguiente proceso MADRE pendiente
-      const nextMotherPending = await this.logRepo.findOne({
-        where: { sourceType: log.sourceType, sourceId: log.sourceId, status: 'pending', processType: 'MOTHER' } as any,
+      // D6 (spec "Re-completion regenerates the returned process"): resolver
+      // UNIFICADO sobre pending Y returned juntos, ordenados por orderIndex
+      // ASC — activa el de menor orderIndex mayor al recién completado. Antes
+      // de PR2 esto solo miraba 'pending', así que devolver PREP→BODYWORK y
+      // luego completar BODYWORK saltaba directo a PAINT (el próximo
+      // 'pending'), dejando PREP 'returned' para siempre. Con este resolver,
+      // aunque ya existan 'pending' más adelante en la secuencia (PAINT,
+      // POLISH...), el 'returned' de menor orderIndex siempre gana primero.
+      const allLogs = await this.logRepo.find({
+        where: { sourceType: log.sourceType, sourceId: log.sourceId } as any,
         order: { orderIndex: 'ASC', createdAt: 'ASC' },
       });
-      if (nextMotherPending) {
-        nextMotherPending.status = 'in_progress';
-        nextMotherPending.startedAt = new Date();
-        next = await this.logRepo.save(nextMotherPending);
+      const laterMothers = allLogs.filter(l => l.processType !== 'PARALLEL' && l.processCode !== 'AGENDA'
+                                             && l.orderIndex > log.orderIndex);
+      const latestByCode = new Map<string, TrackingLog>();
+      for (const l of laterMothers) latestByCode.set(l.processCode, l); // última pasada por processCode
+      const target = [...latestByCode.values()]
+        .sort((a, b) => a.orderIndex - b.orderIndex)
+        .find(l => l.status === 'pending' || l.status === 'returned') ?? null;
+
+      if (target?.status === 'pending') {
+        // Comportamiento actual, intacto.
+        target.status = 'in_progress';
+        target.startedAt = new Date();
+        next = await this.logRepo.save(target);
+      } else if (target?.status === 'returned') {
+        // Regeneración: se crea una pasada NUEVA (no se resucita in place),
+        // 'pending' (no 'in_progress') — el operador debe confirmar técnico
+        // explícitamente vía "Iniciar", la capacidad nunca se asigna implícita.
+        next = await this.logRepo.save(this.logRepo.create({
+          sourceType:   log.sourceType,
+          sourceId:     log.sourceId,
+          processName:  target.processName,
+          processCode:  target.processCode,
+          orderIndex:   target.orderIndex,
+          plannedHours: target.plannedHours,
+          processType:  'MOTHER',
+          status:       'pending',
+        }));
       } else {
         // Todos los procesos madre terminaron — verificar si hay paralelos pendientes
         const pendingParallel = await this.logRepo.findOne({
@@ -836,11 +993,22 @@ export class TrackingService {
   // 0 horas) y hay un PARALLEL (MECHANIC, 5) entre dos MOTHER (POLISH 4,
   // FINAL_CONTROL 6). Si hay varias pasadas del mismo processCode empatadas en
   // orderIndex, se queda con la más nueva (createdAt DESC).
+  //
+  // Post-review fix (PR1→PR2): el desempate por createdAt no alcanza cuando
+  // dos pasadas nacen en la MISMA transacción — returnToProcess() (PR2) hace
+  // dos writes a tracking_logs en un único dataSource.transaction(), y
+  // Postgres now() devuelve el mismo valor para toda la transacción, así que
+  // dos createdAt podrían quedar idénticos. Se agrega `id` (UUID) como tercer
+  // desempate: no le da un significado temporal real al ganador, pero
+  // garantiza que la elección sea determinística sin importar el orden en que
+  // Postgres devuelva las filas empatadas (ORDER BY no lo garantiza en ties).
   private pickPreviousMother(logs: TrackingLog[], current: TrackingLog): TrackingLog | null {
     return logs
       .filter(l => l.processType !== 'PARALLEL' && l.processCode !== 'AGENDA'
                 && l.orderIndex < current.orderIndex)
-      .sort((a, b) => b.orderIndex - a.orderIndex || b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null;
+      .sort((a, b) => b.orderIndex - a.orderIndex
+                    || b.createdAt.getTime() - a.createdAt.getTime()
+                    || b.id.localeCompare(a.id))[0] ?? null;
   }
 
   private buildCard(
