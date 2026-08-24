@@ -32,20 +32,38 @@ swap (~45), DTO+route (~20), plus ~110 test lines. PR3 is `api.ts`/`use-tracking
 
 ## Phase 1: PR1 — Backend foundation: ordering + dedup (TDD)
 
-- [ ] 1.1 RED: `pickPreviousMother()` table test — skips PARALLEL/AGENDA, jumps FINAL_CONTROL(6)→POLISH(4) never MECHANIC(5) — `apps/api/src/__tests__/tracking.service.spec.ts`
-- [ ] 1.2 RED: `allMothersDone` dedup test — latest-pass `'returned'` ⇒ false; superseded `'returned'` + newer `completed` ⇒ true; `'skipped'` ⇒ true
-- [ ] 1.3 RED: sort-stability test — two logs, same `orderIndex`, different `createdAt` → chronological order in `buildCard()`'s `sorted`
-- [ ] 1.4 GREEN: widen `TrackingLog.status` union with `'returned'`, `tracking-log.entity.ts:40`
-- [ ] 1.5 GREEN: add `createdAt: string` to `ProcessSummary` (`tracking.service.ts:78-93`) and populate in `toProcessSummary()` (`:1172`)
-- [ ] 1.6 GREEN: implement `pickPreviousMother(logs, current)` private helper in `tracking.service.ts`
-- [ ] 1.7 GREEN: dedup `allMothersDone` by latest pass per `processCode` in `buildCard()`, `tracking.service.ts:863-864`
-- [ ] 1.8 GREEN: add `order: { orderIndex: 'ASC', createdAt: 'ASC' }` at the 6 sort sites: `tracking.service.ts:621,680,696,718,823,986`
-- [ ] 1.9 GREEN: compute `currentProcess.canReturn`/`previousProcessName` in `buildCard()` via `pickPreviousMother()`
+- [x] 1.1 RED: `pickPreviousMother()` table test — skips PARALLEL/AGENDA, jumps FINAL_CONTROL(6)→POLISH(4) never MECHANIC(5) — `apps/api/src/__tests__/tracking.service.spec.ts`
+- [x] 1.2 RED: `allMothersDone` dedup test — latest-pass `'returned'` ⇒ false; superseded `'returned'` + newer `completed` ⇒ true; `'skipped'` ⇒ true
+- [x] 1.3 RED: sort-stability test — two logs, same `orderIndex`, different `createdAt` → chronological order in `buildCard()`'s `sorted`
+- [x] 1.4 GREEN: widen `TrackingLog.status` union with `'returned'`, `tracking-log.entity.ts:40`
+- [x] 1.5 GREEN: add `createdAt: string` to `ProcessSummary` (`tracking.service.ts:78-93`) and populate in `toProcessSummary()` (`:1172`)
+- [x] 1.6 GREEN: implement `pickPreviousMother(logs, current)` private helper in `tracking.service.ts`
+- [x] 1.7 GREEN: dedup `allMothersDone` by latest pass per `processCode` in `buildCard()`, `tracking.service.ts:863-864`
+- [x] 1.8 GREEN: add `order: { orderIndex: 'ASC', createdAt: 'ASC' }` at the 6 sort sites: `tracking.service.ts:621,680,696,718,823,986`
+- [x] 1.9 GREEN: compute `currentProcess.canReturn`/`previousProcessName` in `buildCard()` via `pickPreviousMother()`
 
 ## Phase 2: PR1 — Verification
 
-- [ ] 2.1 `pnpm test` (api) green
-- [ ] 2.2 `pnpm typecheck` green (api+web)
+- [x] 2.1 `pnpm test` (api) green
+- [x] 2.2 `pnpm typecheck` green (api+web)
+
+**Post-review fix (PR1, before merge)**: `review-reliability` found a real gap —
+none of the 10 new tests asserted that the `order: { orderIndex: 'ASC', createdAt:
+'ASC' }` comparator was actually wired into the 6 changed `logRepo.find`/`findOne`
+call sites (`completeProcess`'s `nextMotherPending` lookup, `getCardProcesses`,
+and `getBoard`'s two log fetches) — all 10 tests exercised `pickPreviousMother`/
+`buildCard` directly with pre-built arrays, never the repo call arguments. Fixed:
+added an assertion on `completeProcess`'s `nextMotherPending` `findOne` call, a
+new `getCardProcesses` describe block (had zero test coverage before this PR),
+and a loop over every `logRepo.find` call in `getBoard`'s shape test asserting
+any call that includes `order` uses the correct comparator. Also flagged, left
+for PR2 (not fixable/triggerable in PR1): `pickPreviousMother`'s `createdAt`
+tie-break has no secondary key (e.g. `id`) — if PR2's return transaction ever
+inserts two logs with the same `processCode`/`orderIndex` inside one DB
+transaction, Postgres `now()` could return an identical timestamp for both,
+making the tie-break non-deterministic. PR2's implementer should either force
+distinguishable `createdAt` ordering (e.g. sequential inserts, not a single
+batch) or add an `id`/sequence-based secondary tiebreak.
 
 ## Phase 3: PR2 — Return transaction, endpoint, and `completeProcess()` resolver (TDD)
 
