@@ -120,6 +120,8 @@ export interface TrackingCard {
     blockedReason: string | null;
     canReturn: boolean;
     availableReturnTargets: ReturnTarget[];
+    /** @deprecated derivado de availableReturnTargets[0] — compat con el frontend single-hop hasta PR3. */
+    previousProcessName: string | null;
   } | null;
   plannedTotalHours: number;
   realTotalHours: number;
@@ -1151,6 +1153,13 @@ export class TrackingService {
         blockedReason: currentLog.blockedReason ?? null,
         canReturn:            availableReturnTargets.length > 0,
         availableReturnTargets,
+        // @deprecated derivado de availableReturnTargets[0] — el frontend
+        // shippeado (single-hop, ya en QAS) todavía lo lee para decidir si
+        // mostrar el botón "Devolver". Sin este campo, ese botón desaparece
+        // en silencio apenas este PR se despliega solo, aunque el
+        // comportamiento single-hop de returnToProcess() no haya cambiado.
+        // Sacar recién en PR3 cuando el frontend migre a availableReturnTargets.
+        previousProcessName: availableReturnTargets[0]?.processName ?? null,
       } : parallelBlocking ? {
         logId:         '__parallel__',
         processCode:   '__PARALLEL_BLOCKING__',
@@ -1162,6 +1171,7 @@ export class TrackingService {
         blockedReason: 'Proceso paralelo pendiente bloquea finalización',
         canReturn:            false,
         availableReturnTargets: [],
+        previousProcessName: null, // @deprecated, ver nota de arriba
       } : null,
       plannedTotalHours: Math.round(plannedTotalHours * 100) / 100,
       realTotalHours:    Math.round(realTotalHours    * 100) / 100,

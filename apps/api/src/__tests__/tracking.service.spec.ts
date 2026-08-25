@@ -1667,6 +1667,42 @@ describe('TrackingService', () => {
       ]);
     });
 
+    it('mantiene previousProcessName (deprecated) derivado de availableReturnTargets[0] — el frontend single-hop ya shippeado todavía lo lee para mostrar el botón "Devolver"; sin este campo el botón desaparece en silencio', async () => {
+      const { service } = await build();
+      const logs = [
+        makeLog({ id: 'l-bw', processCode: 'BODYWORK', processName: 'Chapería', orderIndex: 1, status: 'completed' }),
+        makeLog({
+          id: 'l-prep', processCode: 'PREP', processName: 'Preparación', orderIndex: 2,
+          status: 'in_progress', startedAt: new Date('2026-06-10T08:00:00Z'),
+        }),
+      ];
+
+      const card = (service as any).buildCard(ENTRY_ID, 'bodyshop', {
+        status: 'in_progress', plate: 'ABC', customerName: 'Test', vehicleType: null,
+        techName: null, serviceOrType: null, entryDate: '2026-06-10', exitDate: null,
+      }, logs);
+
+      expect(card.currentProcess.previousProcessName).toBe('Chapería');
+    });
+
+    it('previousProcessName es null cuando no hay proceso anterior disponible', async () => {
+      const { service } = await build();
+      const logs = [
+        makeLog({ id: 'l-agenda', processCode: 'AGENDA', orderIndex: 0, status: 'completed' }),
+        makeLog({
+          id: 'l-bw', processCode: 'BODYWORK', orderIndex: 1,
+          status: 'in_progress', startedAt: new Date('2026-06-10T08:00:00Z'),
+        }),
+      ];
+
+      const card = (service as any).buildCard(ENTRY_ID, 'bodyshop', {
+        status: 'in_progress', plate: 'ABC', customerName: 'Test', vehicleType: null,
+        techName: null, serviceOrType: null, entryDate: '2026-06-10', exitDate: null,
+      }, logs);
+
+      expect(card.currentProcess.previousProcessName).toBeNull();
+    });
+
     it('expone canReturn=false y availableReturnTargets=[] en el primer proceso MOTHER (solo AGENDA lo precede)', async () => {
       const { service } = await build();
       const logs = [
