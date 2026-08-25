@@ -1366,6 +1366,12 @@ export interface TrackingProcessSummary {
   technicianName: string | null;
 }
 
+export interface ReturnTarget {
+  processCode: string;
+  processName: string;
+  orderIndex: number;
+}
+
 export interface TrackingCard {
   id: string;
   sourceId: string;
@@ -1386,7 +1392,7 @@ export interface TrackingCard {
     status: string;
     blockedReason: string | null;
     canReturn: boolean;
-    previousProcessName: string | null;
+    availableReturnTargets: ReturnTarget[];
   } | null;
   plannedTotalHours: number;
   realTotalHours: number;
@@ -1470,6 +1476,7 @@ export async function unblockTrackingProcess(
 
 export async function returnTrackingProcess(
   logId: string,
+  targetProcessCode: string,
   reason: string,
   technicianId: string,
   technicianName?: string,
@@ -1477,7 +1484,7 @@ export async function returnTrackingProcess(
   if (MOCK) return delay(undefined);
   await http(`/tracking/process/${logId}/return`, {
     method: 'PATCH',
-    body: JSON.stringify({ reason, technicianId, technicianName }),
+    body: JSON.stringify({ targetProcessCode, reason, technicianId, technicianName }),
   });
 }
 

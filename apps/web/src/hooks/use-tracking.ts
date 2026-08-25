@@ -58,9 +58,9 @@ export function useUnblockProcess() {
 export function useReturnProcess() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ logId, reason, technicianId, technicianName }: {
-      logId: string; reason: string; technicianId: string; technicianName?: string;
-    }) => returnTrackingProcess(logId, reason, technicianId, technicianName),
+    mutationFn: ({ logId, targetProcessCode, reason, technicianId, technicianName }: {
+      logId: string; targetProcessCode: string; reason: string; technicianId: string; technicianName?: string;
+    }) => returnTrackingProcess(logId, targetProcessCode, reason, technicianId, technicianName),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tracking-board'] }),
   });
 }
