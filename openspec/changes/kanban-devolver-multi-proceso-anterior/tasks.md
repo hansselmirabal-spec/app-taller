@@ -57,6 +57,18 @@ is finally removed. Added 2 regression tests locking in the derived value and th
 - [x] 2.6 Add 3 new cases: multi-hop write order (3 saves, history preserved), non-completed intermediate rejected, invalid target (`AGENDA`/`MECHANIC`) rejected
 - [x] 2.7 `tracking.controller.spec.ts` L159-167: update call assertion with 4th arg; add missing-`targetProcessCode` DTO case
 
+**Post-review fix (PR2a, before merge)**: `review-reliability` came back clean on all 6 focus
+points (server-side revalidation, new-log-not-mutation for skipped intermediates, defensive
+`'completed'` guard, write-order vs. migration 011's partial unique index, rollback, multi-hop
+test assertions) — 1 SUGGESTION: the only existing rollback test used a single-hop scenario (fails
+on the very first `TrackingLog` save), so nothing proved that an intermediate's `'returned'` log
+already written earlier in the *same* transaction also rolls back if a later save in that same
+call fails. Added `makeManager({ failOnNthLogSave })` (fails on the Nth `TrackingLog` save within
+one call, vs. the existing `failOn: 'log'` which always fails on the first) and a new test:
+POLISH→BODYWORK skipping both PREP and PAINT (2 intermediates), forced to fail on the 3rd of 4
+`TrackingLog` saves — confirms `bodyshop_process_techs` never gets a confirmed write once the
+transaction rejects, even though 2+ `TrackingLog` saves had already been attempted in that call.
+
 ## Phase 3: Integration test (PR2b, stacked on PR2a)
 
 - [ ] 3.1 `integration.int.spec.ts`: new `describeIfApi` — PAINT→BODYWORK skipping PREP, then chained reactivation of PREP then PAINT

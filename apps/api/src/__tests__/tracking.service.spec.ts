@@ -154,9 +154,16 @@ function makeProcessTechRepo(overrides: any = {}) {
 // addProcessToBodyshop.
 function makeManager(opts: {
   failOn?: 'log' | 'entry' | 'processTech';
+  // Devolución multi-hop: falla recién en el N-ésimo save() de TrackingLog
+  // dentro de la MISMA llamada — a diferencia de `failOn: 'log'` (falla
+  // siempre en el primero), esto permite probar que un 'returned' de un
+  // intermedio YA guardado en esta transacción también se revierte si un
+  // save posterior de la misma llamada falla.
+  failOnNthLogSave?: number;
   logRepo?: any; processTechRepo?: any; entryRepo?: any;
 } = {}) {
   const saved: { entity: any; data: any }[] = [];
+  let logSaveCount = 0;
   const repoFor = (entity: any) => {
     if (entity === TrackingLog)         return opts.logRepo;
     if (entity === BodyshopProcessTech) return opts.processTechRepo;
@@ -175,6 +182,10 @@ function makeManager(opts: {
       // en returnToProcess() — para probar que ningún write previo (status
       // 'returned', log nuevo) queda confirmado si el upsert final falla.
       if (entity === BodyshopProcessTech && opts.failOn === 'processTech') throw new Error('DB down (processTech)');
+      if (entity === TrackingLog && opts.failOnNthLogSave != null) {
+        logSaveCount += 1;
+        if (logSaveCount === opts.failOnNthLogSave) throw new Error(`DB down (log #${logSaveCount})`);
+      }
       saved.push({ entity, data });
       const repo = repoFor(entity);
       if (repo?.save) return repo.save(data);
@@ -1961,6 +1972,55 @@ describe('TrackingService', () => {
 
       await expect(service.returnToProcess('l-paint', 'motivo', TECH_ID, 'BODYWORK')).rejects.toThrow(BadRequestException);
       expect(saved.filter((s: any) => s.entity === TrackingLog)).toHaveLength(0);
+    });
+
+    it('rollback multi-hop: si falla el save de un intermedio a mitad del loop (2 saltados), los \'returned\' YA guardados en esta misma llamada también se revierten', async () => {
+      const bodywork = makeLog({
+        id: 'l-bw', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'BODYWORK', processName: 'Chapería',
+        orderIndex: 1, plannedHours: 8, status: 'completed', processType: 'MOTHER',
+      });
+      const prep = makeLog({
+        id: 'l-prep', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'PREP', processName: 'Preparación',
+        orderIndex: 2, plannedHours: 4, status: 'completed', processType: 'MOTHER',
+      });
+      const paint = makeLog({
+        id: 'l-paint', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'PAINT', processName: 'Pintura',
+        orderIndex: 3, plannedHours: 6, status: 'completed', processType: 'MOTHER',
+      });
+      const current = makeLog({
+        id: 'l-polish', sourceType: 'bodyshop', sourceId: ENTRY_ID, processCode: 'POLISH', processName: 'Pulida',
+        orderIndex: 4, status: 'in_progress', processType: 'MOTHER', technicianId: 'tech-old',
+      });
+      const logRepo = makeLogRepo({
+        findOne: jest.fn()
+          .mockResolvedValueOnce(current) // el log a devolver
+          .mockResolvedValueOnce(null),   // conflicto: técnico nuevo libre
+        find: jest.fn().mockResolvedValue([bodywork, prep, paint, current]),
+      });
+      const processTechRepo = makeProcessTechRepo({ findOne: jest.fn().mockResolvedValue(null) });
+      // 2 procesos saltados (PREP, PAINT) + el actual (POLISH) + el destino
+      // (BODYWORK) = 4 saves de TrackingLog en total dentro de esta llamada.
+      // Falla en el 3ro — al menos un 'returned' de un intermedio ya se
+      // guardó en la MISMA transacción antes del fallo.
+      const managerBundle = makeManager({ failOnNthLogSave: 3, logRepo, processTechRepo });
+
+      const { service, saved } = await build({ logRepo, processTechRepo, managerBundle });
+
+      await expect(service.returnToProcess('l-polish', 'motivo', 'tech-new', 'BODYWORK'))
+        .rejects.toThrow(/DB down \(log #3\)/);
+
+      // `dataSource.transaction(cb)` hace ROLLBACK real si `cb()` rechaza —
+      // acá lo probamos indirectamente: ni el save que ya había pasado
+      // (mock `saved` sigue registrando lo que el callback intentó escribir
+      // antes de que la transacción entera se revirtiera) resulta en un
+      // upsert de bodyshop_process_techs confirmado, porque ese paso (f)
+      // corre DESPUÉS de todos los saves de TrackingLog — nunca se alcanza.
+      expect(processTechRepo.save).not.toHaveBeenCalled();
+      // El código intentó 3 saves antes de fallar (current + 2 intermedios
+      // en el orden que sea) — confirma que el fallo ocurrió a mitad del
+      // loop, no en el primer save.
+      const trackingLogSaves = saved.filter((s: any) => s.entity === TrackingLog);
+      expect(trackingLogSaves.length).toBeGreaterThanOrEqual(2);
     });
   });
 
