@@ -29,15 +29,15 @@ Units 2b and 3 touch disjoint files (test-only vs web-only) — may run in paral
 
 ## Phase 1: Backend foundation (PR1)
 
-- [ ] 1.1 `tracking.service.ts` ~L996-1023: replace `pickPreviousMother` with `listAvailableMothers(logs, current)` per design (status-agnostic, dedup by `processCode`, orderIndex DESC)
-- [ ] 1.2 `tracking.service.ts` L115-116: export `ReturnTarget` interface; card type gains `availableReturnTargets: ReturnTarget[]`
-- [ ] 1.3 `tracking.service.ts` L1108-1143: `buildCard()` computes `availableReturnTargets` via `listAvailableMothers`; `canReturn = availableReturnTargets.length > 0`; `parallelBlocking` branch (L1142) returns `availableReturnTargets: []`
-- [ ] 1.4 `tracking.service.spec.ts` L1494-1543, L1680-1694: rewrite `pickPreviousMother` suites → `listAvailableMothers` (array assertions, dedup length checks)
-- [ ] 1.5 `tracking.service.spec.ts` L1638-1676: rewrite `canReturn/previousProcessName` suite → `availableReturnTargets`; add parallel-branch case asserting `[]`
+- [x] 1.1 `tracking.service.ts` ~L996-1023: replace `pickPreviousMother` with `listAvailableMothers(logs, current)` per design (status-agnostic, dedup by `processCode`, orderIndex DESC)
+- [x] 1.2 `tracking.service.ts` L115-116: export `ReturnTarget` interface; card type gains `availableReturnTargets: ReturnTarget[]`
+- [x] 1.3 `tracking.service.ts` L1108-1143: `buildCard()` computes `availableReturnTargets` via `listAvailableMothers`; `canReturn = availableReturnTargets.length > 0`; `parallelBlocking` branch (L1142) returns `availableReturnTargets: []`
+- [x] 1.4 `tracking.service.spec.ts` L1494-1543, L1680-1694: rewrite `pickPreviousMother` suites → `listAvailableMothers` (array assertions, dedup length checks)
+- [x] 1.5 `tracking.service.spec.ts` L1638-1676: rewrite `canReturn/previousProcessName` suite → `availableReturnTargets`; add parallel-branch case asserting `[]`
 
 ## Phase 2: Backend transaction (PR2a, stacked on PR1)
 
-- [ ] 2.1 `tracking.service.spec.ts` L155-201: `makeManager()` gains `find()` mock — MUST land before 2.5/2.6 or all `returnToProcess` tests break
+- [x] 2.1 `tracking.service.spec.ts` L155-201: `makeManager()` gains `find()` mock — MUST land before 2.5/2.6 or all `returnToProcess` tests break (pulled forward and landed in PR1, per explicit PR1 scope item 4 — do not re-add in PR2a)
 - [ ] 2.2 `tracking.controller.ts` L44-48: `ReturnProcessDto` gains `targetProcessCode: string` (`@IsString @IsNotEmpty`)
 - [ ] 2.3 `tracking.service.ts` L591-716: rewrite `returnToProcess()` — 4th param `targetProcessCode`, recompute `listAvailableMothers` inside `withTechnicianLock`, reject stale target, validate skipped intermediates are `'completed'`, write skipped `'returned'` passes before destination `in_progress` insert
 - [ ] 2.4 `tracking.controller.ts` L156: forward `dto.targetProcessCode`

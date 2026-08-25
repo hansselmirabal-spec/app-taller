@@ -93,6 +93,12 @@ export interface ProcessSummary {
   technicianName: string | null;
 }
 
+export interface ReturnTarget {
+  processCode: string;
+  processName: string;
+  orderIndex: number;
+}
+
 export interface TrackingCard {
   id: string;
   sourceId: string;
@@ -113,7 +119,7 @@ export interface TrackingCard {
     status: string;
     blockedReason: string | null;
     canReturn: boolean;
-    previousProcessName: string | null;
+    availableReturnTargets: ReturnTarget[];
   } | null;
   plannedTotalHours: number;
   realTotalHours: number;
@@ -612,9 +618,12 @@ export class TrackingService {
       where: { sourceType: log.sourceType, sourceId: log.sourceId },
       order: { orderIndex: 'ASC', createdAt: 'ASC' },
     });
-    const prev = this.pickPreviousMother(allLogs, log);
+    // TODO(PR2a): reemplazar por la revalidación multi-hop dentro de la
+    // transacción (D5) — este [0] preserva exactamente el comportamiento
+    // single-hop de hoy mientras listAvailableMothers() se generaliza (PR1).
+    const prev = this.listAvailableMothers(allLogs, log)[0] ?? null;
     if (!prev) throw new BadRequestException('No hay proceso anterior al que devolver');
-    // prev ya ES la pasada más nueva de su processCode (pickPreviousMother
+    // prev ya ES la pasada más nueva de su processCode (listAvailableMothers
     // desempata por createdAt DESC + id) — su status refleja directamente si
     // ese proceso ya está abierto, sin necesidad de una segunda consulta.
     if (['pending', 'in_progress', 'blocked'].includes(prev.status)) {
@@ -993,12 +1002,12 @@ export class TrackingService {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  // Regla D4: el proceso MADRE anterior es el de mayor orderIndex estrictamente
-  // menor al actual, excluyendo PARALLEL y AGENDA — orderIndex-1 no sirve porque
-  // BODYSHOP_PROCESS_ORDER tiene huecos (paralelos intercalados, procesos con
-  // 0 horas) y hay un PARALLEL (MECHANIC, 5) entre dos MOTHER (POLISH 4,
-  // FINAL_CONTROL 6). Si hay varias pasadas del mismo processCode empatadas en
-  // orderIndex, se queda con la más nueva (createdAt DESC).
+  // Generaliza D4: TODOS los procesos MADRE con orderIndex estrictamente menor al
+  // actual, excluyendo PARALLEL y AGENDA, deduplicados por processCode quedándose
+  // con la pasada más nueva. Devuelve orderIndex DESC (el más cercano primero) —
+  // listAvailableMothers(...)[0] es exactamente el viejo pickPreviousMother().
+  // El desempate por createdAt DESC + id DESC se conserva tal cual (misma nota de
+  // determinismo del PR2: el id UUID solo garantiza repetibilidad, no orden real).
   //
   // Post-review fix (PR1→PR2): revisión adversarial encontró que el único
   // call site real (returnToProcess()) lee `allLogs` ANTES de entrar a la
@@ -1013,13 +1022,22 @@ export class TrackingService {
   // en que Postgres devuelva las filas (ORDER BY no lo garantiza en ties).
   // Si esto alguna vez se vuelve un riesgo real y no solo teórico, la
   // solución correcta es una columna de secuencia monotónica, no un UUID.
-  private pickPreviousMother(logs: TrackingLog[], current: TrackingLog): TrackingLog | null {
-    return logs
+  private listAvailableMothers(logs: TrackingLog[], current: TrackingLog): TrackingLog[] {
+    const candidates = logs
       .filter(l => l.processType !== 'PARALLEL' && l.processCode !== 'AGENDA'
                 && l.orderIndex < current.orderIndex)
       .sort((a, b) => b.orderIndex - a.orderIndex
                     || b.createdAt.getTime() - a.createdAt.getTime()
-                    || b.id.localeCompare(a.id))[0] ?? null;
+                    || b.id.localeCompare(a.id));
+
+    // Map preserva el orden de inserción: como `candidates` ya viene orderIndex
+    // DESC, la primera aparición de cada processCode es su pasada más nueva y el
+    // array resultante queda ordenado del destino más cercano al más lejano.
+    const latestByCode = new Map<string, TrackingLog>();
+    for (const l of candidates) {
+      if (!latestByCode.has(l.processCode)) latestByCode.set(l.processCode, l);
+    }
+    return [...latestByCode.values()];
   }
 
   private buildCard(
@@ -1105,9 +1123,12 @@ export class TrackingService {
       .filter(l => l.processCode !== 'AGENDA' && l.status === 'completed' && l.startedAt && l.completedAt)
       .reduce((s, l) => s + (l.completedAt!.getTime() - l.startedAt!.getTime()) / 3_600_000, 0);
 
-    // D4: false para PARALLEL, AGENDA y el primer proceso madre — pickPreviousMother
-    // ya filtra esos casos y devuelve null, así que basta con chequear el resultado.
-    const previousMother = currentLog ? this.pickPreviousMother(sorted, currentLog) : null;
+    // D4: [] para PARALLEL, AGENDA y el primer proceso madre — listAvailableMothers
+    // ya filtra esos casos y devuelve [], así que basta con chequear el length.
+    const availableReturnTargets: ReturnTarget[] = currentLog
+      ? this.listAvailableMothers(sorted, currentLog)
+          .map(l => ({ processCode: l.processCode, processName: l.processName, orderIndex: l.orderIndex }))
+      : [];
 
     return {
       id: `${sourceType}:${sourceId}`,
@@ -1128,8 +1149,8 @@ export class TrackingService {
         startedAt:     currentLog.startedAt?.toISOString() ?? null,
         status:        currentLog.status,
         blockedReason: currentLog.blockedReason ?? null,
-        canReturn:            previousMother !== null,
-        previousProcessName:  previousMother?.processName ?? null,
+        canReturn:            availableReturnTargets.length > 0,
+        availableReturnTargets,
       } : parallelBlocking ? {
         logId:         '__parallel__',
         processCode:   '__PARALLEL_BLOCKING__',
@@ -1140,7 +1161,7 @@ export class TrackingService {
         status:        'in_progress',
         blockedReason: 'Proceso paralelo pendiente bloquea finalización',
         canReturn:            false,
-        previousProcessName:  null,
+        availableReturnTargets: [],
       } : null,
       plannedTotalHours: Math.round(plannedTotalHours * 100) / 100,
       realTotalHours:    Math.round(realTotalHours    * 100) / 100,
