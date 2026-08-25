@@ -176,4 +176,181 @@ describe('Integración API', () => {
       expect(res.body.error).toMatch(/horas de chapería|horas de pintura|días de estadía/i);
     });
   });
+
+  // ── F3.5 — Kanban: devolución a proceso anterior (multi-hop, cascada real) ──
+  // Nota: `describeIfApi` (arriba) evalúa `apiAvailable` en el momento en que
+  // Jest COLECTA los describes, antes de que corra el `beforeAll` de este
+  // archivo — así que siempre vería `false`. Por eso, igual que el resto del
+  // archivo, el guard `if (!apiAvailable) return;` va DENTRO de cada `it`
+  // (que sí corre después de los hooks), no en el describe.
+
+  describe('Kanban — devolución multi-proceso (cascada)', () => {
+    let workshopId = '';
+    let technicianId = '';
+
+    beforeAll(async () => {
+      if (!apiAvailable || !adminToken) return;
+      const ws = await http('/workshops', { headers: { Authorization: `Bearer ${adminToken}` } });
+      workshopId = (ws.body.data ?? []).find((w: any) => w.type === 'BODYSHOP')?.id ?? '';
+      if (!workshopId) return;
+      const techs = await http(`/technicians?workshopId=${workshopId}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      technicianId = (techs.body.data ?? []).find((t: any) => t.active)?.id ?? '';
+    });
+
+    // Día hábil futuro (evita domingo y colisiones con datos de otros tests/seeds).
+    function futureWeekday(daysAhead: number): string {
+      const d = new Date();
+      d.setDate(d.getDate() + daysAhead);
+      while (d.getDay() === 0) d.setDate(d.getDate() + 1);
+      return d.toISOString().slice(0, 10);
+    }
+
+    async function createBodyshopEntry(date: string, plate: string): Promise<string> {
+      const res = await http('/bodyshop/entries', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}` },
+        body: JSON.stringify({
+          workshopId, date, customerName: 'Integración devolución multi-proceso',
+          plate, channel: 'phone', bodyworkHours: 1, prepHours: 1, paintHours: 1, pieceCount: 1,
+        }),
+      });
+      expect(res.status).toBe(201);
+      return res.body.data.id as string;
+    }
+
+    async function getCard(entryId: string, date: string): Promise<any> {
+      const board = await http(`/tracking/board?date=${date}&workshopId=${workshopId}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      const cards = (board.body.data?.columns ?? []).flatMap((col: any) => col.cards ?? []);
+      // buildCard() arma `id` como `${sourceType}:${sourceId}` — el entryId real vive en `sourceId`.
+      return cards.find((c: any) => c.sourceId === entryId);
+    }
+
+    async function completeProcess(logId: string) {
+      return http(`/tracking/process/${logId}/complete`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${adminToken}` },
+        body: JSON.stringify({}),
+      });
+    }
+
+    // AGENDA nace 'in_progress'; completarla promueve BODYWORK a 'in_progress'
+    // automáticamente (resolver unificado de completeProcess), y así en
+    // cadena — no hace falta /start para este primer tramo.
+    async function advanceToPaint(entryId: string, date: string): Promise<any> {
+      let card = await getCard(entryId, date);
+      expect(card?.currentProcess?.processCode).toBe('AGENDA');
+
+      let res = await completeProcess(card.currentProcess.logId);
+      expect(res.status).toBe(200);
+      card = await getCard(entryId, date);
+      expect(card?.currentProcess?.processCode).toBe('BODYWORK');
+
+      res = await completeProcess(card.currentProcess.logId);
+      expect(res.status).toBe(200);
+      card = await getCard(entryId, date);
+      expect(card?.currentProcess?.processCode).toBe('PREP');
+
+      res = await completeProcess(card.currentProcess.logId);
+      expect(res.status).toBe(200);
+      card = await getCard(entryId, date);
+      expect(card?.currentProcess?.processCode).toBe('PAINT');
+
+      return card;
+    }
+
+    it('devuelve de PAINT a BODYWORK salteando PREP y confirma la reactivación en cascada (PREP → PAINT)', async () => {
+      if (!apiAvailable || !adminToken || !workshopId || !technicianId) return;
+
+      const date = futureWeekday(60);
+      const entryId = await createBodyshopEntry(date, `RETM${Date.now().toString().slice(-6)}`);
+      const paintCard = await advanceToPaint(entryId, date);
+
+      // Contrato: PAINT (orderIndex 3) ve PREP y BODYWORK como destinos válidos, más cercano primero.
+      expect(paintCard.currentProcess.canReturn).toBe(true);
+      expect(
+        paintCard.currentProcess.availableReturnTargets.map((t: any) => t.processCode),
+      ).toEqual(['PREP', 'BODYWORK']);
+
+      const paintLogId = paintCard.currentProcess.logId;
+
+      const ret = await http(`/tracking/process/${paintLogId}/return`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${adminToken}` },
+        body: JSON.stringify({
+          targetProcessCode: 'BODYWORK',
+          reason: 'Retrabajo QA — devolución integración',
+          technicianId,
+        }),
+      });
+      expect(ret.status).toBe(200);
+
+      const afterReturn = await getCard(entryId, date);
+      expect(afterReturn.currentProcess.processCode).toBe('BODYWORK');
+      expect(afterReturn.currentProcess.status).toBe('in_progress');
+
+      // D2: PREP saltado gana una pasada NUEVA 'returned'; la 'completed' original queda como historia.
+      const allPasses = await http(`/tracking/card/bodyshop/${entryId}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      const passes = allPasses.body.data as any[];
+      expect(passes.filter(p => p.processCode === 'PAINT' && p.status === 'returned')).toHaveLength(1);
+      expect(passes.filter(p => p.processCode === 'PREP' && p.status === 'returned')).toHaveLength(1);
+      expect(passes.filter(p => p.processCode === 'PREP' && p.status === 'completed')).toHaveLength(1);
+
+      // Completar BODYWORK (destino) reactiva PREP como 'pending' — resolver unificado de completeProcess().
+      const bwComplete = await completeProcess(afterReturn.currentProcess.logId);
+      expect(bwComplete.status).toBe(200);
+      expect(bwComplete.body.data.next?.processCode).toBe('PREP');
+      expect(bwComplete.body.data.next?.status).toBe('pending');
+
+      const prepLogId = bwComplete.body.data.next.id as string;
+      const prepStart = await http(`/tracking/process/${prepLogId}/start`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${adminToken}` },
+        body: JSON.stringify({ technicianId }),
+      });
+      expect(prepStart.status).toBe(200);
+
+      // Completar PREP reactiva PAINT como 'pending' — el tramo encadenado que la exploración marcó sin cubrir.
+      const prepComplete = await completeProcess(prepLogId);
+      expect(prepComplete.status).toBe(200);
+      expect(prepComplete.body.data.next?.processCode).toBe('PAINT');
+      expect(prepComplete.body.data.next?.status).toBe('pending');
+    });
+
+    it('PATCH .../return con targetProcessCode inválido o faltante responde 400', async () => {
+      if (!apiAvailable || !adminToken || !workshopId || !technicianId) return;
+
+      const date = futureWeekday(67);
+      const entryId = await createBodyshopEntry(date, `RETN${Date.now().toString().slice(-6)}`);
+      const paintCard = await advanceToPaint(entryId, date);
+      const paintLogId = paintCard.currentProcess.logId;
+
+      // AGENDA nunca es un destino válido (listAvailableMothers() lo excluye siempre).
+      const invalidTarget = await http(`/tracking/process/${paintLogId}/return`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${adminToken}` },
+        body: JSON.stringify({
+          targetProcessCode: 'AGENDA',
+          reason: 'Motivo de prueba',
+          technicianId,
+        }),
+      });
+      expect(invalidTarget.status).toBe(400);
+
+      const missingTarget = await http(`/tracking/process/${paintLogId}/return`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${adminToken}` },
+        body: JSON.stringify({
+          reason: 'Motivo de prueba',
+          technicianId,
+        }),
+      });
+      expect(missingTarget.status).toBe(400);
+    });
+  });
 });

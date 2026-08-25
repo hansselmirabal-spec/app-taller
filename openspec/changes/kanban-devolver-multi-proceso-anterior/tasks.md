@@ -71,8 +71,8 @@ transaction rejects, even though 2+ `TrackingLog` saves had already been attempt
 
 ## Phase 3: Integration test (PR2b, stacked on PR2a)
 
-- [ ] 3.1 `integration.int.spec.ts`: new `describeIfApi` — PAINT→BODYWORK skipping PREP, then chained reactivation of PREP then PAINT
-- [ ] 3.2 Negative HTTP cases: invalid `targetProcessCode` → 400; missing `targetProcessCode` → 400
+- [x] 3.1 `integration.int.spec.ts`: new `describeIfApi` — PAINT→BODYWORK skipping PREP, then chained reactivation of PREP then PAINT
+- [x] 3.2 Negative HTTP cases: invalid `targetProcessCode` → 400; missing `targetProcessCode` → 400
 
 ## Phase 4: Frontend wiring (PR3, stacked on PR2a)
 
