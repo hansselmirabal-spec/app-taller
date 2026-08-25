@@ -156,15 +156,15 @@ describe('TrackingController', () => {
   // ── returnProcess() (PR2 — kanban-devolver-proceso-anterior) ─────────────
 
   describe('returnProcess()', () => {
-    it('llama service.returnToProcess con logId + reason/technicianId/technicianName del body', async () => {
+    it('llama service.returnToProcess con logId + reason/technicianId/targetProcessCode/technicianName del body', async () => {
       const returnedLog = { id: 'log-new-001', status: 'in_progress', processCode: 'BODYWORK' };
       (service.returnToProcess as jest.Mock).mockResolvedValue(returnedLog);
 
       const result = await controller.returnProcess('log-001', {
-        reason: 'Faltó soldar un panel', technicianId: 'tech-001', technicianName: 'Luis Benitez',
+        reason: 'Faltó soldar un panel', technicianId: 'tech-001', targetProcessCode: 'BODYWORK', technicianName: 'Luis Benitez',
       });
 
-      expect(service.returnToProcess).toHaveBeenCalledWith('log-001', 'Faltó soldar un panel', 'tech-001', 'Luis Benitez');
+      expect(service.returnToProcess).toHaveBeenCalledWith('log-001', 'Faltó soldar un panel', 'tech-001', 'BODYWORK', 'Luis Benitez');
       expect(result).toEqual({
         data: returnedLog,
         meta: expect.objectContaining({ timestamp: expect.any(String) }),
@@ -179,28 +179,35 @@ describe('TrackingController', () => {
 
     it('rechaza reason vacío', async () => {
       const { ReturnProcessDto } = await import('../modules/tracking/tracking.controller');
-      const dto = plainToInstance(ReturnProcessDto, { reason: '', technicianId: VALID_TECH_ID });
+      const dto = plainToInstance(ReturnProcessDto, { reason: '', technicianId: VALID_TECH_ID, targetProcessCode: 'BODYWORK' });
       const errors = await validate(dto);
       expect(errors.some(e => e.property === 'reason')).toBe(true);
     });
 
     it('rechaza reason de más de 120 caracteres', async () => {
       const { ReturnProcessDto } = await import('../modules/tracking/tracking.controller');
-      const dto = plainToInstance(ReturnProcessDto, { reason: 'x'.repeat(121), technicianId: VALID_TECH_ID });
+      const dto = plainToInstance(ReturnProcessDto, { reason: 'x'.repeat(121), technicianId: VALID_TECH_ID, targetProcessCode: 'BODYWORK' });
       const errors = await validate(dto);
       expect(errors.some(e => e.property === 'reason')).toBe(true);
     });
 
     it('rechaza technicianId ausente o no-UUID', async () => {
       const { ReturnProcessDto } = await import('../modules/tracking/tracking.controller');
-      const dto = plainToInstance(ReturnProcessDto, { reason: 'motivo válido', technicianId: 'no-es-uuid' });
+      const dto = plainToInstance(ReturnProcessDto, { reason: 'motivo válido', technicianId: 'no-es-uuid', targetProcessCode: 'BODYWORK' });
       const errors = await validate(dto);
       expect(errors.some(e => e.property === 'technicianId')).toBe(true);
     });
 
-    it('acepta reason + technicianId válidos (technicianName opcional)', async () => {
+    it('rechaza targetProcessCode ausente o vacío — multi-hop (kanban-devolver-multi-proceso-anterior)', async () => {
       const { ReturnProcessDto } = await import('../modules/tracking/tracking.controller');
       const dto = plainToInstance(ReturnProcessDto, { reason: 'motivo válido', technicianId: VALID_TECH_ID });
+      const errors = await validate(dto);
+      expect(errors.some(e => e.property === 'targetProcessCode')).toBe(true);
+    });
+
+    it('acepta reason + technicianId + targetProcessCode válidos (technicianName opcional)', async () => {
+      const { ReturnProcessDto } = await import('../modules/tracking/tracking.controller');
+      const dto = plainToInstance(ReturnProcessDto, { reason: 'motivo válido', technicianId: VALID_TECH_ID, targetProcessCode: 'BODYWORK' });
       const errors = await validate(dto);
       expect(errors).toHaveLength(0);
     });
