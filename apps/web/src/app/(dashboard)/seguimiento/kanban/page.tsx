@@ -11,7 +11,7 @@ import { useWorkshops } from '@/hooks/use-workshops';
 import { useQueryClient } from '@tanstack/react-query';
 import { createBodyshopEntry, releaseTechNoStart } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
-import type { TrackingCard, TrackingColumn, TrackingProcessSummary } from '@/lib/api';
+import type { TrackingCard, TrackingColumn, TrackingProcessSummary, ReturnTarget } from '@/lib/api';
 import { InfoButton } from '@/components/ui/info-button';
 import { ResumeTechModal } from '@/components/kanban/resume-tech-modal';
 import { ReturnProcessModal } from '@/components/kanban/return-process-modal';
@@ -841,7 +841,7 @@ function CardDetailModal({
   onComplete: (logId: string) => void;
   onPause:    (logId: string, processName: string) => void;
   onUnblock:  (logId: string, processName: string) => void;
-  onReturn:   (logId: string, processName: string, previousProcessName: string) => void;
+  onReturn:   (logId: string, processName: string, targets: ReturnTarget[]) => void;
   loadingLogId:    string | null;
   pausingLogId:    string | null;
   unblockingLogId: string | null;
@@ -1250,11 +1250,11 @@ function CardDetailModal({
 
         {cp && !isParallelPlaceholder && (
           <div className="flex-shrink-0 p-4 border-t border-slate-100 bg-slate-50/50 rounded-b-2xl space-y-2">
-            {isAdminOrManager() && cp.canReturn && cp.previousProcessName && (
-              <button type="button" disabled={isActing} onClick={() => onReturn(cp.logId, cp.processName, cp.previousProcessName!)}
+            {isAdminOrManager() && cp.canReturn && cp.availableReturnTargets.length > 0 && (
+              <button type="button" disabled={isActing} onClick={() => onReturn(cp.logId, cp.processName, cp.availableReturnTargets)}
                 className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 transition-colors">
                 <Undo2 className="h-3.5 w-3.5" />
-                {returningLogId === cp.logId ? 'Devolviendo...' : `Devolver a ${cp.previousProcessName}`}
+                {returningLogId === cp.logId ? 'Devolviendo...' : 'Devolver proceso'}
               </button>
             )}
             <div className="flex gap-2">
@@ -1856,7 +1856,7 @@ export default function TrackingKanbanPage() {
   const [unblockingLogId, setUnblockingLogId] = useState<string | null>(null);
   const [pauseModal, setPauseModal]         = useState<{ logId: string; processName: string } | null>(null);
   const [resumeModal, setResumeModal]       = useState<{ logId: string; processName: string } | null>(null);
-  const [returnModal, setReturnModal]       = useState<{ logId: string; processName: string; previousProcessName: string } | null>(null);
+  const [returnModal, setReturnModal]       = useState<{ logId: string; processName: string; targets: ReturnTarget[] } | null>(null);
   const [returningLogId, setReturningLogId] = useState<string | null>(null);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [filterTech, setFilterTech]         = useState('');
@@ -1939,15 +1939,15 @@ export default function TrackingKanbanPage() {
     }
   }
 
-  function handleReturnOpen(logId: string, processName: string, previousProcessName: string) {
-    setReturnModal({ logId, processName, previousProcessName });
+  function handleReturnOpen(logId: string, processName: string, targets: ReturnTarget[]) {
+    setReturnModal({ logId, processName, targets });
   }
 
-  async function handleReturnConfirm(reason: string, technicianId: string, technicianName: string) {
+  async function handleReturnConfirm(targetProcessCode: string, reason: string, technicianId: string, technicianName: string) {
     if (!returnModal) return;
     setReturningLogId(returnModal.logId);
     try {
-      await returnMutation.mutateAsync({ logId: returnModal.logId, reason, technicianId, technicianName });
+      await returnMutation.mutateAsync({ logId: returnModal.logId, targetProcessCode, reason, technicianId, technicianName });
       setReturnModal(null);
     } finally {
       setReturningLogId(null);
@@ -2042,7 +2042,7 @@ export default function TrackingKanbanPage() {
       {returnModal && (
         <ReturnProcessModal
           processName={returnModal.processName}
-          previousProcessName={returnModal.previousProcessName}
+          targets={returnModal.targets}
           onConfirm={handleReturnConfirm}
           onClose={() => setReturnModal(null)}
           isLoading={returnMutation.isPending}

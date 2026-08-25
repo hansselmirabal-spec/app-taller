@@ -76,11 +76,24 @@ transaction rejects, even though 2+ `TrackingLog` saves had already been attempt
 
 ## Phase 4: Frontend wiring (PR3, stacked on PR2a)
 
-- [ ] 4.1 `apps/web/src/lib/api.ts` L1388-1389, L1471-1482: export `ReturnTarget`, replace `previousProcessName` in card type, `returnTrackingProcess()` gains `targetProcessCode`
-- [ ] 4.2 `apps/web/src/hooks/use-tracking.ts` L58-66: `useReturnProcess` mutation vars gain `targetProcessCode`
-- [ ] 4.3 `apps/web/src/components/kanban/return-process-modal.tsx`: `targets: ReturnTarget[]` prop, radio destination selector (RETURN_REASONS visual pattern) before reason/technician, cascade hint, static "Devolver proceso" title, `onConfirm` gains `targetProcessCode`
-- [ ] 4.4 `page.tsx` 7 sites: L844 `onReturn` type, L1253-1258 static button label + `availableReturnTargets`, L1859 state shape, L1942-1943 `handleReturnOpen`, L2045 `targets` prop, `handleReturnConfirm` forwards `targetProcessCode`
+- [x] 4.1 `apps/web/src/lib/api.ts` L1388-1389, L1471-1482: export `ReturnTarget`, replace `previousProcessName` in card type, `returnTrackingProcess()` gains `targetProcessCode`
+- [x] 4.2 `apps/web/src/hooks/use-tracking.ts` L58-66: `useReturnProcess` mutation vars gain `targetProcessCode`
+- [x] 4.3 `apps/web/src/components/kanban/return-process-modal.tsx`: `targets: ReturnTarget[]` prop, radio destination selector (RETURN_REASONS visual pattern) before reason/technician, cascade hint, static "Devolver proceso" title, `onConfirm` gains `targetProcessCode`
+- [x] 4.4 `page.tsx` 7 sites: L844 `onReturn` type, L1253-1258 static button label + `availableReturnTargets`, L1859 state shape, L1942-1943 `handleReturnOpen`, L2045 `targets` prop, `handleReturnConfirm` forwards `targetProcessCode`
+
+**Post-implementation note (PR3)**: extracted 2 pure functions from the modal per strict TDD
+(`sortReturnTargets` — defensive client-side re-sort orderIndex DESC, `computeCascadeTargets` —
+targets that will also be returned given the selected destination, used for the "También se
+devolverán: …" hint). New unit suite `apps/web/src/__tests__/return-process-modal.spec.ts`
+(5 tests, same isolated-pure-function pattern as `kanban-return-process-order.spec.ts`).
 
 ## Phase 5: Rollout
 
-- [ ] 5.1 Confirm API+web deploy together (contract-breaking payload change, fail-closed per design); no migration needed
+- [x] 5.1 Confirm API+web deploy together (contract-breaking payload change, fail-closed per design); no migration needed. No longer strictly required for zero-downtime: PR1 kept `previousProcessName` as a backward-compatible derived field, so a stale web build against the new API still renders the single-hop button correctly. Documented here for completeness — this PR (PR3) is what finally drops the frontend's read of that deprecated field.
+
+**Post-review fix (PR3, before merge)**: `review-reliability` found 1 WARNING — the 5 new tests
+for `sortReturnTargets`/`computeCascadeTargets` only exercised 2-item target lists, never 3+, which
+is the actual central scenario this whole change introduces (choosing a non-immediate destination
+among several). Added 3 new tests with a 3-target list (BODYWORK/PREP/PAINT): sorting all three
+correctly, choosing the farthest destination (2 intermediates cascade), and choosing the middle one
+(only the farthest cascades, not the closest). All 8 tests pass.
