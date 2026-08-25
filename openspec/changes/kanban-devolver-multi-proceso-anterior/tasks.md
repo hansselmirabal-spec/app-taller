@@ -29,15 +29,27 @@ Units 2b and 3 touch disjoint files (test-only vs web-only) — may run in paral
 
 ## Phase 1: Backend foundation (PR1)
 
-- [ ] 1.1 `tracking.service.ts` ~L996-1023: replace `pickPreviousMother` with `listAvailableMothers(logs, current)` per design (status-agnostic, dedup by `processCode`, orderIndex DESC)
-- [ ] 1.2 `tracking.service.ts` L115-116: export `ReturnTarget` interface; card type gains `availableReturnTargets: ReturnTarget[]`
-- [ ] 1.3 `tracking.service.ts` L1108-1143: `buildCard()` computes `availableReturnTargets` via `listAvailableMothers`; `canReturn = availableReturnTargets.length > 0`; `parallelBlocking` branch (L1142) returns `availableReturnTargets: []`
-- [ ] 1.4 `tracking.service.spec.ts` L1494-1543, L1680-1694: rewrite `pickPreviousMother` suites → `listAvailableMothers` (array assertions, dedup length checks)
-- [ ] 1.5 `tracking.service.spec.ts` L1638-1676: rewrite `canReturn/previousProcessName` suite → `availableReturnTargets`; add parallel-branch case asserting `[]`
+- [x] 1.1 `tracking.service.ts` ~L996-1023: replace `pickPreviousMother` with `listAvailableMothers(logs, current)` per design (status-agnostic, dedup by `processCode`, orderIndex DESC)
+- [x] 1.2 `tracking.service.ts` L115-116: export `ReturnTarget` interface; card type gains `availableReturnTargets: ReturnTarget[]`
+- [x] 1.3 `tracking.service.ts` L1108-1143: `buildCard()` computes `availableReturnTargets` via `listAvailableMothers`; `canReturn = availableReturnTargets.length > 0`; `parallelBlocking` branch (L1142) returns `availableReturnTargets: []`
+- [x] 1.4 `tracking.service.spec.ts` L1494-1543, L1680-1694: rewrite `pickPreviousMother` suites → `listAvailableMothers` (array assertions, dedup length checks)
+- [x] 1.5 `tracking.service.spec.ts` L1638-1676: rewrite `canReturn/previousProcessName` suite → `availableReturnTargets`; add parallel-branch case asserting `[]`
+
+**Post-review fix (PR1, before merge)**: `review-reliability` found a CRITICAL — `buildCard()`
+dropped `previousProcessName` entirely from the payload, replaced by `availableReturnTargets`.
+The already-shipped single-hop frontend (`page.tsx`, `return-process-modal.tsx`, both untouched
+until PR3) still reads `cp.previousProcessName` to decide whether to render the "Devolver a
+proceso anterior" button and to build its label. Since `undefined` is falsy, merging PR1 alone
+would silently make the button disappear for every card, even though this PR's own stated goal
+was to leave single-hop behavior byte-identical. Fixed by keeping `previousProcessName` as a
+`@deprecated`, derived-from-`availableReturnTargets[0]` field in both `buildCard()` branches
+(non-null-currentProcess and `parallelBlocking`), so the response stays backward-compatible for
+the currently-deployed frontend until PR3 migrates it to `availableReturnTargets` and this field
+is finally removed. Added 2 regression tests locking in the derived value and the null case.
 
 ## Phase 2: Backend transaction (PR2a, stacked on PR1)
 
-- [ ] 2.1 `tracking.service.spec.ts` L155-201: `makeManager()` gains `find()` mock — MUST land before 2.5/2.6 or all `returnToProcess` tests break
+- [x] 2.1 `tracking.service.spec.ts` L155-201: `makeManager()` gains `find()` mock — MUST land before 2.5/2.6 or all `returnToProcess` tests break (pulled forward and landed in PR1, per explicit PR1 scope item 4 — do not re-add in PR2a)
 - [ ] 2.2 `tracking.controller.ts` L44-48: `ReturnProcessDto` gains `targetProcessCode: string` (`@IsString @IsNotEmpty`)
 - [ ] 2.3 `tracking.service.ts` L591-716: rewrite `returnToProcess()` — 4th param `targetProcessCode`, recompute `listAvailableMothers` inside `withTechnicianLock`, reject stale target, validate skipped intermediates are `'completed'`, write skipped `'returned'` passes before destination `in_progress` insert
 - [ ] 2.4 `tracking.controller.ts` L156: forward `dto.targetProcessCode`

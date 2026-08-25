@@ -185,6 +185,13 @@ function makeManager(opts: {
       const repo = repoFor(entity);
       return repo?.findOne ? repo.findOne(findOpts) : null;
     },
+    // PR2a: listAvailableMothers() recalcula la lista autoritativa dentro de
+    // la transacción vía manager.find(TrackingLog, ...) en vez de this.logRepo.find
+    // (D5) — sin este mock, todo call site que entre a la transacción rompe.
+    find: async (entity: any, findOpts: any) => {
+      const repo = repoFor(entity);
+      return repo?.find ? repo.find(findOpts) : [];
+    },
     // PR2: returnToProcess() borra bodyshop_process_techs vía manager (no vía
     // this.processTechRepo.delete como pauseLog) para que quede atómico junto
     // con el resto de la transacción — ver tracking.service.ts returnToProcess().
@@ -1491,8 +1498,8 @@ describe('TrackingService', () => {
 
   // ── PR1: fundación "devolver a proceso anterior" ────────────────────────────
 
-  describe('pickPreviousMother (PR1)', () => {
-    it('salta PARALLEL y AGENDA — desde FINAL_CONTROL(6) llega a POLISH(4), nunca a MECHANIC(5)', async () => {
+  describe('listAvailableMothers (PR1)', () => {
+    it('salta PARALLEL y AGENDA — desde FINAL_CONTROL(6) devuelve el resto de MOTHER en orderIndex DESC', async () => {
       const { service } = await build();
 
       const logs = [
@@ -1506,11 +1513,13 @@ describe('TrackingService', () => {
       ];
       const current = logs.find(l => l.id === 'l-fc')!;
 
-      const prev = (service as any).pickPreviousMother(logs, current);
-      expect(prev.id).toBe('l-polish');
+      const available = (service as any).listAvailableMothers(logs, current);
+      expect(available.map((l: any) => l.processCode)).toEqual(['POLISH', 'PAINT', 'PREP', 'BODYWORK']);
+      expect(available.some((l: any) => l.processCode === 'MECHANIC')).toBe(false);
+      expect(available.some((l: any) => l.processCode === 'AGENDA')).toBe(false);
     });
 
-    it('retorna null cuando el proceso actual es el primero (solo AGENDA lo precede)', async () => {
+    it('retorna [] cuando el proceso actual es el primero (solo AGENDA lo precede)', async () => {
       const { service } = await build();
       const logs = [
         makeLog({ id: 'l-agenda', processCode: 'AGENDA',   orderIndex: 0, processType: 'MOTHER' }),
@@ -1518,11 +1527,11 @@ describe('TrackingService', () => {
       ];
       const current = logs.find(l => l.id === 'l-bw')!;
 
-      const prev = (service as any).pickPreviousMother(logs, current);
-      expect(prev).toBeNull();
+      const available = (service as any).listAvailableMothers(logs, current);
+      expect(available).toEqual([]);
     });
 
-    it('con dos pasadas del mismo orderIndex, elige la más nueva por createdAt', async () => {
+    it('con dos pasadas del mismo processCode, deduplica y se queda con la más nueva por createdAt', async () => {
       const { service } = await build();
       const logs = [
         makeLog({
@@ -1537,8 +1546,9 @@ describe('TrackingService', () => {
       ];
       const current = logs.find(l => l.id === 'l-prep')!;
 
-      const prev = (service as any).pickPreviousMother(logs, current);
-      expect(prev.id).toBe('l-bw-redo');
+      const available = (service as any).listAvailableMothers(logs, current);
+      expect(available).toHaveLength(1);
+      expect(available[0].id).toBe('l-bw-redo');
     });
   });
 
@@ -1635,8 +1645,8 @@ describe('TrackingService', () => {
     });
   });
 
-  describe('buildCard — currentProcess.canReturn / previousProcessName (PR1)', () => {
-    it('expone canReturn=true y previousProcessName cuando existe un MOTHER anterior', async () => {
+  describe('buildCard — currentProcess.canReturn / availableReturnTargets (PR1)', () => {
+    it('expone canReturn=true y availableReturnTargets cuando existe un MOTHER anterior', async () => {
       const { service } = await build();
       const logs = [
         makeLog({ id: 'l-bw', processCode: 'BODYWORK', processName: 'Chapería', orderIndex: 1, status: 'completed' }),
@@ -1652,10 +1662,48 @@ describe('TrackingService', () => {
       }, logs);
 
       expect(card.currentProcess.canReturn).toBe(true);
+      expect(card.currentProcess.availableReturnTargets).toEqual([
+        { processCode: 'BODYWORK', processName: 'Chapería', orderIndex: 1 },
+      ]);
+    });
+
+    it('mantiene previousProcessName (deprecated) derivado de availableReturnTargets[0] — el frontend single-hop ya shippeado todavía lo lee para mostrar el botón "Devolver"; sin este campo el botón desaparece en silencio', async () => {
+      const { service } = await build();
+      const logs = [
+        makeLog({ id: 'l-bw', processCode: 'BODYWORK', processName: 'Chapería', orderIndex: 1, status: 'completed' }),
+        makeLog({
+          id: 'l-prep', processCode: 'PREP', processName: 'Preparación', orderIndex: 2,
+          status: 'in_progress', startedAt: new Date('2026-06-10T08:00:00Z'),
+        }),
+      ];
+
+      const card = (service as any).buildCard(ENTRY_ID, 'bodyshop', {
+        status: 'in_progress', plate: 'ABC', customerName: 'Test', vehicleType: null,
+        techName: null, serviceOrType: null, entryDate: '2026-06-10', exitDate: null,
+      }, logs);
+
       expect(card.currentProcess.previousProcessName).toBe('Chapería');
     });
 
-    it('expone canReturn=false en el primer proceso MOTHER (solo AGENDA lo precede)', async () => {
+    it('previousProcessName es null cuando no hay proceso anterior disponible', async () => {
+      const { service } = await build();
+      const logs = [
+        makeLog({ id: 'l-agenda', processCode: 'AGENDA', orderIndex: 0, status: 'completed' }),
+        makeLog({
+          id: 'l-bw', processCode: 'BODYWORK', orderIndex: 1,
+          status: 'in_progress', startedAt: new Date('2026-06-10T08:00:00Z'),
+        }),
+      ];
+
+      const card = (service as any).buildCard(ENTRY_ID, 'bodyshop', {
+        status: 'in_progress', plate: 'ABC', customerName: 'Test', vehicleType: null,
+        techName: null, serviceOrType: null, entryDate: '2026-06-10', exitDate: null,
+      }, logs);
+
+      expect(card.currentProcess.previousProcessName).toBeNull();
+    });
+
+    it('expone canReturn=false y availableReturnTargets=[] en el primer proceso MOTHER (solo AGENDA lo precede)', async () => {
       const { service } = await build();
       const logs = [
         makeLog({ id: 'l-agenda', processCode: 'AGENDA',   orderIndex: 0, status: 'completed' }),
@@ -1671,25 +1719,26 @@ describe('TrackingService', () => {
       }, logs);
 
       expect(card.currentProcess.canReturn).toBe(false);
-      expect(card.currentProcess.previousProcessName).toBeNull();
+      expect(card.currentProcess.availableReturnTargets).toEqual([]);
     });
   });
 
   // ── PR2: transacción "devolver a proceso anterior" ──────────────────────
 
-  describe('pickPreviousMother — desempate secundario por id (PR2)', () => {
-    it('con dos pasadas de igual orderIndex y createdAt idéntico (misma tx), el ganador es determinístico sin importar el orden de entrada', async () => {
+  describe('listAvailableMothers — desempate secundario por id (PR2)', () => {
+    it('con dos pasadas de igual orderIndex y createdAt idéntico (misma tx), el dedup colapsa a una sola y el ganador es determinístico sin importar el orden de entrada', async () => {
       const { service } = await build();
       const tiedCreatedAt = new Date('2026-06-11T08:00:00Z');
       const passA = makeLog({ id: 'l-bw-a', processCode: 'BODYWORK', orderIndex: 1, processType: 'MOTHER', createdAt: tiedCreatedAt });
       const passB = makeLog({ id: 'l-bw-b', processCode: 'BODYWORK', orderIndex: 1, processType: 'MOTHER', createdAt: tiedCreatedAt });
       const current = makeLog({ id: 'l-prep', processCode: 'PREP', orderIndex: 2, processType: 'MOTHER' });
 
-      const resultAB = (service as any).pickPreviousMother([passA, passB, current], current);
-      const resultBA = (service as any).pickPreviousMother([passB, passA, current], current);
+      const resultAB = (service as any).listAvailableMothers([passA, passB, current], current);
+      const resultBA = (service as any).listAvailableMothers([passB, passA, current], current);
 
-      expect(resultAB).not.toBeNull();
-      expect(resultAB.id).toBe(resultBA.id);
+      expect(resultAB).toHaveLength(1);
+      expect(resultBA).toHaveLength(1);
+      expect(resultAB[0].id).toBe(resultBA[0].id);
     });
   });
 
