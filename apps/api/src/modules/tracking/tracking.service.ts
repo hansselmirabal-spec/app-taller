@@ -591,15 +591,17 @@ export class TrackingService {
   }
 
   // PATCH tracking/process/:logId/return — devuelve el proceso MADRE actual
-  // al proceso MADRE inmediatamente anterior (D4/pickPreviousMother), dentro
-  // de una única transacción vía withTechnicianLock (mismo candado que
-  // startProcess/unblockProcess, línea 321) para que el índice único parcial
-  // tracking_logs_one_in_progress_per_technician (migración 011) nunca vea un
-  // estado intermedio inconsistente.
+  // a CUALQUIER proceso MADRE anterior (targetProcessCode, no solo el
+  // inmediatamente anterior — kanban-devolver-multi-proceso-anterior),
+  // dentro de una única transacción vía withTechnicianLock (mismo candado
+  // que startProcess/unblockProcess, línea 321) para que el índice único
+  // parcial tracking_logs_one_in_progress_per_technician (migración 011)
+  // nunca vea un estado intermedio inconsistente.
   async returnToProcess(
     logId: string,
     reason: string,
     technicianId: string,
+    targetProcessCode: string,
     technicianName?: string,
   ): Promise<TrackingLog> {
     const log = await this.logRepo.findOne({ where: { id: logId } });
@@ -607,6 +609,7 @@ export class TrackingService {
 
     // Requisito 8 (spec): solo procesos MADRE se pueden devolver — un
     // paralelo (ej. Mecánica) no tiene "proceso anterior" en el flujo madre.
+    // Guard barato, se queda AFUERA de la transacción para fallar rápido.
     if (log.processType === 'PARALLEL') {
       throw new BadRequestException('Solo los procesos madre se pueden devolver');
     }
@@ -614,22 +617,6 @@ export class TrackingService {
     // impide una doble devolución del mismo log.
     if (!['in_progress', 'blocked', 'pending'].includes(log.status)) {
       throw new BadRequestException('El proceso no se puede devolver en su estado actual');
-    }
-
-    const allLogs = await this.logRepo.find({
-      where: { sourceType: log.sourceType, sourceId: log.sourceId },
-      order: { orderIndex: 'ASC', createdAt: 'ASC' },
-    });
-    // TODO(PR2a): reemplazar por la revalidación multi-hop dentro de la
-    // transacción (D5) — este [0] preserva exactamente el comportamiento
-    // single-hop de hoy mientras listAvailableMothers() se generaliza (PR1).
-    const prev = this.listAvailableMothers(allLogs, log)[0] ?? null;
-    if (!prev) throw new BadRequestException('No hay proceso anterior al que devolver');
-    // prev ya ES la pasada más nueva de su processCode (listAvailableMothers
-    // desempata por createdAt DESC + id) — su status refleja directamente si
-    // ese proceso ya está abierto, sin necesidad de una segunda consulta.
-    if (['pending', 'in_progress', 'blocked'].includes(prev.status)) {
-      throw new BadRequestException('El proceso anterior ya está abierto');
     }
 
     const newLog = await this.withTechnicianLock(technicianId, async manager => {
@@ -643,7 +630,43 @@ export class TrackingService {
         );
       }
 
-      // (b) snapshot del técnico saliente ANTES de borrar
+      // (b) D5: la lista de destinos válidos se recalcula ACÁ DENTRO de la
+      // transacción, contra el estado real de la DB al momento del commit —
+      // el targetProcessCode que mandó el cliente NUNCA se confía sin esta
+      // revalidación (spec: "Stale target is rejected on server
+      // revalidation"). `manager.find()` en vez de `this.logRepo.find()`
+      // para que quede atómico con el resto de la sección crítica.
+      const allLogs = await manager.find(TrackingLog, {
+        where: { sourceType: log.sourceType, sourceId: log.sourceId },
+        order: { orderIndex: 'ASC', createdAt: 'ASC' },
+      });
+      const available = this.listAvailableMothers(allLogs, log);
+      const target = available.find(l => l.processCode === targetProcessCode);
+      if (!target) {
+        throw new BadRequestException('El proceso destino no es un destino válido para esta devolución');
+      }
+      // target ya ES la pasada más nueva de su processCode (listAvailableMothers
+      // desempata por createdAt DESC + id) — su status refleja directamente si
+      // ese proceso ya está abierto, sin necesidad de una segunda consulta.
+      if (['pending', 'in_progress', 'blocked'].includes(target.status)) {
+        throw new BadRequestException('El proceso destino ya está abierto');
+      }
+
+      // (c) intermedios: todo MOTHER disponible con orderIndex mayor al del
+      // destino elegido (es decir, entre el actual exclusivo y el destino
+      // inclusivo) es un salto de la cascada. Validación defensiva: hoy es
+      // inalcanzable por el invariante del sistema (solo hay una pasada
+      // abierta a la vez), pero el spec la exige explícita.
+      const skipped = available.filter(l => l.orderIndex > target.orderIndex);
+      for (const s of skipped) {
+        if (s.status !== 'completed') {
+          throw new BadRequestException(
+            `El proceso "${s.processName}" debe estar completado antes de devolver a un proceso anterior`,
+          );
+        }
+      }
+
+      // (d) snapshot del técnico saliente ANTES de borrar
       // bodyshop_process_techs — mismo patrón que pauseLog().
       if (!log.technicianId) {
         const assigned = await this.resolveAssignedTechnician(log);
@@ -653,7 +676,9 @@ export class TrackingService {
         }
       }
 
-      // (c) marcar 'returned' ANTES de crear el log nuevo (e) — si se
+      // (e) marcar el log actual 'returned' — SIEMPRE es el punto de partida
+      // de la cascada (los `skipped` son procesos anteriores a este, nunca
+      // lo incluyen). Se hace ANTES de crear cualquier log nuevo — si se
       // invirtiera, el índice único parcial
       // tracking_logs_one_in_progress_per_technician (migración 011)
       // dispararía un 23505 al reasignar el mismo técnico al proceso reabierto.
@@ -662,22 +687,46 @@ export class TrackingService {
       log.pausedAt = null;
       await manager.save(TrackingLog, log);
 
-      // (d) libera la capacidad del proceso devuelto — mismo criterio que
+      // libera la capacidad del proceso devuelto — mismo criterio que
       // pauseLog() (`this.processTechRepo.delete(...)`), pero vía manager
       // para que quede atómico con el resto de la transacción.
       if (log.sourceType === 'bodyshop') {
         await manager.delete(BodyshopProcessTech, { entryId: log.sourceId, process: log.processCode });
       }
 
-      // (e) nueva pasada del proceso anterior — shape de initForBodyshop()
-      // + campos de arranque de startProcess().
+      // (f) D2: cada intermedio saltado recibe un log 'returned' NUEVO — la
+      // pasada 'completed' original queda intacta como historia. Mutarla en
+      // el lugar borraría sus horas reales de realTotalHours/deviationTotal
+      // (buildCard() solo suma sobre status === 'completed'). Mismo `reason`
+      // que escribió el usuario una sola vez, SIN técnico asignado — el
+      // técnico elegido aplica solo al destino final (g). TODOS los
+      // 'returned' (intermedios + el actual) se escriben ANTES del insert
+      // 'in_progress' del destino — mismo motivo que la versión single-hop:
+      // el índice único parcial de la migración 011 si se reutiliza el
+      // mismo técnico.
+      for (const s of skipped) {
+        await manager.save(TrackingLog, manager.create(TrackingLog, {
+          sourceType:    log.sourceType,
+          sourceId:      log.sourceId,
+          processName:   s.processName,
+          processCode:   s.processCode,
+          orderIndex:    s.orderIndex,
+          plannedHours:  s.plannedHours,
+          processType:   'MOTHER',
+          status:        'returned',
+          blockedReason: reason,
+        }));
+      }
+
+      // (g) nueva pasada del proceso destino — shape de initForBodyshop() +
+      // campos de arranque de startProcess().
       const created = await manager.save(TrackingLog, manager.create(TrackingLog, {
         sourceType:   log.sourceType,
         sourceId:     log.sourceId,
-        processName:  prev.processName,
-        processCode:  prev.processCode,
-        orderIndex:   prev.orderIndex,
-        plannedHours: prev.plannedHours,
+        processName:  target.processName,
+        processCode:  target.processCode,
+        orderIndex:   target.orderIndex,
+        plannedHours: target.plannedHours,
         processType:  'MOTHER',
         status:       'in_progress',
         startedAt:    new Date(),
@@ -685,18 +734,19 @@ export class TrackingService {
         technicianName,
       }));
 
-      // (f) upsert de bodyshop_process_techs para el proceso reabierto —
-      // mirror exacto de unblockProcess().
+      // (h) upsert de bodyshop_process_techs para el proceso reabierto —
+      // mirror exacto de unblockProcess(). Solo el destino final recibe
+      // técnico; los intermedios saltados en (f) no tocan bodyshop_process_techs.
       if (log.sourceType === 'bodyshop') {
         const existing = await manager.findOne(BodyshopProcessTech, {
-          where: { entryId: log.sourceId, process: prev.processCode },
+          where: { entryId: log.sourceId, process: target.processCode },
         });
         if (existing) {
           existing.technicianId = technicianId;
           await manager.save(BodyshopProcessTech, existing);
         } else {
           await manager.save(BodyshopProcessTech,
-            manager.create(BodyshopProcessTech, { entryId: log.sourceId, process: prev.processCode, technicianId }),
+            manager.create(BodyshopProcessTech, { entryId: log.sourceId, process: target.processCode, technicianId }),
           );
         }
       }
@@ -1012,12 +1062,14 @@ export class TrackingService {
   // determinismo del PR2: el id UUID solo garantiza repetibilidad, no orden real).
   //
   // Post-review fix (PR1→PR2): revisión adversarial encontró que el único
-  // call site real (returnToProcess()) lee `allLogs` ANTES de entrar a la
-  // transacción — así que el escenario "dos pasadas nacidas en la misma
-  // transacción, mismo now()" NO es observable hoy desde acá (no hay dos
-  // writes de tracking_logs en la misma transacción que este método vea).
-  // El riesgo genuino, más improbable, es una colisión de timestamp entre
-  // DOS llamadas separadas a returnToProcess() para el mismo processCode.
+  // call site real (returnToProcess(), PR2a) lee `allLogs` UNA sola vez vía
+  // `manager.find()`, ANTES de escribir ningún log nuevo dentro de esa misma
+  // transacción (D5) — así que el escenario "dos pasadas nacidas en la
+  // misma transacción, mismo now()" sigue sin ser observable desde acá (esta
+  // llamada nunca ve los 'returned'/'in_progress' que la propia transacción
+  // crea después de leer). El riesgo genuino, más improbable, es una
+  // colisión de timestamp entre DOS llamadas separadas a returnToProcess()
+  // para el mismo processCode.
   // El desempate por `id` (UUID, sin orden temporal real) NO garantiza
   // elegir la pasada correcta ante ese empate — solo garantiza que la
   // elección sea determinística y repetible en vez de depender del orden

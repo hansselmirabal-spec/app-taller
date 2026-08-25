@@ -50,12 +50,12 @@ is finally removed. Added 2 regression tests locking in the derived value and th
 ## Phase 2: Backend transaction (PR2a, stacked on PR1)
 
 - [x] 2.1 `tracking.service.spec.ts` L155-201: `makeManager()` gains `find()` mock — MUST land before 2.5/2.6 or all `returnToProcess` tests break (pulled forward and landed in PR1, per explicit PR1 scope item 4 — do not re-add in PR2a)
-- [ ] 2.2 `tracking.controller.ts` L44-48: `ReturnProcessDto` gains `targetProcessCode: string` (`@IsString @IsNotEmpty`)
-- [ ] 2.3 `tracking.service.ts` L591-716: rewrite `returnToProcess()` — 4th param `targetProcessCode`, recompute `listAvailableMothers` inside `withTechnicianLock`, reject stale target, validate skipped intermediates are `'completed'`, write skipped `'returned'` passes before destination `in_progress` insert
-- [ ] 2.4 `tracking.controller.ts` L156: forward `dto.targetProcessCode`
-- [ ] 2.5 `tracking.service.spec.ts` L1696-1831: add 4th arg to 7 existing calls; rewrite "no hay proceso anterior" case to use invalid target
-- [ ] 2.6 Add 3 new cases: multi-hop write order (3 saves, history preserved), non-completed intermediate rejected, invalid target (`AGENDA`/`MECHANIC`) rejected
-- [ ] 2.7 `tracking.controller.spec.ts` L159-167: update call assertion with 4th arg; add missing-`targetProcessCode` DTO case
+- [x] 2.2 `tracking.controller.ts` L44-48: `ReturnProcessDto` gains `targetProcessCode: string` (`@IsString @IsNotEmpty`)
+- [x] 2.3 `tracking.service.ts` L591-716: rewrite `returnToProcess()` — 4th param `targetProcessCode`, recompute `listAvailableMothers` inside `withTechnicianLock`, reject stale target, validate skipped intermediates are `'completed'`, write skipped `'returned'` passes before destination `in_progress` insert
+- [x] 2.4 `tracking.controller.ts` L156: forward `dto.targetProcessCode`
+- [x] 2.5 `tracking.service.spec.ts` L1696-1831: add 4th arg to 7 existing calls; rewrite "no hay proceso anterior" case to use invalid target
+- [x] 2.6 Add 3 new cases: multi-hop write order (3 saves, history preserved), non-completed intermediate rejected, invalid target (`AGENDA`/`MECHANIC`) rejected
+- [x] 2.7 `tracking.controller.spec.ts` L159-167: update call assertion with 4th arg; add missing-`targetProcessCode` DTO case
 
 ## Phase 3: Integration test (PR2b, stacked on PR2a)
 

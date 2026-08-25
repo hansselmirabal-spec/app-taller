@@ -44,6 +44,11 @@ export class UnblockProcessDto {
 export class ReturnProcessDto {
   @IsString() @IsNotEmpty() @MaxLength(120) reason: string;
   @IsUUID() technicianId: string;
+  // Multi-hop (kanban-devolver-multi-proceso-anterior): destino elegido por
+  // el admin. Sin @IsIn — el conjunto válido es dinámico por tarjeta, la
+  // revalidación real ocurre server-side contra listAvailableMothers()
+  // recalculado dentro de la transacción (D5).
+  @IsString() @IsNotEmpty() targetProcessCode: string;
   @IsOptional() @IsString() technicianName?: string;
 }
 
@@ -153,7 +158,7 @@ export class TrackingController {
     @Param('logId') logId: string,
     @Body() dto: ReturnProcessDto,
   ) {
-    return wrap(await this.service.returnToProcess(logId, dto.reason, dto.technicianId, dto.technicianName));
+    return wrap(await this.service.returnToProcess(logId, dto.reason, dto.technicianId, dto.targetProcessCode, dto.technicianName));
   }
 
   @Patch('exit-date/:sourceType/:sourceId')
