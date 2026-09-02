@@ -86,7 +86,7 @@ export default function NuevaCitaPresupuestoPage() {
         insuranceCompany: insuranceCompany.trim() || null,
         peritoId: isAdmin && selectedPeritoId ? selectedPeritoId : null,
       });
-      router.push(`/presupuesto/${result.id}`);
+      router.replace('/presupuesto');
     } catch (err: any) {
       setError(err.message ?? 'Error al agendar la cita');
     }
