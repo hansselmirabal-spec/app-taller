@@ -55,6 +55,13 @@ Chain strategy: pending
 - [ ] 3.9 Manual QA — Rechazar and Cancelar still work on a `pending` appointment. — Not run by apply; left for reviewer/QA.
 - [ ] 3.10 Manual QA — `/presupuesto/simulador/[id]` edit mode is unaffected; stale-tab redirect to `/presupuesto/[id]?readonly=1` for non-pending appointments still works. — Not run by apply; left for reviewer/QA.
 
+## Post-review fix (critical, found on PR #93 by `review-reliability`)
+
+- **Bug**: `budgetNavPath()` in `apps/web/src/app/(dashboard)/presupuesto/page.tsx:72-76` (preexisting, not touched by this change) routes every `pending` appointment clicked from the board to `/presupuesto/simulador/${id}` (edit mode), never to `/presupuesto/${id}`. Before this change, the only path into `/presupuesto/${id}` for a `pending` appointment was the post-create redirect — which Phase 1 replaced with `router.replace('/presupuesto')`. Net effect: after Phase 1+2, there was no reachable navigation path to Aprobar/Rechazar/Cancelar at all, since the Simulator edit screen only had "Guardar cambios".
+- **Fix**: ported Aprobar/Rechazar/Cancelar (including the approve modal with repair start date) from `/presupuesto/[id]/page.tsx` into `apps/web/src/app/(dashboard)/presupuesto/simulador/[id]/page.tsx`'s sticky bottom bar, gated on `screenState === 'ready'` (this screen only ever renders for `pending` appointments — non-pending redirects to `/presupuesto/[id]?readonly=1` before hydration). Used a separate `actionError` state to avoid colliding with the `error` already returned by `useSimulatorForm()`. Aprobar gates on `appt.processes` (persisted data), not the in-progress `estimate`, so approving always reflects saved state — same rule the original screen enforced.
+- **Verification**: `pnpm --filter web typecheck`, `pnpm --filter web build`, `pnpm --filter web test` (129/129) all clean. No test suite covers this file (unchanged from initial `sdd-verify` finding).
+- **Not touched**: `budgetNavPath()` and the board's routing logic — out of scope per explicit decision, since the Simulator edit screen is where the board already sends `pending` clicks.
+
 ## Known, accepted, out-of-scope risk (do not fix here)
 
 - `/presupuesto` is fixed to the current Mon-Fri week with no week navigation (`page.tsx:172`) and defaults `selectedDay` to today (`page.tsx:177-181`). An appointment created for a future day/week will not be visible in the day timeline immediately after redirect until that date is navigated to. Accepted by the proposal as out of scope. Follow-up idea for later: `/presupuesto?date=...` driving `selectedDay`/`weekStart`.
