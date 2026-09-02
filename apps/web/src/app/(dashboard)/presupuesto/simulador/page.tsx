@@ -69,7 +69,7 @@ export default function SimuladorPresupuestoPage() {
         }
       }
 
-      router.push(`/presupuesto/${result.id}`);
+      router.replace('/presupuesto');
     } catch (err: any) {
       setModalError(err.message ?? 'Error al guardar');
     } finally {

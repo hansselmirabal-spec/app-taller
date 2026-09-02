@@ -24,36 +24,43 @@ Chain strategy: pending
 
 ## Phase 1: Redirect create flows to the board
 
-- [ ] 1.1 `apps/web/src/app/(dashboard)/presupuesto/nueva-cita/page.tsx:89` — replace `router.push(\`/presupuesto/${result.id}\`)` with `router.replace('/presupuesto')`.
-- [ ] 1.2 `apps/web/src/app/(dashboard)/presupuesto/simulador/page.tsx:72` — same replacement, create-mode branch only; leave the preceding `updateProcesses` call (L65-70) untouched.
+- [x] 1.1 `apps/web/src/app/(dashboard)/presupuesto/nueva-cita/page.tsx:89` — replace `router.push(\`/presupuesto/${result.id}\`)` with `router.replace('/presupuesto')`.
+- [x] 1.2 `apps/web/src/app/(dashboard)/presupuesto/simulador/page.tsx:72` — same replacement, create-mode branch only; leave the preceding `updateProcesses` call (L65-70) untouched.
 
 ## Phase 2: Collapse `/presupuesto/[id]/page.tsx` to read-only
 
-- [ ] 2.1 Import cleanup (L6, L12, L17): remove `Plus`, `Trash2` from the `lucide-react` import (keep `Loader2`); remove `useUpdateBudgetProcesses` from the hooks import; remove `import type { BudgetProcess } from '@/types';`.
-- [ ] 2.2 Delete `PROCESS_CATALOG` (L19-26).
-- [ ] 2.3 Delete `const updateProcesses = useUpdateBudgetProcesses();` (L53).
-- [ ] 2.4 Delete `processes`, `isDirty`, `newCode`, `newHours` state (L58-61).
-- [ ] 2.5 Change L85 to `const effectiveProcesses = appt.processes ?? [];`.
-- [ ] 2.6 Delete `addProcess`, `removeProcess`, `updateHours`, `saveProcesses` (L89-125).
-- [ ] 2.7 Delete the `if (isDirty) { ... }` guard inside `openApproveModal` (L132-135); keep the `effectiveProcesses.length === 0` guard.
-- [ ] 2.8 Delete `usedCodes`, `availableProcesses` (L174-175).
-- [ ] 2.9 Collapse the process-list ternary (L331-352) to keep only the read-only `<span className="text-sm font-semibold text-slate-700">{p.hours}h</span>` branch — same wrapper `<div>`, same `key={p.code}`, same classNames.
-- [ ] 2.10 Delete the "Agregar proceso" block (L360-398).
-- [ ] 2.11 Delete the "Guardar cambios" block (L400-411).
-- [ ] 2.12 (Optional, copy-only) Update the empty state text to point to the Simulator, e.g. `Sin procesos cargados — se cargan desde el Simulador`. No behavior change; skip if out of scope for this pass.
+- [x] 2.1 Import cleanup (L6, L12, L17): remove `Plus`, `Trash2` from the `lucide-react` import (keep `Loader2`); remove `useUpdateBudgetProcesses` from the hooks import; remove `import type { BudgetProcess } from '@/types';`.
+- [x] 2.2 Delete `PROCESS_CATALOG` (L19-26).
+- [x] 2.3 Delete `const updateProcesses = useUpdateBudgetProcesses();` (L53).
+- [x] 2.4 Delete `processes`, `isDirty`, `newCode`, `newHours` state (L58-61).
+- [x] 2.5 Change L85 to `const effectiveProcesses = appt.processes ?? [];`.
+- [x] 2.6 Delete `addProcess`, `removeProcess`, `updateHours`, `saveProcesses` (L89-125).
+- [x] 2.7 Delete the `if (isDirty) { ... }` guard inside `openApproveModal` (L132-135); keep the `effectiveProcesses.length === 0` guard.
+- [x] 2.8 Delete `usedCodes`, `availableProcesses` (L174-175).
+- [x] 2.9 Collapse the process-list ternary (L331-352) to keep only the read-only `<span className="text-sm font-semibold text-slate-700">{p.hours}h</span>` branch — same wrapper `<div>`, same `key={p.code}`, same classNames.
+- [x] 2.10 Delete the "Agregar proceso" block (L360-398).
+- [x] 2.11 Delete the "Guardar cambios" block (L400-411).
+- [x] 2.12 (Optional, copy-only) Update the empty state text to point to the Simulator, e.g. `Sin procesos cargados — se cargan desde el Simulador`. No behavior change; skip if out of scope for this pass. — Skipped: kept original "Sin procesos cargados" text, out of scope for this pass.
 
 ## Phase 3: Verification (no new automated tests — see design Decision 5)
 
-- [ ] 3.1 `pnpm --filter @app-taller/web typecheck` — passes. Note: `tsconfig.json` has no `noUnusedLocals`, so this does NOT catch leftover unused imports; Phase 2 deletions must be applied by hand.
-- [ ] 3.2 `next build` on `apps/web` — passes with no missing-reference errors.
-- [ ] 3.3 `next lint` on `apps/web` — backstop for orphaned imports/identifiers Phase 2 may have missed.
-- [ ] 3.4 `rg 'PROCESS_CATALOG|addProcess|saveProcesses|isDirty|updateHours|removeProcess|setProcesses' apps/web/src` — confirm zero hits in `[id]/page.tsx` (remaining hits, if any, must be unrelated identifiers like `seguimiento/kanban/page.tsx`'s `ENTRY_PROCESS_CATALOG`/`addProcessOpen`/etc.).
-- [ ] 3.5 Manual QA — "+ Cita" submit lands on `/presupuesto`; browser Back does not re-show the submitted form.
-- [ ] 3.6 Manual QA — Simulator create-mode save lands on `/presupuesto`; the appointment's saved processes are preserved (visible after opening `/presupuesto/[id]`).
-- [ ] 3.7 Manual QA — `/presupuesto/[id]` shows no editor (no "Agregar proceso", no hours input, no "Guardar cambios") for `pending`, `approved`, `rejected`, and `cancelled` appointments.
-- [ ] 3.8 Manual QA — Aprobar stays disabled at 0 processes; becomes enabled after processes are saved via the Simulator.
-- [ ] 3.9 Manual QA — Rechazar and Cancelar still work on a `pending` appointment.
-- [ ] 3.10 Manual QA — `/presupuesto/simulador/[id]` edit mode is unaffected; stale-tab redirect to `/presupuesto/[id]?readonly=1` for non-pending appointments still works.
+- [x] 3.1 `pnpm --filter @app-taller/web typecheck` — passes. Note: `tsconfig.json` has no `noUnusedLocals`, so this does NOT catch leftover unused imports; Phase 2 deletions must be applied by hand.
+- [x] 3.2 `next build` on `apps/web` — passes with no missing-reference errors.
+- [x] 3.3 `next lint` on `apps/web` — BLOCKED: Next.js 16.2.3 removed the `next lint` command entirely (`next --help` lists no `lint` subcommand; not a pnpm arg-parsing issue). No `eslint` binary installed as a fallback. Repo-level tooling gap, unrelated to this change; backstopped by 3.4 instead.
+- [x] 3.4 `rg 'PROCESS_CATALOG|addProcess|saveProcesses|isDirty|updateHours|removeProcess|setProcesses' apps/web/src` — confirmed zero hits in `[id]/page.tsx`; remaining hits are unrelated identifiers in `seguimiento/kanban/page.tsx` (`ENTRY_PROCESS_CATALOG`, `addProcessOpen`, etc.) as predicted by design.md.
+- [ ] 3.5 Manual QA — "+ Cita" submit lands on `/presupuesto`; browser Back does not re-show the submitted form. — Not run by apply (no manual QA environment in this session); left for reviewer/QA.
+- [ ] 3.6 Manual QA — Simulator create-mode save lands on `/presupuesto`; the appointment's saved processes are preserved (visible after opening `/presupuesto/[id]`). — Not run by apply; left for reviewer/QA.
+- [ ] 3.7 Manual QA — `/presupuesto/[id]` shows no editor (no "Agregar proceso", no hours input, no "Guardar cambios") for `pending`, `approved`, `rejected`, and `cancelled` appointments. — Not run by apply; left for reviewer/QA.
+- [ ] 3.8 Manual QA — Aprobar stays disabled at 0 processes; becomes enabled after processes are saved via the Simulator. — Not run by apply; left for reviewer/QA.
+- [ ] 3.9 Manual QA — Rechazar and Cancelar still work on a `pending` appointment. — Not run by apply; left for reviewer/QA.
+- [ ] 3.10 Manual QA — `/presupuesto/simulador/[id]` edit mode is unaffected; stale-tab redirect to `/presupuesto/[id]?readonly=1` for non-pending appointments still works. — Not run by apply; left for reviewer/QA.
+
+## Post-review fix (critical, found on PR #93 by `review-reliability`)
+
+- **Bug**: `budgetNavPath()` in `apps/web/src/app/(dashboard)/presupuesto/page.tsx:72-76` (preexisting, not touched by this change) routes every `pending` appointment clicked from the board to `/presupuesto/simulador/${id}` (edit mode), never to `/presupuesto/${id}`. Before this change, the only path into `/presupuesto/${id}` for a `pending` appointment was the post-create redirect — which Phase 1 replaced with `router.replace('/presupuesto')`. Net effect: after Phase 1+2, there was no reachable navigation path to Aprobar/Rechazar/Cancelar at all, since the Simulator edit screen only had "Guardar cambios".
+- **Fix**: ported Aprobar/Rechazar/Cancelar (including the approve modal with repair start date) from `/presupuesto/[id]/page.tsx` into `apps/web/src/app/(dashboard)/presupuesto/simulador/[id]/page.tsx`'s sticky bottom bar, gated on `screenState === 'ready'` (this screen only ever renders for `pending` appointments — non-pending redirects to `/presupuesto/[id]?readonly=1` before hydration). Used a separate `actionError` state to avoid colliding with the `error` already returned by `useSimulatorForm()`. Aprobar gates on `appt.processes` (persisted data), not the in-progress `estimate`, so approving always reflects saved state — same rule the original screen enforced.
+- **Verification**: `pnpm --filter web typecheck`, `pnpm --filter web build`, `pnpm --filter web test` (129/129) all clean. No test suite covers this file (unchanged from initial `sdd-verify` finding).
+- **Not touched**: `budgetNavPath()` and the board's routing logic — out of scope per explicit decision, since the Simulator edit screen is where the board already sends `pending` clicks.
 
 ## Known, accepted, out-of-scope risk (do not fix here)
 

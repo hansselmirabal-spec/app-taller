@@ -3,27 +3,16 @@
 import { Suspense, useState } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import {
-  ArrowLeft, CheckCircle2, XCircle, Plus, Trash2,
+  ArrowLeft, CheckCircle2, XCircle,
   Loader2, ExternalLink, AlertTriangle, FileText, Calendar, Info,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import {
   useBudgetAppointment,
-  useUpdateBudgetProcesses,
   useCancelBudgetAppointment,
   useApproveBudgetAppointment,
   useRejectBudgetAppointment,
 } from '@/hooks/use-budget-appointments';
-import type { BudgetProcess } from '@/types';
-
-const PROCESS_CATALOG: { code: string; name: string }[] = [
-  { code: 'BODYWORK',      name: 'Chapería'     },
-  { code: 'PREP',          name: 'Preparación'  },
-  { code: 'PAINT',         name: 'Pintura'      },
-  { code: 'POLISH',        name: 'Pulido'       },
-  { code: 'MECHANIC',      name: 'Mecánica'     },
-  { code: 'FINAL_CONTROL', name: 'Control Final'},
-];
 
 const STATUS_CONFIG = {
   pending:   { label: 'Pendiente',  className: 'bg-yellow-100 text-yellow-700' },
@@ -50,15 +39,10 @@ function PresupuestoDetailBody() {
   const isReadonlyNotice = searchParams.get('readonly') === '1';
 
   const { data: appt, isLoading } = useBudgetAppointment(id);
-  const updateProcesses = useUpdateBudgetProcesses();
   const cancelMutation  = useCancelBudgetAppointment();
   const approveMutation = useApproveBudgetAppointment();
   const rejectMutation  = useRejectBudgetAppointment();
 
-  const [processes, setProcesses] = useState<BudgetProcess[] | null>(null);
-  const [isDirty, setIsDirty] = useState(false);
-  const [newCode, setNewCode] = useState('');
-  const [newHours, setNewHours] = useState('');
   const [error, setError] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -82,55 +66,13 @@ function PresupuestoDetailBody() {
   }
 
   const isEditable = appt.status === 'pending';
-  const effectiveProcesses = processes ?? appt.processes ?? [];
+  const effectiveProcesses = appt.processes ?? [];
   const totalHours = effectiveProcesses.reduce((s, p) => s + p.hours, 0);
   const statusCfg = STATUS_CONFIG[appt.status];
-
-  function addProcess() {
-    if (!newCode || !newHours) return;
-    const hours = parseFloat(newHours);
-    if (isNaN(hours) || hours <= 0) return;
-    const catalog = PROCESS_CATALOG.find(p => p.code === newCode);
-    if (!catalog) return;
-    const updated = [...effectiveProcesses.filter(p => p.code !== newCode), { code: newCode, name: catalog.name, hours }];
-    setProcesses(updated);
-    setIsDirty(true);
-    setNewCode('');
-    setNewHours('');
-  }
-
-  function removeProcess(code: string) {
-    const updated = effectiveProcesses.filter(p => p.code !== code);
-    setProcesses(updated);
-    setIsDirty(true);
-  }
-
-  function updateHours(code: string, val: string) {
-    const hours = parseFloat(val);
-    if (isNaN(hours) || hours <= 0) return;
-    const updated = effectiveProcesses.map(p => p.code === code ? { ...p, hours } : p);
-    setProcesses(updated);
-    setIsDirty(true);
-  }
-
-  async function saveProcesses() {
-    setError('');
-    try {
-      await updateProcesses.mutateAsync({ id: appt!.id, processes: effectiveProcesses });
-      setIsDirty(false);
-      setProcesses(null);
-    } catch (err: any) {
-      setError(err.message ?? 'Error al guardar los procesos');
-    }
-  }
 
   function openApproveModal() {
     if (effectiveProcesses.length === 0) {
       setError('Cargá al menos un proceso antes de aprobar');
-      return;
-    }
-    if (isDirty) {
-      setError('Guardá los cambios de procesos antes de aprobar');
       return;
     }
     setError('');
@@ -170,9 +112,6 @@ function PresupuestoDetailBody() {
       setError(err.message ?? 'Error al rechazar');
     }
   }
-
-  const usedCodes = new Set(effectiveProcesses.map(p => p.code));
-  const availableProcesses = PROCESS_CATALOG.filter(p => !usedCodes.has(p.code));
 
   return (
     <div className="h-screen flex flex-col bg-slate-50">
@@ -328,86 +267,12 @@ function PresupuestoDetailBody() {
                 {effectiveProcesses.map(p => (
                   <div key={p.code} className="flex items-center gap-3 py-1.5 border-b border-slate-50 last:border-0">
                     <span className="flex-1 text-sm font-medium text-slate-700">{p.name}</span>
-                    {isEditable ? (
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="number"
-                          defaultValue={p.hours}
-                          min={0.5}
-                          step={0.5}
-                          onBlur={e => updateHours(p.code, e.target.value)}
-                          className="w-20 text-center text-sm rounded-lg border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-blue-300"
-                        />
-                        <span className="text-xs text-slate-400">h</span>
-                        <button
-                          type="button"
-                          onClick={() => removeProcess(p.code)}
-                          className="p-1 rounded hover:bg-red-50 text-slate-300 hover:text-red-500 transition-colors"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="text-sm font-semibold text-slate-700">{p.hours}h</span>
-                    )}
+                    <span className="text-sm font-semibold text-slate-700">{p.hours}h</span>
                   </div>
                 ))}
               </div>
             ) : (
               <p className="text-sm text-slate-400 italic py-2">Sin procesos cargados</p>
-            )}
-
-            {/* Agregar proceso */}
-            {isEditable && availableProcesses.length > 0 && (
-              <div className="flex items-end gap-2 pt-2 border-t border-slate-100">
-                <div className="flex-1">
-                  <label className="block text-xs text-slate-500 mb-1">Proceso</label>
-                  <select
-                    value={newCode}
-                    onChange={e => setNewCode(e.target.value)}
-                    className="w-full text-sm rounded-lg border border-slate-200 px-3 py-1.5 outline-none focus:ring-2 focus:ring-blue-300"
-                  >
-                    <option value="">Seleccionar...</option>
-                    {availableProcesses.map(p => (
-                      <option key={p.code} value={p.code}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="w-24">
-                  <label className="block text-xs text-slate-500 mb-1">Horas</label>
-                  <input
-                    type="number"
-                    value={newHours}
-                    onChange={e => setNewHours(e.target.value)}
-                    min={0.5}
-                    step={0.5}
-                    placeholder="0"
-                    className="w-full text-sm text-center rounded-lg border border-slate-200 px-2 py-1.5 outline-none focus:ring-2 focus:ring-blue-300"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={addProcess}
-                  disabled={!newCode || !newHours}
-                  className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-40 transition-colors"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Agregar
-                </button>
-              </div>
-            )}
-
-            {/* Guardar procesos */}
-            {isEditable && isDirty && (
-              <button
-                type="button"
-                disabled={updateProcesses.isPending}
-                onClick={saveProcesses}
-                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold hover:bg-blue-100 transition-colors"
-              >
-                {updateProcesses.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                Guardar cambios
-              </button>
             )}
           </div>
 
