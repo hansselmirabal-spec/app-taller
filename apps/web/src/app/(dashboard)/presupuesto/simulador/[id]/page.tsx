@@ -161,7 +161,10 @@ export default function EditarSimuladorPresupuestoPage() {
     setActionError('');
     try {
       await cancelMutation.mutateAsync(appt!.id);
-      setConfirmCancel(false);
+      // A cancelled appointment is no longer `pending` — this screen has no
+      // live status re-check like `/presupuesto/[id]` does, so navigate away
+      // instead of leaving stale action buttons on screen after success.
+      router.push('/presupuesto');
     } catch (err: any) {
       setActionError(err.message ?? 'Error al cancelar');
     }
@@ -172,8 +175,7 @@ export default function EditarSimuladorPresupuestoPage() {
     setActionError('');
     try {
       await rejectMutation.mutateAsync({ id: appt!.id, reason: rejectReason.trim() });
-      setShowRejectForm(false);
-      setRejectReason('');
+      router.push('/presupuesto');
     } catch (err: any) {
       setActionError(err.message ?? 'Error al rechazar');
     }
